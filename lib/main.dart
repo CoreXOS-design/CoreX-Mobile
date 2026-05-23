@@ -22,6 +22,7 @@ import 'screens/client/client_home_screen.dart';
 import 'screens/home_hub_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/client_auth_service.dart';
+import 'services/debug_log.dart';
 import 'services/messaging_service.dart';
 import 'services/security_service.dart';
 
@@ -29,23 +30,28 @@ final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Force normal (non-immersive) system UI so the Android home pill /
-  // gesture bar always responds — without this, any screen that ever
-  // entered immersive mode can leave the gesture bar in a stuck state.
+  final log = DebugLog.instance;
+  log.add('main: start');
   await SystemChrome.setEnabledSystemUIMode(
     SystemUiMode.edgeToEdge,
     overlays: SystemUiOverlay.values,
   );
-  await dotenv.load(fileName: '.env');
-  // Touch Env early so dotenv reads happen on the main isolate.
-  Env.apiBaseUrl;
+  try {
+    await dotenv.load(fileName: '.env');
+    log.add('dotenv loaded, apiBaseUrl=${Env.apiBaseUrl}');
+  } catch (e) {
+    log.add('dotenv FAILED: $e');
+  }
   try {
     await Firebase.initializeApp();
+    log.add('firebase init ok');
     await MessagingService.instance.init(navigatorKey: rootNavigatorKey);
+    log.add('messaging init ok');
   } catch (e) {
-    debugPrint('[firebase] init failed: $e');
+    log.add('firebase/messaging FAILED: $e');
   }
   await _requestInitialPermissions();
+  log.add('permissions done, runApp');
   runApp(const CoreXApp());
 }
 

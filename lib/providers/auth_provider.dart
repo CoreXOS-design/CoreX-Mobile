@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/debug_log.dart';
 import '../services/messaging_service.dart';
 import '../services/security_service.dart';
 
@@ -31,26 +32,32 @@ class AuthProvider extends ChangeNotifier {
   String get userName => _user?['name'] ?? 'Agent';
 
   Future<void> checkAuth() async {
+    final log = DebugLog.instance;
+    log.add('auth.checkAuth: start');
     _biometricEnabled = await _security.isBiometricEnabled();
     final token = await _api.getToken();
+    log.add('auth.checkAuth: token=${token == null ? "null" : "present"}');
     if (token != null) {
       try {
+        log.add('auth.checkAuth: GET /profile');
         _user = await _api.getProfile().timeout(const Duration(seconds: 8));
+        log.add('auth.checkAuth: /profile OK');
         _isLoggedIn = true;
-        // Cold-start with biometrics on → require unlock before showing app.
         _isLocked = _biometricEnabled;
         unawaited(_messaging.onLogin());
       } on TimeoutException {
-        // Network hung — keep token, let user retry from login screen.
+        log.add('auth.checkAuth: /profile TIMEOUT');
         _isLoggedIn = false;
         _user = null;
-      } catch (_) {
+      } catch (e) {
+        log.add('auth.checkAuth: /profile ERROR $e');
         await _api.clearToken();
         _isLoggedIn = false;
         _user = null;
       }
     }
     _isChecking = false;
+    log.add('auth.checkAuth: done loggedIn=$_isLoggedIn');
     notifyListeners();
   }
 

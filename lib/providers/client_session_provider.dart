@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../models/client_models.dart';
 import '../services/api_service.dart' show ApiException;
 import '../services/client_auth_service.dart';
+import '../services/debug_log.dart';
 
 // Owns the long-lived client session: token, profile, agencies, current
 // agency. Sibling to AuthProvider — they never both hold a session at the
@@ -46,37 +47,42 @@ class ClientSessionProvider extends ChangeNotifier {
 
   /// Cold-start: do we have a token and is it still valid?
   Future<void> bootstrap() async {
+    final log = DebugLog.instance;
+    log.add('client.bootstrap: start');
     final token = await _api.getToken();
+    log.add('client.bootstrap: token=${token == null ? "null" : "present"}');
     if (token == null) {
       _checking = false;
       notifyListeners();
       return;
     }
     try {
+      log.add('client.bootstrap: GET /v1/client/me');
       final me = await _api.me().timeout(const Duration(seconds: 8));
+      log.add('client.bootstrap: /me OK');
       _client = me.client;
       _contact = me.contact;
       _agencies = me.agencies;
       _passwordMustChange = me.client.passwordMustChange;
       _isLoggedIn = true;
     } on TimeoutException {
-      // Network hung — leave logged-out so splash can finish.
+      log.add('client.bootstrap: /me TIMEOUT');
     } on ApiException catch (e) {
+      log.add('client.bootstrap: /me ApiException ${e.statusCode}');
       if (e.statusCode == 401) {
         await _api.clearToken();
       } else if (e.statusCode == 423) {
         _isLoggedIn = true;
         _passwordMustChange = true;
       }
-      // Network / other → leave logged-out; user can retry.
-    } on SocketException {
-      // Offline cold start with token: optimistically mark logged in so the
-      // UI shell can render. /me + /matches will retry when network returns.
+    } on SocketException catch (e) {
+      log.add('client.bootstrap: /me SocketException $e');
       _isLoggedIn = true;
-    } catch (_) {
-      // ignore
+    } catch (e) {
+      log.add('client.bootstrap: /me ERROR $e');
     }
     _checking = false;
+    log.add('client.bootstrap: done loggedIn=$_isLoggedIn');
     notifyListeners();
   }
 
