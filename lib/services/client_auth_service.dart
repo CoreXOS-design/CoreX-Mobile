@@ -18,9 +18,11 @@ class ClientAuthService {
   static String get _baseUrl => Env.apiBaseUrl; // ends in /api
   static const Duration _timeout = Duration(seconds: 15);
 
-  static const FlutterSecureStorage _storage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
+  // NOTE: do NOT enable `encryptedSharedPreferences: true` — on several Android
+  // builds the KeyStore-backed EncryptedSharedPreferences init hangs forever
+  // on first read, bricking cold-start. Default storage is still encrypted via
+  // KeyStore, just without that wrapper.
+  static const FlutterSecureStorage _storage = FlutterSecureStorage();
 
   // -------------------- Token helpers --------------------
 

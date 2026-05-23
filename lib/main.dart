@@ -22,7 +22,6 @@ import 'screens/client/client_home_screen.dart';
 import 'screens/home_hub_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/client_auth_service.dart';
-import 'services/debug_log.dart';
 import 'services/messaging_service.dart';
 import 'services/security_service.dart';
 
@@ -30,28 +29,19 @@ final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final log = DebugLog.instance;
-  log.add('main: start');
   await SystemChrome.setEnabledSystemUIMode(
     SystemUiMode.edgeToEdge,
     overlays: SystemUiOverlay.values,
   );
-  try {
-    await dotenv.load(fileName: '.env');
-    log.add('dotenv loaded, apiBaseUrl=${Env.apiBaseUrl}');
-  } catch (e) {
-    log.add('dotenv FAILED: $e');
-  }
+  await dotenv.load(fileName: '.env');
+  Env.apiBaseUrl;
   try {
     await Firebase.initializeApp();
-    log.add('firebase init ok');
     await MessagingService.instance.init(navigatorKey: rootNavigatorKey);
-    log.add('messaging init ok');
   } catch (e) {
-    log.add('firebase/messaging FAILED: $e');
+    debugPrint('[firebase] init failed: $e');
   }
   await _requestInitialPermissions();
-  log.add('permissions done, runApp');
   runApp(const CoreXApp());
 }
 

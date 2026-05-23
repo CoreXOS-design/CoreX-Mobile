@@ -245,19 +245,18 @@ class _LoginScreenState extends State<LoginScreen> {
                           color: AppTheme.textPrimary(context),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        (auth.isLocked
-                                ? 'Unlock to continue'
-                                : 'Home Finders Coastal')
-                            .toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 2.0,
-                          color: AppTheme.textSecondary(context),
+                      if (auth.isLocked) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Unlock to continue'.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 2.0,
+                            color: AppTheme.textSecondary(context),
+                          ),
                         ),
-                      ),
+                      ],
                       const SizedBox(height: 40),
                       if (showDemo) ..._buildDemoButtons()
                       else ...[

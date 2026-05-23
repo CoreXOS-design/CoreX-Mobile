@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:google_fonts/google_fonts.dart';
-import '../services/debug_log.dart';
 import '../theme.dart';
 
 /// Animated app-open splash.
@@ -118,8 +116,7 @@ class _SplashScreenState extends State<SplashScreen>
     );
 
     return Scaffold(
-      body: Stack(children: [
-        AnimatedBuilder(
+      body: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
           return Container(
@@ -224,84 +221,6 @@ class _SplashScreenState extends State<SplashScreen>
             ),
           );
         },
-      ),
-      const Positioned.fill(child: _DebugLogPanel()),
-      ]),
-    );
-  }
-}
-
-class _DebugLogPanel extends StatelessWidget {
-  const _DebugLogPanel();
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Align(
-        alignment: Alignment.bottomCenter,
-        child: Container(
-          margin: const EdgeInsets.all(12),
-          padding: const EdgeInsets.all(8),
-          constraints: const BoxConstraints(maxHeight: 260),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.55),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.white24),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text('debug log',
-                        style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600)),
-                  ),
-                  TextButton(
-                    onPressed: () async {
-                      await Clipboard.setData(
-                          ClipboardData(text: DebugLog.instance.dump()));
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text('log copied'),
-                                duration: Duration(seconds: 1)));
-                      }
-                    },
-                    style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        minimumSize: const Size(0, 28),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                    child: const Text('copy',
-                        style: TextStyle(color: Colors.white, fontSize: 12)),
-                  ),
-                ],
-              ),
-              Flexible(
-                child: ValueListenableBuilder<List<String>>(
-                  valueListenable: DebugLog.instance.entries,
-                  builder: (context, lines, _) {
-                    return SingleChildScrollView(
-                      reverse: true,
-                      child: Text(
-                        lines.join('\n'),
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontFamily: 'monospace',
-                            height: 1.3),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

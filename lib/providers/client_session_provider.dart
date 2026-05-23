@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import '../models/client_models.dart';
 import '../services/api_service.dart' show ApiException;
 import '../services/client_auth_service.dart';
-import '../services/debug_log.dart';
 
 // Owns the long-lived client session: token, profile, agencies, current
 // agency. Sibling to AuthProvider — they never both hold a session at the
@@ -47,51 +46,42 @@ class ClientSessionProvider extends ChangeNotifier {
 
   /// Cold-start: do we have a token and is it still valid?
   Future<void> bootstrap() async {
-    final log = DebugLog.instance;
-    log.add('client.bootstrap: start');
+    // 3s timeout guards against flutter_secure_storage hanging on Android
+    // KeyStore init on certain devices — defense-in-depth alongside the
+    // disabled `encryptedSharedPreferences` flag in ClientAuthService.
     String? token;
     try {
       token = await _api.getToken().timeout(const Duration(seconds: 3));
-    } on TimeoutException {
-      log.add('client.bootstrap: secure-storage getToken TIMEOUT');
-      token = null;
-    } catch (e) {
-      log.add('client.bootstrap: secure-storage getToken ERROR $e');
+    } catch (_) {
       token = null;
     }
-    log.add('client.bootstrap: token=${token == null ? "null" : "present"}');
     if (token == null) {
       _checking = false;
       notifyListeners();
       return;
     }
     try {
-      log.add('client.bootstrap: GET /v1/client/me');
       final me = await _api.me().timeout(const Duration(seconds: 8));
-      log.add('client.bootstrap: /me OK');
       _client = me.client;
       _contact = me.contact;
       _agencies = me.agencies;
       _passwordMustChange = me.client.passwordMustChange;
       _isLoggedIn = true;
     } on TimeoutException {
-      log.add('client.bootstrap: /me TIMEOUT');
+      // Network hung — leave logged-out so splash can finish.
     } on ApiException catch (e) {
-      log.add('client.bootstrap: /me ApiException ${e.statusCode}');
       if (e.statusCode == 401) {
         await _api.clearToken();
       } else if (e.statusCode == 423) {
         _isLoggedIn = true;
         _passwordMustChange = true;
       }
-    } on SocketException catch (e) {
-      log.add('client.bootstrap: /me SocketException $e');
+    } on SocketException {
       _isLoggedIn = true;
-    } catch (e) {
-      log.add('client.bootstrap: /me ERROR $e');
+    } catch (_) {
+      // ignore
     }
     _checking = false;
-    log.add('client.bootstrap: done loggedIn=$_isLoggedIn');
     notifyListeners();
   }
 
