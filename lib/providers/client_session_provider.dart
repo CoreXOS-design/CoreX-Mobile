@@ -49,7 +49,16 @@ class ClientSessionProvider extends ChangeNotifier {
   Future<void> bootstrap() async {
     final log = DebugLog.instance;
     log.add('client.bootstrap: start');
-    final token = await _api.getToken();
+    String? token;
+    try {
+      token = await _api.getToken().timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      log.add('client.bootstrap: secure-storage getToken TIMEOUT');
+      token = null;
+    } catch (e) {
+      log.add('client.bootstrap: secure-storage getToken ERROR $e');
+      token = null;
+    }
     log.add('client.bootstrap: token=${token == null ? "null" : "present"}');
     if (token == null) {
       _checking = false;
