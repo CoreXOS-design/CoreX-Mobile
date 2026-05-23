@@ -187,7 +187,15 @@ class _AppBootstrapState extends State<_AppBootstrap> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final clientSession = context.watch<ClientSessionProvider>();
-    if (!_splashDone || auth.isChecking || clientSession.isChecking) {
+    // Splash stays up until the animation finishes AND we have a definitive
+    // auth answer. The two providers are mutually exclusive (agent xor client),
+    // so the moment either reports logged-in we can advance — no need to wait
+    // on the other. If both come back logged-out we wait for both to settle so
+    // the login screen has the correct branding state. Each provider has its
+    // own 8s timeout, so the splash is bounded even if the network hangs.
+    final eitherLoggedIn = auth.isLoggedIn || clientSession.isLoggedIn;
+    final bothSettled = !auth.isChecking && !clientSession.isChecking;
+    if (!_splashDone || (!eitherLoggedIn && !bothSettled)) {
       return SplashScreen(
         onFinished: () => setState(() => _splashDone = true),
       );
