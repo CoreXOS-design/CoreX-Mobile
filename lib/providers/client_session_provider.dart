@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -52,12 +53,14 @@ class ClientSessionProvider extends ChangeNotifier {
       return;
     }
     try {
-      final me = await _api.me();
+      final me = await _api.me().timeout(const Duration(seconds: 8));
       _client = me.client;
       _contact = me.contact;
       _agencies = me.agencies;
       _passwordMustChange = me.client.passwordMustChange;
       _isLoggedIn = true;
+    } on TimeoutException {
+      // Network hung — leave logged-out so splash can finish.
     } on ApiException catch (e) {
       if (e.statusCode == 401) {
         await _api.clearToken();

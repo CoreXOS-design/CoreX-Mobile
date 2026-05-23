@@ -35,11 +35,15 @@ class AuthProvider extends ChangeNotifier {
     final token = await _api.getToken();
     if (token != null) {
       try {
-        _user = await _api.getProfile();
+        _user = await _api.getProfile().timeout(const Duration(seconds: 8));
         _isLoggedIn = true;
         // Cold-start with biometrics on → require unlock before showing app.
         _isLocked = _biometricEnabled;
         unawaited(_messaging.onLogin());
+      } on TimeoutException {
+        // Network hung — keep token, let user retry from login screen.
+        _isLoggedIn = false;
+        _user = null;
       } catch (_) {
         await _api.clearToken();
         _isLoggedIn = false;

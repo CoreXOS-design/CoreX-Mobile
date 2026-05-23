@@ -37,6 +37,7 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.14.1
   flutter_native_splash: ^2.4.1
+  image: ^4.8.0
 
 flutter:
   uses-material-design: true
@@ -47,27 +48,27 @@ flutter:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/images/corex_logo.png"
+  image_path: "assets/images/corex_launcher_icon.png"
   min_sdk_android: 21
   remove_alpha_ios: true
   background_color_ios: "#0D0F14"
   adaptive_icon_background: "#0D0F14"
-  adaptive_icon_foreground: "assets/images/corex_logo.png"
-  adaptive_icon_monochrome: "assets/images/corex_logo.png"
+  adaptive_icon_foreground: "assets/images/corex_launcher_icon.png"
+  adaptive_icon_monochrome: "assets/images/corex_launcher_icon.png"
   windows:
     generate: true
-    image_path: "assets/images/corex_logo.png"
+    image_path: "assets/images/corex_launcher_icon.png"
     icon_size: 48
 
 flutter_native_splash:
   color: "#0D0F14"
-  image: assets/images/corex_logo.png
+  image: assets/images/corex_logo_splash.png
   color_dark: "#0D0F14"
-  image_dark: assets/images/corex_logo.png
+  image_dark: assets/images/corex_logo_splash.png
   android_12:
-    image: assets/images/corex_logo.png
+    image: assets/images/corex_logo_splash.png
     color: "#0D0F14"
-    image_dark: assets/images/corex_logo.png
+    image_dark: assets/images/corex_logo_splash.png
     color_dark: "#0D0F14"
   android: true
   ios: true
