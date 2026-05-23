@@ -35,6 +35,64 @@ Widget statusPill(String? status) {
   );
 }
 
+const Color kTierStrong = Color(0xFF22C55E);
+const Color kTierGood = Color(0xFF0EA5E9);
+const Color kTierFair = Color(0xFFF59E0B);
+
+/// Resolves a tier colour from the API `match_tier` string, falling back to
+/// score thresholds when the tier is absent (legacy payloads).
+Color tierColor(String? tier, {int? score}) {
+  switch (tier) {
+    case 'strong':
+      return kTierStrong;
+    case 'good':
+      return kTierGood;
+    case 'fair':
+      return kTierFair;
+  }
+  if (score != null) {
+    if (score >= 80) return kTierStrong;
+    if (score >= 65) return kTierGood;
+  }
+  return kTierFair;
+}
+
+String tierLabel(String? tier, {int? score}) {
+  switch (tier) {
+    case 'strong':
+      return 'Strong matches';
+    case 'good':
+      return 'Good matches';
+    case 'fair':
+      return 'Fair matches';
+  }
+  if (score != null) {
+    if (score >= 80) return 'Strong matches';
+    if (score >= 65) return 'Good matches';
+  }
+  return 'Fair matches';
+}
+
+/// Compact percentage badge for a property's match score, colour-coded by tier.
+Widget matchScoreBadge(int score, String? tier) {
+  final c = tierColor(tier, score: score);
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: c.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(999),
+    ),
+    child: Text(
+      '$score%',
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: c,
+      ),
+    ),
+  );
+}
+
 Widget reactionBadge(String reaction) {
   late Color c;
   late String label;

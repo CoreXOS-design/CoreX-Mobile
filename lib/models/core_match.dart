@@ -204,6 +204,7 @@ class CoreMatch extends CoreMatchSummary {
   final List<String> mustHaveFeatures;
   final String? notes;
   final List<int> hiddenPropertyIds;
+  final Map<int, String> hiddenPropertyReasons;
   final String? shareUrl;
 
   const CoreMatch({
@@ -227,6 +228,7 @@ class CoreMatch extends CoreMatchSummary {
     this.mustHaveFeatures = const [],
     this.notes,
     this.hiddenPropertyIds = const [],
+    this.hiddenPropertyReasons = const {},
     this.shareUrl,
   });
 
@@ -239,6 +241,14 @@ class CoreMatch extends CoreMatchSummary {
         .map((e) => e is num ? e.toInt() : int.tryParse(e.toString()) ?? 0)
         .where((v) => v != 0)
         .toList();
+    final reasonsRaw = j['hidden_property_reasons'];
+    final reasons = <int, String>{};
+    if (reasonsRaw is Map) {
+      reasonsRaw.forEach((k, v) {
+        final id = k is num ? k.toInt() : int.tryParse(k.toString());
+        if (id != null && v != null) reasons[id] = v.toString();
+      });
+    }
     return CoreMatch(
       id: base.id,
       contactId: base.contactId,
@@ -260,6 +270,7 @@ class CoreMatch extends CoreMatchSummary {
       mustHaveFeatures: feats,
       notes: j['notes']?.toString(),
       hiddenPropertyIds: hidden,
+      hiddenPropertyReasons: reasons,
       shareUrl: j['share_url']?.toString(),
     );
   }
@@ -276,8 +287,15 @@ class CoreMatchResult {
   final String? priceDisplay;
   final String? thumbnail;
   final bool hidden;
+  final String? hiddenReason;
   final String? reaction;
   final String? reactionNote;
+  // Match engine score 0–100. Null only for legacy payloads that predate
+  // tiered matching.
+  final int? matchScore;
+  // "strong" (≥80), "good" (65–79) or "fair" (50–64). New field; null on
+  // legacy payloads.
+  final String? matchTier;
 
   const CoreMatchResult({
     required this.id,
@@ -290,11 +308,15 @@ class CoreMatchResult {
     this.priceDisplay,
     this.thumbnail,
     this.hidden = false,
+    this.hiddenReason,
     this.reaction,
     this.reactionNote,
+    this.matchScore,
+    this.matchTier,
   });
 
-  CoreMatchResult copyWith({bool? hidden}) => CoreMatchResult(
+  CoreMatchResult copyWith({bool? hidden, String? hiddenReason}) =>
+      CoreMatchResult(
         id: id,
         address: address,
         suburb: suburb,
@@ -305,8 +327,11 @@ class CoreMatchResult {
         priceDisplay: priceDisplay,
         thumbnail: thumbnail,
         hidden: hidden ?? this.hidden,
+        hiddenReason: hiddenReason,
         reaction: reaction,
         reactionNote: reactionNote,
+        matchScore: matchScore,
+        matchTier: matchTier,
       );
 
   factory CoreMatchResult.fromJson(Map<String, dynamic> j) {
@@ -322,8 +347,11 @@ class CoreMatchResult {
       priceDisplay: j['price_display']?.toString(),
       thumbnail: j['thumbnail']?.toString(),
       hidden: j['hidden'] == true,
+      hiddenReason: j['hidden_reason']?.toString(),
       reaction: j['reaction']?.toString(),
       reactionNote: j['reaction_note']?.toString(),
+      matchScore: n(j['match_score']),
+      matchTier: j['match_tier']?.toString(),
     );
   }
 }

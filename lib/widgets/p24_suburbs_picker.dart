@@ -11,7 +11,9 @@ import '../theme.dart';
 /// when the agent switches province/city to add more, since a wishlist can
 /// target suburbs across multiple cities.
 ///
-/// Backed by `/api/v1/p24/*`, where the suburb `id` IS the P24 suburb id —
+/// Backed by `/api/mobile/p24/*` — the SAME cascade the property create
+/// screen uses, so the suburb `id` submitted as `p24_suburb_ids` is
+/// identical to the `p24_suburb_id` stored on a property —
 /// the same value submitted as `p24_suburb_ids` and matched against
 /// `properties.p24_suburb_id`.
 class P24SuburbsPicker extends StatefulWidget {
@@ -69,7 +71,7 @@ class _P24SuburbsPickerState extends State<P24SuburbsPicker> {
   Future<void> _pickProvince() async {
     final picked = await _openSheet(
       title: 'Select Province',
-      loader: (q) => _api.getP24v1Provinces(q: q),
+      loader: (q) => _api.getP24Provinces(q: q),
     );
     if (picked == null || picked.id == _province?.id) return;
     setState(() {
@@ -83,7 +85,7 @@ class _P24SuburbsPickerState extends State<P24SuburbsPicker> {
     if (prov == null) return;
     final picked = await _openSheet(
       title: 'Select City',
-      loader: (q) => _api.getP24v1Cities(provinceId: prov.id, q: q),
+      loader: (q) => _api.getP24Cities(provinceId: prov.id, q: q),
     );
     if (picked == null || picked.id == _city?.id) return;
     setState(() => _city = picked);
@@ -101,7 +103,7 @@ class _P24SuburbsPickerState extends State<P24SuburbsPicker> {
       ),
       builder: (_) => _P24SuburbsMultiSheet(
         cityName: city.name,
-        loader: (q) => _api.getP24v1Suburbs(cityId: city.id, q: q),
+        loader: (q) => _api.getP24Suburbs(cityId: city.id, q: q),
         preselectedIds: _selected.keys.toSet(),
       ),
     );

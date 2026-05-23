@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
+import '../../widgets/p24_suburbs_picker.dart';
 
 class NewMatchScreen extends StatefulWidget {
   final int contactId;
@@ -21,9 +22,9 @@ class _NewMatchScreenState extends State<NewMatchScreen> {
   final _priceMax = TextEditingController();
   final _bedsMin = TextEditingController();
   final _bathsMin = TextEditingController();
-  final _suburbInput = TextEditingController();
   final _notes = TextEditingController();
-  final List<String> _suburbs = [];
+  List<int> _p24SuburbIds = [];
+  List<String> _p24SuburbNames = [];
   bool _saving = false;
   Map<String, String> _fieldErrors = const {};
 
@@ -36,7 +37,6 @@ class _NewMatchScreenState extends State<NewMatchScreen> {
     _priceMax.dispose();
     _bedsMin.dispose();
     _bathsMin.dispose();
-    _suburbInput.dispose();
     _notes.dispose();
     super.dispose();
   }
@@ -66,7 +66,8 @@ class _NewMatchScreenState extends State<NewMatchScreen> {
       if (n(_priceMax) != null) 'price_max': n(_priceMax),
       if (n(_bedsMin) != null) 'beds_min': n(_bedsMin),
       if (n(_bathsMin) != null) 'baths_min': n(_bathsMin),
-      if (_suburbs.isNotEmpty) 'suburbs': _suburbs,
+      // Submit P24 suburb IDs only — same source as property suburbs.
+      'p24_suburb_ids': _p24SuburbIds,
       if (s(_notes) != null) 'notes': s(_notes),
     };
 
@@ -87,15 +88,6 @@ class _NewMatchScreenState extends State<NewMatchScreen> {
         SnackBar(content: Text('Failed: $e')),
       );
     }
-  }
-
-  void _addSuburb() {
-    final t = _suburbInput.text.trim();
-    if (t.isEmpty) return;
-    setState(() {
-      _suburbs.add(t);
-      _suburbInput.clear();
-    });
   }
 
   @override
@@ -176,38 +168,20 @@ class _NewMatchScreenState extends State<NewMatchScreen> {
             ],
           ),
           _label('Suburbs'),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _suburbInput,
-                  decoration: const InputDecoration(hintText: 'Add suburb…'),
-                  onSubmitted: (_) => _addSuburb(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: Icon(Icons.add_rounded, color: AppTheme.brand),
-                onPressed: _addSuburb,
-              ),
-            ],
+          P24SuburbsPicker(
+            initialIds: _p24SuburbIds,
+            initialNames: _p24SuburbNames,
+            errorText: _fieldErrors['p24_suburb_ids'],
+            onChanged: (ids, names) {
+              setState(() {
+                _p24SuburbIds = ids;
+                _p24SuburbNames = names;
+                if (_fieldErrors.containsKey('p24_suburb_ids')) {
+                  _fieldErrors = {..._fieldErrors}..remove('p24_suburb_ids');
+                }
+              });
+            },
           ),
-          if (_suburbs.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: _suburbs
-                    .map(
-                      (s) => Chip(
-                        label: Text(s),
-                        onDeleted: () => setState(() => _suburbs.remove(s)),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
           _label('Notes'),
           TextField(
             controller: _notes,

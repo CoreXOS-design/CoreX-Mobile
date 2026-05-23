@@ -98,15 +98,48 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
     final d = _detail;
     if (d == null) return;
     final original = d.results[index];
-    final optimistic = original.copyWith(hidden: !original.hidden);
+
+    // Hiding a visible property: capture a reason first. The sheet performs
+    // the API call itself so it can surface a 422 validation error inline.
+    if (!original.hidden) {
+      final result = await showModalBottomSheet<HidePropertyResult>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: AppTheme.surface(context),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppTheme.radiusLarge),
+          ),
+        ),
+        builder: (ctx) => _HideReasonSheet(
+          api: _api,
+          matchId: widget.matchId,
+          propertyId: original.id,
+        ),
+      );
+      if (result == null || !mounted) return;
+      setState(() {
+        d.results[index] = original.copyWith(
+          hidden: result.hidden,
+          hiddenReason: result.hiddenReason,
+        );
+      });
+      return;
+    }
+
+    // Un-hiding: no prompt, no body — the stored reason is cleared.
     setState(() {
-      d.results[index] = optimistic;
+      d.results[index] = original.copyWith(hidden: false);
     });
     try {
-      final hidden = await _api.toggleHideMatchProperty(widget.matchId, original.id);
+      final result =
+          await _api.toggleHideMatchProperty(widget.matchId, original.id);
       if (!mounted) return;
       setState(() {
-        d.results[index] = original.copyWith(hidden: hidden);
+        d.results[index] = original.copyWith(
+          hidden: result.hidden,
+          hiddenReason: result.hiddenReason,
+        );
       });
     } catch (e) {
       if (!mounted) return;
@@ -461,7 +494,10 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Adjust the filters or unhide previously hidden properties.',
+                  d.results.any((r) => r.hidden)
+                      ? 'Every match is hidden. Unhide a property to see it here.'
+                      : 'Nothing scored 50% or higher for this match. '
+                          'Adjust the filters to widen the search.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13,
@@ -471,11 +507,7 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
               ],
             ),
           ),
-        if (!_scopeBusy)
-          ...results.map((r) {
-            final i = d.results.indexWhere((x) => x.id == r.id);
-            return _resultTile(r, i);
-          }),
+        if (!_scopeBusy) ..._resultsWithHeaders(results, d),
       ],
     );
   }
@@ -668,6 +700,41 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
     );
   }
 
+  /// Builds the result tiles, inserting tier section headers ("Strong
+  /// matches", etc.) whenever the tier changes. Results arrive already
+  /// sorted best-first by the API, so a single pass is enough. Legacy
+  /// payloads with no scores fall back to a plain, header-less list.
+  List<Widget> _resultsWithHeaders(
+      List<CoreMatchResult> results, CoreMatchDetail d) {
+    final scored = results.any((r) => r.matchScore != null);
+    final widgets = <Widget>[];
+    String? currentTier;
+    for (final r in results) {
+      final i = d.results.indexWhere((x) => x.id == r.id);
+      if (scored) {
+        final tier = tierLabel(r.matchTier, score: r.matchScore);
+        if (tier != currentTier) {
+          currentTier = tier;
+          widgets.add(_tierHeader(tier));
+        }
+      }
+      widgets.add(_resultTile(r, i));
+    }
+    return widgets;
+  }
+
+  Widget _tierHeader(String label) => Padding(
+        padding: const EdgeInsets.only(top: 4, bottom: 8),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textSecondary(context),
+          ),
+        ),
+      );
+
   Widget _resultTile(CoreMatchResult r, int absoluteIndex) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -707,15 +774,26 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  r.address ?? 'Property',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary(context),
-                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        r.address ?? 'Property',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary(context),
+                        ),
+                      ),
+                    ),
+                    if (r.matchScore != null) ...[
+                      const SizedBox(width: 6),
+                      matchScoreBadge(r.matchScore!, r.matchTier),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -761,6 +839,29 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
                       ),
                     ),
                   ),
+                if (r.hidden &&
+                    r.hiddenReason != null &&
+                    r.hiddenReason!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.visibility_off_rounded,
+                            size: 12, color: AppTheme.textMuted(context)),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            'Hidden: ${r.hiddenReason!}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: AppTheme.textMuted(context),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),
@@ -772,6 +873,175 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
               color: AppTheme.textSecondary(context),
             ),
             onPressed: () => _toggleHide(absoluteIndex),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// CoreX-styled slide-up sheet that asks the agent why they're hiding a
+/// property from a Core Match. Performs the hide API call itself so a 422
+/// validation error is shown inline. Pops with a [HidePropertyResult] on
+/// success, or `null` on cancel.
+class _HideReasonSheet extends StatefulWidget {
+  final ApiService api;
+  final int matchId;
+  final int propertyId;
+
+  const _HideReasonSheet({
+    required this.api,
+    required this.matchId,
+    required this.propertyId,
+  });
+
+  @override
+  State<_HideReasonSheet> createState() => _HideReasonSheetState();
+}
+
+class _HideReasonSheetState extends State<_HideReasonSheet> {
+  static const int _minChars = 3;
+  static const int _maxChars = 500;
+
+  final TextEditingController _controller = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  bool get _valid => _controller.text.trim().length >= _minChars;
+
+  Future<void> _confirm() async {
+    if (!_valid || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final result = await widget.api.toggleHideMatchProperty(
+        widget.matchId,
+        widget.propertyId,
+        reason: _controller.text,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(result);
+    } on ValidationException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.fieldErrors['reason'] ?? e.message;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = 'Failed to hide property. Please try again.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 12,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Drag handle.
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: AppTheme.borderColor(context),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              Icon(Icons.visibility_off_rounded,
+                  size: 20, color: AppTheme.textPrimary(context)),
+              const SizedBox(width: 8),
+              Text(
+                'Hide property',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textPrimary(context),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Why are you hiding this property from this match?',
+            style: TextStyle(
+              fontSize: 13,
+              color: AppTheme.textSecondary(context),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            enabled: !_busy,
+            minLines: 3,
+            maxLines: 5,
+            maxLength: _maxChars,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: InputDecoration(
+              hintText: 'Add a reason (at least $_minChars characters)',
+              errorText: _error,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    onPressed:
+                        _busy ? null : () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: (_valid && !_busy) ? _confirm : null,
+                    child: _busy
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Hide property'),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

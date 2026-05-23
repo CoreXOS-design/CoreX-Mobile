@@ -1006,40 +1006,11 @@ class ApiService {
           {required int cityId, String q = ''}) =>
       _getP24('suburbs', {'city_id': '$cityId', 'q': q});
 
-  // --- /api/v1/p24/* — IDs returned here ARE Property24 suburb IDs ---
-  // Use these for the Core Matches / Buyer Wishlist picker. The `id` field
-  // on the suburb response is what gets submitted as `p24_suburb_ids` and
-  // matches `properties.p24_suburb_id` server-side. Distinct from
-  // `/mobile/p24/*` whose `id` is the CoreX-side surrogate.
-
-  Future<List<P24Location>> _getP24v1(
-      String path, Map<String, String> qp) async {
-    final uri = Uri.parse('$baseUrl/v1/p24/$path').replace(queryParameters: {
-      for (final e in qp.entries)
-        if (e.value.isNotEmpty) e.key: e.value,
-    });
-    final response =
-        await http.get(uri, headers: await _headers()).timeout(_timeout);
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      final list = (data['data'] as List?) ?? const [];
-      return list
-          .map((e) => P24Location.fromJson(Map<String, dynamic>.from(e)))
-          .toList();
-    }
-    throw ApiException(response.statusCode, 'Failed to load $path');
-  }
-
-  Future<List<P24Location>> getP24v1Provinces({String q = ''}) =>
-      _getP24v1('provinces', {'q': q});
-
-  Future<List<P24Location>> getP24v1Cities(
-          {required int provinceId, String q = ''}) =>
-      _getP24v1('cities', {'province_id': '$provinceId', 'q': q});
-
-  Future<List<P24Location>> getP24v1Suburbs(
-          {required int cityId, String q = ''}) =>
-      _getP24v1('suburbs', {'city_id': '$cityId', 'q': q});
+  // NOTE: the Core Matches / Buyer Wishlist suburb picker uses the same
+  // `/mobile/p24/*` cascade above (getP24Provinces/Cities/Suburbs). The
+  // suburb `id` it returns is what gets submitted as `p24_suburb_ids`, and
+  // is the same value stored as `p24_suburb_id` on a property — so a
+  // match's suburbs always line up with property suburbs.
 
   Future<Property> createProperty(Map<String, dynamic> data) async {
     final reqBody = jsonEncode(data);
@@ -2010,17 +1981,34 @@ class ApiService {
     }
   }
 
-  Future<bool> toggleHideMatchProperty(int matchId, int propertyId) async {
+  /// Toggles a property's visibility within a Core Match.
+  ///
+  /// When hiding (property currently visible) the server requires a [reason]
+  /// of 3–500 characters, sent as the request body. When un-hiding, pass a
+  /// null/empty [reason] and no body is sent — the stored reason is cleared.
+  ///
+  /// Throws [ValidationException] on a 422 (e.g. a missing/too-short reason).
+  Future<HidePropertyResult> toggleHideMatchProperty(
+      int matchId, int propertyId,
+      {String? reason}) async {
+    final hasReason = reason != null && reason.trim().isNotEmpty;
     final response = await http.post(
       Uri.parse('$baseUrl/mobile/core-matches/$matchId/hide/$propertyId'),
       headers: await _headers(),
+      body: hasReason ? jsonEncode({'reason': reason.trim()}) : null,
     ).timeout(_timeout);
 
     if (response.statusCode == 200) {
       final body = jsonDecode(response.body);
-      if (body is Map && body['hidden'] is bool) return body['hidden'] as bool;
-      return false;
+      if (body is Map) {
+        return HidePropertyResult(
+          hidden: body['hidden'] == true,
+          hiddenReason: body['hidden_reason']?.toString(),
+        );
+      }
+      return const HidePropertyResult(hidden: false);
     }
+    if (response.statusCode == 422) throw _parseValidationError(response.body);
     throw ApiException(response.statusCode, 'Failed to toggle visibility');
   }
 
@@ -2266,6 +2254,14 @@ class DownloadedFile {
     required this.fileName,
     this.mimeType,
   });
+}
+
+/// Outcome of [ApiService.toggleHideMatchProperty]: the new visibility state
+/// and, when hidden, the agent-supplied reason.
+class HidePropertyResult {
+  final bool hidden;
+  final String? hiddenReason;
+  const HidePropertyResult({required this.hidden, this.hiddenReason});
 }
 
 class ApiException implements Exception {
