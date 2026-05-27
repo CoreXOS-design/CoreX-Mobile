@@ -21,6 +21,7 @@ dependencies:
   url_launcher: ^6.3.0
   firebase_core: ^4.7.0
   firebase_messaging: ^16.2.0
+  flutter_local_notifications: ^18.0.1
   local_auth: ^2.3.0
   local_auth_android: ^1.0.46
   local_auth_darwin: ^1.4.0
@@ -28,8 +29,15 @@ dependencies:
   flutter_animate: ^4.5.0
   mobile_scanner: ^5.2.3
   qr_flutter: ^4.1.0
+  tabler_icons: ^2.5.0+1
   share_plus: ^10.0.0
   gal: ^2.3.0
+
+dependency_overrides:
+  # Patched local copy: original tabler_icons subclasses IconData, which is
+  # now `final` in Flutter >= 3.40 and breaks the build.
+  tabler_icons:
+    path: third_party/tabler_icons
 
 dev_dependencies:
   flutter_test:

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/notification_models.dart';
 import '../../providers/notifications_provider.dart';
+import '../../services/messaging_service.dart';
 import '../../theme.dart';
 
 class NotificationSettingsScreen extends StatefulWidget {
@@ -66,6 +67,8 @@ class _NotificationSettingsScreenState
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
               children: [
                 if (locked) _agencyBanner(context),
+                _testButton(context),
+                const SizedBox(height: 12),
                 _MasterSwitches(master: data.master, locked: locked, onChanged: () {
                   setState(() {});
                 }),
@@ -105,6 +108,27 @@ class _NotificationSettingsScreenState
         ),
       );
     }
+  }
+
+  Widget _testButton(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        icon: const Icon(Icons.notifications_active_outlined, size: 18),
+        label: const Text('Send test notification'),
+        onPressed: () async {
+          final messenger = ScaffoldMessenger.of(context);
+          try {
+            await MessagingService.instance.sendTestNotification();
+            messenger.showSnackBar(const SnackBar(
+              content: Text('Test notification sent — check your notification bar.'),
+            ));
+          } catch (e) {
+            messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
+          }
+        },
+      ),
+    );
   }
 
   Widget _agencyBanner(BuildContext context) {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'models/branding.dart';
+import 'theme/corex_accent_theme.dart';
+import 'theme/corex_tokens.dart';
 
 class AppTheme {
   /// Active branding for the legacy `AppTheme.brand` / `AppTheme.brandDark`
@@ -17,31 +19,30 @@ class AppTheme {
   static Color get brandDark => _activeBranding.defaultColor;
 
   // --- Radius scale -------------------------------------------------------
-  // Tile/card default bumped to 18 (cleaner, more modern). HeroCard uses 24.
-  static const double radius = 18.0;
+  // Aligned with the 2026-05-25 CoreX redesign tokens.
+  static const double radius = 14.0;
   static const double radiusSmall = 10.0;
-  static const double radiusLarge = 24.0;
-  static const double radiusButton = 16.0;
-  static const double radiusChip = 12.0;
+  static const double radiusLarge = 20.0;
+  static const double radiusButton = 12.0;
+  static const double radiusChip = 999.0;
 
-  // --- Dark palette (richer, deeper, faint blue undertone) ---------------
-  static const Color darkBackground = Color(0xFF07090F);
-  static const Color darkSurface    = Color(0xFF0F1420);
-  static const Color darkSurface2   = Color(0xFF182032);
-  // Near-invisible border in dark mode — depth comes from shadow + gradient.
-  static const Color darkBorder        = Color(0x0AFFFFFF);
-  static const Color darkTextPrimary   = Color(0xFFEEF1F7);
-  static const Color darkTextSecondary = Color(0xFF8C95AD);
-  static const Color darkTextMuted     = Color(0xFF565E73);
+  // --- Dark palette (aligned with CorexTokens) ---------------------------
+  static const Color darkBackground = Color(0xFF0A0F1C);
+  static const Color darkSurface = Color(0xFF131A2A);
+  static const Color darkSurface2 = Color(0xFF1B2440);
+  static const Color darkBorder = Color(0x0AFFFFFF);
+  static const Color darkTextPrimary = Color(0xFFF5F7FB);
+  static const Color darkTextSecondary = Color(0xFF8B9AB5);
+  static const Color darkTextMuted = Color(0xFF5C6B85);
 
   // --- Light palette ------------------------------------------------------
   static const Color lightBackground = Color(0xFFFAFAF7);
-  static const Color lightSurface    = Color(0xFFFFFFFF);
-  static const Color lightSurface2   = Color(0xFFF2F4F9);
-  static const Color lightBorder        = Color(0x14000000);
-  static const Color lightTextPrimary   = Color(0xFF0F172A);
+  static const Color lightSurface = Color(0xFFFFFFFF);
+  static const Color lightSurface2 = Color(0xFFF2F4F9);
+  static const Color lightBorder = Color(0x14000000);
+  static const Color lightTextPrimary = Color(0xFF0F172A);
   static const Color lightTextSecondary = Color(0xFF64748B);
-  static const Color lightTextMuted     = Color(0xFF9CA3AF);
+  static const Color lightTextMuted = Color(0xFF9CA3AF);
 
   // --- Theme-aware accessors ---------------------------------------------
   static bool isDark(BuildContext context) =>
@@ -109,7 +110,7 @@ class AppTheme {
       return const LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: [Color(0xFF141A28), Color(0xFF0F1420)],
+        colors: [Color(0xFF1B2440), Color(0xFF131A2A)],
       );
     }
     return const LinearGradient(
@@ -181,9 +182,8 @@ class AppTheme {
     required Color textPrimary,
     required Color textSecondary,
   }) {
-    final base = brightness == Brightness.dark
-        ? ThemeData.dark()
-        : ThemeData.light();
+    final base =
+        brightness == Brightness.dark ? ThemeData.dark() : ThemeData.light();
 
     final body = GoogleFonts.interTextTheme(base.textTheme);
     final display = GoogleFonts.plusJakartaSansTextTheme(base.textTheme);
@@ -203,8 +203,8 @@ class AppTheme {
           fontWeight: FontWeight.w700, color: textPrimary, letterSpacing: -0.3),
       titleLarge: display.titleLarge?.copyWith(
           fontWeight: FontWeight.w700, color: textPrimary, letterSpacing: -0.2),
-      titleMedium: body.titleMedium?.copyWith(
-          fontWeight: FontWeight.w600, color: textPrimary),
+      titleMedium: body.titleMedium
+          ?.copyWith(fontWeight: FontWeight.w600, color: textPrimary),
       bodyLarge: body.bodyLarge?.copyWith(color: textPrimary, height: 1.4),
       bodyMedium: body.bodyMedium?.copyWith(color: textPrimary, height: 1.4),
     );
@@ -304,11 +304,17 @@ class AppTheme {
         thickness: WidgetStateProperty.all(6),
         radius: const Radius.circular(6),
         thumbColor: WidgetStateProperty.all(
-          brightness == Brightness.dark ? darkTextSecondary : lightTextSecondary,
+          brightness == Brightness.dark
+              ? darkTextSecondary
+              : lightTextSecondary,
         ),
       ),
       extensions: <ThemeExtension<dynamic>>[
         BrandColors.fromBranding(branding),
+        CorexAccentTheme.fromBranding(branding),
+        brightness == Brightness.light
+            ? CorexTokens.lightPalette
+            : CorexTokens.darkPalette,
       ],
     );
   }

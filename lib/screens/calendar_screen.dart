@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:tabler_icons/tabler_icons.dart';
 import '../theme.dart';
+import '../theme/corex_tokens.dart';
+import '../widgets/corex/corex_bottom_nav.dart';
 import '../providers/dashboard_provider.dart';
 import '../models/dashboard_data.dart';
 import '../widgets/event_card.dart';
@@ -316,7 +319,45 @@ class _CalendarScreenState extends State<CalendarScreen>
 
     return Scaffold(
       backgroundColor: AppTheme.background(context),
-      body: _buildBody(context, events),
+      bottomNavigationBar: CorexBottomNav(
+        active: CorexNavTab.calendar,
+        onTap: (tab) =>
+            corexNavigateTo(context, tab, CorexNavTab.calendar),
+      ),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            SizedBox(
+              height: 56,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon: Icon(
+                        TablerIcons.arrow_left,
+                        color: CorexTokens.textPrimary(context),
+                      ),
+                    ),
+                    Text(
+                      'Calendar',
+                      style: TextStyle(
+                        color: CorexTokens.textPrimary(context),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Expanded(child: _buildBody(context, events)),
+          ],
+        ),
+      ),
       floatingActionButton: _buildFab(context),
     );
   }

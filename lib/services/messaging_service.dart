@@ -2,7 +2,10 @@ import 'dart:io' show Platform;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../providers/portal_leads_provider.dart';
 import 'api_service.dart';
 import 'deep_link_router.dart';
 
@@ -22,6 +25,11 @@ class MessagingService {
 
   final ApiService _api = ApiService();
   final FirebaseMessaging _fcm = FirebaseMessaging.instance;
+  final FlutterLocalNotificationsPlugin _local =
+      FlutterLocalNotificationsPlugin();
+
+  static const _testChannelId = 'corex_test';
+  static const _testChannelName = 'CoreX test notifications';
 
   /// Set by `main.dart` before runApp so deep-links from cold-start taps know
   /// where to navigate. Foreground / warm-tap handlers grab the active context
@@ -46,6 +54,8 @@ class MessagingService {
     // Permission prompt on iOS (no-op on Android < 13; handled by
     // permission_handler in main.dart for Android 13+).
     await _fcm.requestPermission();
+
+    await _initLocalNotifications();
 
     // Auto-register if the OS rotates the token.
     _fcm.onTokenRefresh.listen(_registerWithServer);
@@ -119,7 +129,15 @@ class MessagingService {
     final body = msg.notification?.body ?? msg.data['body']?.toString();
     if (title == null && body == null) return;
 
-    final action = msg.data['action_url']?.toString();
+    final action = (msg.data['action_url'] ?? msg.data['deep_link'])
+        ?.toString();
+
+    if (msg.data['type']?.toString() == 'portal_lead') {
+      try {
+        Provider.of<PortalLeadsProvider>(ctx, listen: false).bumpUnread();
+      } catch (_) {}
+    }
+
     ScaffoldMessenger.of(ctx).showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 5),
@@ -145,9 +163,48 @@ class MessagingService {
 
   void _onMessageTap(RemoteMessage msg) {
     final ctx = navigatorKey?.currentContext;
-    final action = msg.data['action_url']?.toString();
-    if (ctx == null || action == null) return;
-    DeepLinkRouter.open(ctx, action);
+    if (ctx == null) return;
+    final action = (msg.data['action_url'] ?? msg.data['deep_link'])
+        ?.toString();
+    if (action != null && action.isNotEmpty) {
+      DeepLinkRouter.open(ctx, action);
+    }
+  }
+
+  Future<void> _initLocalNotifications() async {
+    const android =
+        AndroidInitializationSettings('ic_launcher_monochrome');
+    const ios = DarwinInitializationSettings();
+    await _local.initialize(
+      const InitializationSettings(android: android, iOS: ios),
+    );
+    await _local
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(const AndroidNotificationChannel(
+          _testChannelId,
+          _testChannelName,
+          importance: Importance.high,
+        ));
+  }
+
+  /// Fires a local system-tray notification so the user can verify that
+  /// notifications surface correctly on their device.
+  Future<void> sendTestNotification() async {
+    await _local.show(
+      DateTime.now().millisecondsSinceEpoch.remainder(100000),
+      'CoreX test notification',
+      'If you can see this in your notification bar, push delivery is working.',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _testChannelId,
+          _testChannelName,
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+    );
   }
 
   String get _platform {

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,17 +12,17 @@ import 'providers/branding_provider.dart';
 import 'providers/client_session_provider.dart';
 import 'providers/dashboard_provider.dart';
 import 'providers/notifications_provider.dart';
+import 'providers/portal_leads_provider.dart';
 import 'providers/property_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/visibility_provider.dart';
 import 'screens/auth/client/client_set_password_screen.dart';
-import 'screens/auth/login_choice_screen.dart';
+import 'screens/auth/login_screen.dart';
 import 'screens/client/client_home_screen.dart';
-import 'screens/home_hub_screen.dart';
+import 'screens/home/home_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/client_auth_service.dart';
 import 'services/messaging_service.dart';
-import 'services/security_service.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -52,7 +51,8 @@ Future<void> _requestInitialPermissions() async {
   }
 
   final notificationStatus = await Permission.notification.status;
-  if (!notificationStatus.isGranted && !notificationStatus.isPermanentlyDenied) {
+  if (!notificationStatus.isGranted &&
+      !notificationStatus.isPermanentlyDenied) {
     await Permission.notification.request();
   }
 }
@@ -77,6 +77,7 @@ class CoreXApp extends StatelessWidget {
             create: (_) => ClientSessionProvider()..bootstrap()),
         ChangeNotifierProvider(create: (_) => DashboardProvider()),
         ChangeNotifierProvider(create: (_) => NotificationsProvider()),
+        ChangeNotifierProvider(create: (_) => PortalLeadsProvider()),
         ChangeNotifierProvider(create: (_) => PropertyProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => VisibilityProvider()),
@@ -93,77 +94,10 @@ class CoreXApp extends StatelessWidget {
             theme: AppTheme.light(b),
             darkTheme: AppTheme.dark(b),
             themeMode: themeProvider.themeMode,
-            home: const _InactivityGate(child: _AppBootstrap()),
+            home: const _AppBootstrap(),
           );
         },
       ),
-    );
-  }
-}
-
-/// Locks the session back to the LoginScreen after [_idleTimeout] of no
-/// pointer activity, and again whenever the app comes back from background.
-class _InactivityGate extends StatefulWidget {
-  final Widget child;
-  const _InactivityGate({required this.child});
-
-  @override
-  State<_InactivityGate> createState() => _InactivityGateState();
-}
-
-class _InactivityGateState extends State<_InactivityGate>
-    with WidgetsBindingObserver {
-  static const Duration _idleTimeout = Duration(minutes: 5);
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _resetTimer();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Lock immediately when the app is backgrounded/inactive — re-entry must
-    // pass the login or biometric prompt again.
-    // Suppress lock-on-lifecycle while a system biometric/credential prompt
-    // is showing — the prompt itself fires inactive/paused, which would
-    // otherwise re-lock the session mid-authentication.
-    if (SecurityService.isAuthenticating) return;
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.hidden) {
-      _lock();
-    } else if (state == AppLifecycleState.resumed) {
-      _resetTimer();
-    }
-  }
-
-  void _resetTimer() {
-    _timer?.cancel();
-    _timer = Timer(_idleTimeout, _lock);
-  }
-
-  void _lock() {
-    final auth = rootNavigatorKey.currentContext?.read<AuthProvider>();
-    auth?.lockSession();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Listener(
-      behavior: HitTestBehavior.translucent,
-      onPointerDown: (_) => _resetTimer(),
-      onPointerMove: (_) => _resetTimer(),
-      child: widget.child,
     );
   }
 }
@@ -208,6 +142,7 @@ class _AppBootstrapState extends State<_AppBootstrap> {
         // Refresh agent visibility on every login / cold start. Failure
         // falls back silently to own-only with no filter UI.
         context.read<VisibilityProvider>().refresh();
+        context.read<ThemeProvider>().syncFromServer();
       });
     } else if (!auth.isLoggedIn && _brandingPulled) {
       _brandingPulled = false;
@@ -252,8 +187,8 @@ class AuthGate extends StatelessWidget {
     }
 
     if (auth.isLoggedIn) {
-      return const HomeHubScreen();
+      return const HomeScreen();
     }
-    return const LoginChoiceScreen();
+    return const LoginScreen();
   }
 }

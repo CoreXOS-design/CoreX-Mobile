@@ -10,6 +10,7 @@ class Branding {
   final Color icon;
   final Color defaultColor;
   final Color button;
+  final Color money;
 
   const Branding({
     this.logoUrl,
@@ -17,6 +18,7 @@ class Branding {
     required this.icon,
     required this.defaultColor,
     required this.button,
+    required this.money,
   });
 
   /// Hard-coded fallback used on first launch and on request failure.
@@ -25,6 +27,7 @@ class Branding {
     icon: Color(0xFF0EA5E9),
     defaultColor: Color(0xFF0B2A4A),
     button: Color(0xFF0EA5E9),
+    money: Color(0xFFE8B86D),
   );
 
   factory Branding.fromJson(Map<String, dynamic> json) {
@@ -35,6 +38,7 @@ class Branding {
       icon: _parseHex(colors['icon'], fallback.icon),
       defaultColor: _parseHex(colors['default'], fallback.defaultColor),
       button: _parseHex(colors['button'], fallback.button),
+      money: _parseHex(colors['money'], fallback.money),
     );
   }
 
@@ -68,12 +72,14 @@ class BrandColors extends ThemeExtension<BrandColors> {
   final Color icon;
   final Color defaultColor;
   final Color button;
+  final Color money;
 
   const BrandColors({
     required this.sidebar,
     required this.icon,
     required this.defaultColor,
     required this.button,
+    required this.money,
   });
 
   factory BrandColors.fromBranding(Branding b) => BrandColors(
@@ -81,6 +87,7 @@ class BrandColors extends ThemeExtension<BrandColors> {
         icon: b.icon,
         defaultColor: b.defaultColor,
         button: b.button,
+        money: b.money,
       );
 
   static BrandColors of(BuildContext context) =>
@@ -98,12 +105,14 @@ class BrandColors extends ThemeExtension<BrandColors> {
     Color? icon,
     Color? defaultColor,
     Color? button,
+    Color? money,
   }) =>
       BrandColors(
         sidebar: sidebar ?? this.sidebar,
         icon: icon ?? this.icon,
         defaultColor: defaultColor ?? this.defaultColor,
         button: button ?? this.button,
+        money: money ?? this.money,
       );
 
   @override
@@ -114,6 +123,7 @@ class BrandColors extends ThemeExtension<BrandColors> {
       icon: Color.lerp(icon, other.icon, t)!,
       defaultColor: Color.lerp(defaultColor, other.defaultColor, t)!,
       button: Color.lerp(button, other.button, t)!,
+      money: Color.lerp(money, other.money, t)!,
     );
   }
 }

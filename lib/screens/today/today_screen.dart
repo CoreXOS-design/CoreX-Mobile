@@ -1,19 +1,22 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:tabler_icons/tabler_icons.dart';
 import '../../models/notification_models.dart';
 import '../../models/today_card.dart';
 import '../../providers/dashboard_provider.dart';
 import '../../providers/notifications_provider.dart';
 import '../../services/api_service.dart';
 import '../../services/deep_link_router.dart';
-import '../../theme.dart';
+import '../../theme/corex_accent_theme.dart';
+import '../../theme/corex_tokens.dart';
+import '../../widgets/corex/corex_bottom_nav.dart';
+import '../../widgets/corex/corex_card.dart';
 
 /// Today screen — two stacked blocks:
 ///   A. Today's Schedule (calendar events for today, from `/command-center/today`)
 ///   B. Unread Notifications (from `/notifications?unread=1`)
-///
-/// Pull-to-refresh refetches both. Foreground poll every 60s.
 class TodayScreen extends StatefulWidget {
   const TodayScreen({super.key});
 
@@ -78,51 +81,118 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
     final notes = context.watch<NotificationsProvider>();
     final events = _todaysEvents(dash);
     final unread = notes.items.where((n) => !n.isRead).toList();
+    final t = CorexAccentTheme.of(context);
 
-    return RefreshIndicator(
-      onRefresh: _pullRefresh,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-        children: [
-          const _SectionHeader(label: "Today's Schedule"),
-          const SizedBox(height: 8),
-          if (events.isEmpty)
-            const _EmptyTile(text: 'No events today.')
-          else
-            ...events.map((e) => _EventRow(
-                  event: e,
-                  onTap: () => _openEventSheet(context, e),
-                )),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              const Expanded(
-                  child: _SectionHeader(label: 'Unread Notifications')),
-              if (notes.unread > 0)
-                TextButton(
-                  onPressed: () =>
-                      context.read<NotificationsProvider>().markAllRead(),
-                  child: const Text('Mark all read',
-                      style: TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600)),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: CorexTokens.pageBase(context),
+        body: Container(
+          decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
+          child: SafeArea(
+            bottom: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  height: 56,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => Navigator.of(context).maybePop(),
+                          icon: Icon(
+                            TablerIcons.arrow_left,
+                            color: CorexTokens.textPrimary(context),
+                          ),
+                        ),
+                        Text(
+                          'Today',
+                          style: TextStyle(
+                            color: CorexTokens.textPrimary(context),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-            ],
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _pullRefresh,
+                    color: t.accent,
+                    backgroundColor: CorexTokens.surfaceBase(context),
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                      children: [
+                        const _SectionHeader(label: "Today's Schedule"),
+                        const SizedBox(height: 10),
+                        if (events.isEmpty)
+                          const _EmptyTile(text: 'No events today.')
+                        else
+                          ...events.map((e) => _EventRow(
+                                event: e,
+                                onTap: () => _openEventSheet(context, e),
+                              )),
+                        const SizedBox(height: 22),
+                        Row(
+                          children: [
+                            const Expanded(
+                              child:
+                                  _SectionHeader(label: 'Unread Notifications'),
+                            ),
+                            if (notes.unread > 0)
+                              TextButton(
+                                onPressed: () => context
+                                    .read<NotificationsProvider>()
+                                    .markAllRead(),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: t.accent,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                child: const Text(
+                                  'Mark all read',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        if (unread.isEmpty)
+                          const _EmptyTile(text: "You're all caught up.")
+                        else
+                          ...unread.map((n) => _NotifRow(item: n)),
+                      ],
+                    ),
+                  ),
+                ),
+                CorexBottomNav(
+                  active: CorexNavTab.today,
+                  onTap: (tab) => _onNavTap(context, tab),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 4),
-          if (unread.isEmpty)
-            const _EmptyTile(text: "You're all caught up.")
-          else
-            ...unread.map((n) => _NotifRow(item: n)),
-        ],
+        ),
       ),
     );
   }
 
+  void _onNavTap(BuildContext context, CorexNavTab tab) {
+    corexNavigateTo(context, tab, CorexNavTab.today);
+  }
+
   List<_ScheduleItem> _todaysEvents(DashboardProvider dash) {
-    // The unified /today payload exposes today's calendar events under the
-    // `today_appointments` card. We render whatever items it returns,
-    // permissively mapping common field aliases.
     final card = dash.cards.firstWhere(
       (c) => c.cardId == 'today_appointments',
       orElse: () => const TodayCard(cardId: ''),
@@ -143,7 +213,7 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.surface(context),
+      backgroundColor: CorexTokens.surfaceBase(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -189,10 +259,10 @@ class _SectionHeader extends StatelessWidget {
     return Text(
       label,
       style: TextStyle(
-        fontSize: 13,
+        fontSize: 16,
         fontWeight: FontWeight.w700,
-        color: AppTheme.textSecondary(context),
-        letterSpacing: 0.4,
+        color: CorexTokens.textPrimary(context),
+        letterSpacing: -0.2,
       ),
     );
   }
@@ -203,17 +273,17 @@ class _EmptyTile extends StatelessWidget {
   const _EmptyTile({required this.text});
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
-      decoration: BoxDecoration(
-        color: AppTheme.surface(context),
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppTheme.borderColor(context)),
-      ),
+    return CorexCard(
+      padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 14),
       child: Center(
-        child: Text(text,
-            style: TextStyle(
-                fontSize: 13, color: AppTheme.textMuted(context))),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 13,
+            color: CorexTokens.textTertiary(context),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ),
     );
   }
@@ -226,89 +296,87 @@ class _EventRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = event.color ?? Theme.of(context).colorScheme.primary;
+    final t = CorexAccentTheme.of(context);
+    final accent = event.color ?? t.accent;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: AppTheme.surface(context),
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppTheme.radius),
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppTheme.radius),
-              border: Border.all(color: AppTheme.borderColor(context)),
+      padding: const EdgeInsets.only(bottom: 10),
+      child: CorexCard(
+        onTap: onTap,
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 4,
+              height: 44,
+              decoration: BoxDecoration(
+                color: accent,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 4,
-                  height: 44,
-                  decoration: BoxDecoration(
-                      color: accent, borderRadius: BorderRadius.circular(2)),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 58,
+              child: Text(
+                event.timeLabel,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: CorexTokens.textPrimary(context),
                 ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 58,
-                  child: Text(
-                    event.timeLabel,
+              ),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    event.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary(context)),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: CorexTokens.textPrimary(context),
+                    ),
                   ),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(event.title,
-                          maxLines: 2,
+                  if (event.location != null &&
+                      event.location!.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Row(children: [
+                      Icon(Icons.place_outlined,
+                          size: 12, color: CorexTokens.textTertiary(context)),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          event.location!,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textPrimary(context))),
-                      if (event.location != null &&
-                          event.location!.isNotEmpty) ...[
-                        const SizedBox(height: 3),
-                        Row(children: [
-                          Icon(Icons.place_outlined,
-                              size: 12,
-                              color: AppTheme.textMuted(context)),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(event.location!,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    color:
-                                        AppTheme.textSecondary(context))),
-                          ),
-                        ]),
-                      ],
-                    ],
-                  ),
-                ),
-                if (event.attendeesCount > 0) ...[
-                  const SizedBox(width: 8),
-                  Row(children: [
-                    Icon(Icons.people_outline,
-                        size: 13, color: AppTheme.textMuted(context)),
-                    const SizedBox(width: 2),
-                    Text('${event.attendeesCount}',
-                        style: TextStyle(
                             fontSize: 11,
-                            color: AppTheme.textSecondary(context))),
-                  ]),
+                            color: CorexTokens.textSecondary(context),
+                          ),
+                        ),
+                      ),
+                    ]),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
+            if (event.attendeesCount > 0) ...[
+              const SizedBox(width: 8),
+              Row(children: [
+                Icon(Icons.people_outline,
+                    size: 13, color: CorexTokens.textTertiary(context)),
+                const SizedBox(width: 2),
+                Text('${event.attendeesCount}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: CorexTokens.textSecondary(context),
+                    )),
+              ]),
+            ],
+          ],
         ),
       ),
     );
@@ -327,7 +395,8 @@ class _EventDetailSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = event.color ?? Theme.of(context).colorScheme.primary;
+    final t = CorexAccentTheme.of(context);
+    final accent = event.color ?? t.accent;
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.only(
@@ -343,7 +412,7 @@ class _EventDetailSheet extends StatelessWidget {
                   width: 36,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppTheme.borderColor(context),
+                    color: CorexTokens.textMuted(context),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -360,8 +429,11 @@ class _EventDetailSheet extends StatelessWidget {
                 Expanded(
                   child: Text(
                     event.title,
-                    style: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.w700),
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: CorexTokens.textPrimary(context),
+                    ),
                   ),
                 ),
               ]),
@@ -377,10 +449,13 @@ class _EventDetailSheet extends StatelessWidget {
               if (event.description != null &&
                   event.description!.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text(event.description!,
-                    style: TextStyle(
-                        fontSize: 13,
-                        color: AppTheme.textSecondary(context))),
+                Text(
+                  event.description!,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: CorexTokens.textSecondary(context),
+                  ),
+                ),
               ],
               const SizedBox(height: 18),
               Row(children: [
@@ -389,6 +464,15 @@ class _EventDetailSheet extends StatelessWidget {
                     onPressed: event.id == null ? null : onDismiss,
                     icon: const Icon(Icons.close, size: 16),
                     label: const Text('Dismiss'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: CorexTokens.textPrimary(context),
+                      side: BorderSide(color: t.accentBorder),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(CorexTokens.radiusButton),
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -397,6 +481,15 @@ class _EventDetailSheet extends StatelessWidget {
                     onPressed: event.id == null ? null : onComplete,
                     icon: const Icon(Icons.check, size: 16),
                     label: const Text('Complete'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: t.accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(CorexTokens.radiusButton),
+                      ),
+                    ),
                   ),
                 ),
               ]),
@@ -411,12 +504,16 @@ class _EventDetailSheet extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(children: [
-        Icon(icon, size: 14, color: AppTheme.textMuted(context)),
+        Icon(icon, size: 14, color: CorexTokens.textTertiary(context)),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(text,
-              style: TextStyle(
-                  fontSize: 13, color: AppTheme.textPrimary(context))),
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 13,
+              color: CorexTokens.textPrimary(context),
+            ),
+          ),
         ),
       ]),
     );
@@ -431,61 +528,70 @@ class _NotifRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = _severity(item.severity);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Material(
-        color: AppTheme.surface(context),
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppTheme.radius),
-          onTap: () async {
-            final p = context.read<NotificationsProvider>();
-            await p.markRead(item.id);
-            if (!context.mounted) return;
-            final url = item.actionUrl ?? item.data['url']?.toString();
-            if (url != null && url.isNotEmpty) {
-              await DeepLinkRouter.open(context, url);
-            }
-          },
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppTheme.radius),
-              border: Border.all(color: accent.withValues(alpha: 0.35)),
-            ),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(_iconFor(item.type),
-                  size: 18, color: accent),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textPrimary(context))),
-                    if (item.body.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(item.body,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary(context))),
-                    ],
-                    const SizedBox(height: 4),
-                    Text(_relTime(item.createdAt),
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: AppTheme.textMuted(context))),
-                  ],
-                ),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: CorexCard(
+        onTap: () async {
+          final p = context.read<NotificationsProvider>();
+          await p.markRead(item.id);
+          if (!context.mounted) return;
+          final url = item.actionUrl ?? item.data['url']?.toString();
+          if (url != null && url.isNotEmpty) {
+            await DeepLinkRouter.open(context, url);
+          }
+        },
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
               ),
-            ]),
-          ),
+              alignment: Alignment.center,
+              child: Icon(_iconFor(item.type), size: 16, color: accent),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: CorexTokens.textPrimary(context),
+                    ),
+                  ),
+                  if (item.body.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      item.body,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: CorexTokens.textSecondary(context),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 4),
+                  Text(
+                    _relTime(item.createdAt),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: CorexTokens.textTertiary(context),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

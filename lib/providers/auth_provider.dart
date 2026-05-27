@@ -16,7 +16,12 @@ class AuthProvider extends ChangeNotifier {
   bool _biometricEnabled = false;
   bool _needsBiometricSetupPrompt = false;
   String? _error;
+  int? _lastLoginStatus;
   Map<String, dynamic>? _user;
+
+  /// HTTP status of the most recent [login] attempt, or null on network error.
+  /// 200 = success, 401/422 = bad credentials for an existing user.
+  int? get lastLoginStatus => _lastLoginStatus;
 
   bool get isLoading => _isLoading;
   /// True only when fully authenticated AND not locked. AuthGate uses this
@@ -55,10 +60,12 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> login(String email, String password) async {
     _isLoading = true;
     _error = null;
+    _lastLoginStatus = null;
     notifyListeners();
 
     try {
       final result = await _api.login(email, password);
+      _lastLoginStatus = 200;
       await _api.saveToken(result['token']);
       _user = result['user'];
       _isLoggedIn = true;
@@ -85,6 +92,7 @@ class AuthProvider extends ChangeNotifier {
       unawaited(_messaging.onLogin());
       return true;
     } catch (e) {
+      _lastLoginStatus = e is ApiException ? e.statusCode : null;
       _error = 'Invalid email or password';
       _isLoading = false;
       notifyListeners();
@@ -173,7 +181,6 @@ class AuthProvider extends ChangeNotifier {
   Future<void> logout() async {
     await _messaging.onLogout();
     await _api.clearToken();
-    await _security.clearCredentials();
     await _security.setBiometricEnabled(false);
     _biometricEnabled = false;
     _isLoggedIn = false;

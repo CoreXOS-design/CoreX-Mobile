@@ -11,6 +11,7 @@ import '../models/core_match.dart';
 import '../models/dashboard_data.dart';
 import '../models/gallery_tags.dart';
 import '../models/notification_models.dart';
+import '../models/portal_lead.dart';
 import '../models/p24_location.dart';
 import '../models/property.dart';
 import '../models/property_compliance.dart';
@@ -170,6 +171,38 @@ class ApiService {
       return jsonDecode(response.body) as Map<String, dynamic>;
     }
     throw ApiException(response.statusCode, 'Failed to load logged-user');
+  }
+
+  // --- User theme (mobile preference) ---
+
+  /// `GET /v1/me/theme` → `{ "theme": "light" | "dark" }`. Backed by the
+  /// `users.theme` column; default `dark`. Pulled on login so the app
+  /// mirrors the user's saved web/mobile preference.
+  Future<String?> getUserTheme() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/v1/me/theme'),
+      headers: await _headers(),
+    ).timeout(_timeout);
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body);
+      if (body is Map && body['theme'] is String) return body['theme'] as String;
+      return null;
+    }
+    throw ApiException(response.statusCode, 'Failed to load theme');
+  }
+
+  /// `PUT /v1/me/theme` body `{ "theme": "light" | "dark" }`. Persists the
+  /// in-app toggle back to the server so the web cockpit picks up the same
+  /// value.
+  Future<void> setUserTheme(String theme) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/v1/me/theme'),
+      headers: await _headers(),
+      body: jsonEncode({'theme': theme}),
+    ).timeout(_timeout);
+    if (response.statusCode != 200) {
+      throw ApiException(response.statusCode, 'Failed to update theme');
+    }
   }
 
   // --- Agent QR ---
@@ -2239,6 +2272,77 @@ class ApiService {
       CalendarEvent(id: 5, title: 'Meet with bond originator', eventType: 'deal',
           eventDate: today.add(const Duration(days: 3, hours: 11)), colour: '#3b82f6'),
     ];
+  }
+
+  // --- Portal Leads ---
+
+  Future<({String date, int total, int page, int pages, List<PortalLead> leads})>
+      getPortalLeads({String? date, String? portal, int page = 1, int perPage = 25}) async {
+    final qp = <String, String>{
+      if (date != null) 'date': date,
+      if (portal != null) 'portal': portal,
+      'page': '$page',
+      'per_page': '$perPage',
+    };
+    final uri =
+        Uri.parse('$baseUrl/v1/mobile/portal-leads').replace(queryParameters: qp);
+    final response =
+        await http.get(uri, headers: await _headers()).timeout(_timeout);
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final leads = (body['leads'] as List? ?? [])
+          .whereType<Map>()
+          .map((e) => PortalLead.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      return (
+        date: body['date']?.toString() ?? (date ?? ''),
+        total: body['total'] is num ? (body['total'] as num).toInt() : leads.length,
+        page: body['page'] is num ? (body['page'] as num).toInt() : page,
+        pages: body['pages'] is num ? (body['pages'] as num).toInt() : 1,
+        leads: leads,
+      );
+    }
+    throw ApiException(response.statusCode, 'Failed to load portal leads');
+  }
+
+  Future<List<PortalLeadDate>> getPortalLeadDates() async {
+    final response = await http
+        .get(Uri.parse('$baseUrl/v1/mobile/portal-leads/dates'),
+            headers: await _headers())
+        .timeout(_timeout);
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      return (body['dates'] as List? ?? [])
+          .whereType<Map>()
+          .map((e) => PortalLeadDate.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    throw ApiException(response.statusCode, 'Failed to load portal lead dates');
+  }
+
+  Future<PortalLead> getPortalLead(int id) async {
+    final response = await http
+        .get(Uri.parse('$baseUrl/v1/mobile/portal-leads/$id'),
+            headers: await _headers())
+        .timeout(_timeout);
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final lead = (body['lead'] is Map)
+          ? Map<String, dynamic>.from(body['lead'] as Map)
+          : body;
+      return PortalLead.fromJson(lead);
+    }
+    throw ApiException(response.statusCode, 'Failed to load portal lead');
+  }
+
+  Future<void> markPortalLeadRead(int id) async {
+    final response = await http
+        .post(Uri.parse('$baseUrl/v1/mobile/portal-leads/$id/mark-read'),
+            headers: await _headers())
+        .timeout(_timeout);
+    if (response.statusCode != 200 && response.statusCode != 204) {
+      throw ApiException(response.statusCode, 'Failed to mark portal lead read');
+    }
   }
 }
 
