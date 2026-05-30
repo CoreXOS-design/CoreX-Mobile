@@ -12,11 +12,12 @@ import '../../widgets/corex/corex_drawer.dart';
 import '../../widgets/corex/corex_ellie_teaser.dart';
 import '../../widgets/corex/corex_kpi_tile.dart';
 import '../../widgets/corex/corex_module_tile.dart';
-import '../../widgets/corex/corex_today_focus.dart';
+import '../../widgets/corex/corex_next_appointment.dart';
 import '../../providers/portal_leads_provider.dart';
 import '../coming_soon_screen.dart';
 import '../contacts/contacts_list_screen.dart';
 import '../ellie/ellie_screen.dart';
+import '../notifications/notifications_screen.dart';
 import '../core_matches/core_matches_list_screen.dart';
 import '../portal_leads/portal_leads_screen.dart';
 import '../profile_screen.dart';
@@ -49,6 +50,7 @@ class HomeScreen extends StatelessWidget {
                     userInitials: initials,
                     unreadBadge: 1,
                     onMenuTap: () => Scaffold.of(ctx).openDrawer(),
+                    onBellTap: () => _push(ctx, const NotificationsScreen()),
                     onAvatarTap: () => _push(ctx, const ProfileScreen()),
                   ),
                 ),
@@ -88,10 +90,7 @@ class HomeScreen extends StatelessWidget {
                         const SizedBox(height: 16),
                         _kpiRow(),
                         const SizedBox(height: 16),
-                        const CorexTodayFocus(
-                          address: 'No focus set today',
-                          chips: ['Tap a property to focus'],
-                        ),
+                        const CorexNextAppointment(),
                         const SizedBox(height: 22),
                         _sectionHeader(
                           'Workspace',
@@ -120,13 +119,13 @@ class HomeScreen extends StatelessWidget {
   Widget _kpiRow() {
     return const Row(
       children: [
-        Expanded(child: CorexKpiTile(label: 'Mandates', value: '—')),
+        Expanded(child: CorexKpiTile(label: 'Coming soon', value: '—')),
         SizedBox(width: 10),
-        Expanded(child: CorexKpiTile(label: 'FICA', value: '—')),
+        Expanded(child: CorexKpiTile(label: 'Coming soon', value: '—')),
         SizedBox(width: 10),
         Expanded(
           child: CorexKpiTile(
-            label: 'May GCI',
+            label: 'Coming soon',
             value: '—',
             money: true,
           ),
@@ -199,14 +198,14 @@ class HomeScreen extends StatelessWidget {
         builder: () => const PortalLeadsScreen(),
       ),
       _ModuleSpec(
-        icon: TablerIcons.coin,
-        label: 'Commission',
-        builder: () => const ComingSoonScreen(feature: 'Commission'),
+        icon: TablerIcons.hourglass_high,
+        label: 'Coming Soon',
+        builder: () => const ComingSoonScreen(feature: 'Coming Soon'),
       ),
       _ModuleSpec(
-        icon: TablerIcons.school,
-        label: 'Training',
-        builder: () => const ComingSoonScreen(feature: 'Training'),
+        icon: TablerIcons.hourglass_high,
+        label: 'Coming Soon',
+        builder: () => const ComingSoonScreen(feature: 'Coming Soon'),
       ),
     ];
 

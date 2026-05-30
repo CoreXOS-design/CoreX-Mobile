@@ -58,8 +58,13 @@ void corexNavigateTo(BuildContext context, CorexNavTab tab, CorexNavTab from) {
       target = const EllieScreen();
       break;
     case CorexNavTab.me:
-      target = const ProfileScreen();
-      break;
+      // Profile has no bottom nav of its own, so open it as a pushed page
+      // on top of the current screen — same behaviour as the home-screen
+      // avatar — instead of replacing the tab and stranding the user.
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const ProfileScreen()),
+      );
+      return;
   }
   Navigator.of(context).pushReplacement(corexTabRoute(target));
 }

@@ -3,7 +3,6 @@ import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
-import 'corex_chip.dart';
 
 class CorexEllieTeaser extends StatelessWidget {
   final VoidCallback onTap;
@@ -66,8 +65,6 @@ class CorexEllieTeaser extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              const CorexChip(label: 'Soon', variant: CorexChipVariant.accent),
             ],
           ),
         ),

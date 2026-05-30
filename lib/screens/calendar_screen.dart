@@ -316,12 +316,20 @@ class _CalendarScreenState extends State<CalendarScreen>
   Widget _buildFab(BuildContext context) {
     return FloatingActionButton(
       heroTag: 'calendar_fab',
-      onPressed: () => showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (_) => const QuickAddSheet(initialMode: 'event'),
-      ),
+      onPressed: () async {
+        final created = await showModalBottomSheet<bool>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (_) => QuickAddSheet(
+            initialMode: 'event',
+            // Pre-fill the day the user is currently viewing.
+            initialDate: _selectedDate ?? DateTime.now(),
+          ),
+        );
+        // Refresh the visible range so the new event shows without leaving.
+        if (created == true && mounted) await _reload();
+      },
       backgroundColor: AppTheme.brand,
       child: const Icon(Icons.add, color: Colors.white),
     );

@@ -1,9 +1,7 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/dashboard_data.dart';
 import '../../providers/dashboard_provider.dart';
-import '../../services/api_service.dart';
 import '../../theme.dart';
 
 /// One sheet, two modes — replaces the separate create-task and create-event
@@ -11,8 +9,9 @@ import '../../theme.dart';
 /// FAB) can pre-select the relevant segment.
 class QuickAddSheet extends StatefulWidget {
   final String initialMode; // 'task' | 'event'
+  final DateTime? initialDate; // pre-fills the event date (e.g. selected day)
 
-  const QuickAddSheet({super.key, this.initialMode = 'task'});
+  const QuickAddSheet({super.key, this.initialMode = 'task', this.initialDate});
 
   @override
   State<QuickAddSheet> createState() => _QuickAddSheetState();
@@ -38,80 +37,125 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
   TimeOfDay? _eventEndTime;
   bool _allDay = false;
 
-  // Conflict check (debounced 400ms on event date/time change).
-  final _api = ApiService();
-  Timer? _conflictDebounce;
+  // Overlapping events for the chosen window, computed locally against the
+  // events already loaded for the day — no server round-trip, no timezone
+  // ambiguity. Empty until a valid start+end window is set.
   List<CalendarEvent> _conflicts = const [];
-  bool _checkingConflicts = false;
 
   @override
   void initState() {
     super.initState();
     _mode = widget.initialMode == 'event' ? 'event' : 'task';
+    // Pre-fill the event date with the day the user was viewing (date-only).
+    final d = widget.initialDate;
+    if (d != null) _eventDate = DateTime(d.year, d.month, d.day);
   }
 
   @override
   void dispose() {
-    _conflictDebounce?.cancel();
     _titleController.dispose();
     _descriptionController.dispose();
     super.dispose();
   }
 
-  /// Called whenever the event date, time, or all-day toggle changes.
-  /// Debounces to avoid hammering the API while the user picks.
-  void _scheduleConflictCheck() {
-    _conflictDebounce?.cancel();
-    if (_mode != 'event' || _eventDate == null || _allDay || _eventTime == null) {
-      if (_conflicts.isNotEmpty || _checkingConflicts) {
-        setState(() {
-          _conflicts = const [];
-          _checkingConflicts = false;
-        });
-      }
+  /// Recompute overlapping events for the chosen window. A "conflict" means the
+  /// chosen [start, end) overlaps another timed event on the same day — it has
+  /// nothing to do with start-vs-end ordering. Only runs once the user has set
+  /// a date, a start time AND an end time that is after the start.
+  void _recomputeConflicts() {
+    final valid = _mode == 'event' &&
+        _eventDate != null &&
+        !_allDay &&
+        _eventTime != null &&
+        _eventEndTime != null &&
+        _toMinutes(_eventEndTime!) > _toMinutes(_eventTime!);
+    if (!valid) {
+      if (_conflicts.isNotEmpty) setState(() => _conflicts = const []);
       return;
     }
-    _conflictDebounce = Timer(const Duration(milliseconds: 400), _runConflictCheck);
+    final start = DateTime(_eventDate!.year, _eventDate!.month, _eventDate!.day,
+        _eventTime!.hour, _eventTime!.minute);
+    final end = DateTime(_eventDate!.year, _eventDate!.month, _eventDate!.day,
+        _eventEndTime!.hour, _eventEndTime!.minute);
+
+    final events = context.read<DashboardProvider>().events;
+    final overlaps = <CalendarEvent>[];
+    for (final e in events) {
+      if (e.allDay) continue; // all-day events don't block a timed slot
+      final eStart = e.eventDate.toLocal();
+      final eEnd = (e.endDate ?? e.eventDate).toLocal();
+      // Half-open overlap: [start,end) intersects [eStart,eEnd].
+      final intersects = start.isBefore(eEnd) && eStart.isBefore(end);
+      // Zero-length (point) events: overlap only if strictly inside the window.
+      final pointInside = eEnd == eStart &&
+          !eStart.isBefore(start) &&
+          eStart.isBefore(end);
+      if (eEnd == eStart ? pointInside : intersects) overlaps.add(e);
+    }
+    setState(() => _conflicts = overlaps);
   }
 
-  Future<void> _runConflictCheck() async {
-    if (!mounted || _eventDate == null || _eventTime == null) return;
-    final time = _eventTime!;
-    final start = DateTime(
-      _eventDate!.year, _eventDate!.month, _eventDate!.day,
-      time.hour, time.minute,
-    );
-    DateTime end;
-    if (_eventEndTime != null &&
-        _toMinutes(_eventEndTime!) > _toMinutes(time)) {
-      end = DateTime(
-        _eventDate!.year, _eventDate!.month, _eventDate!.day,
-        _eventEndTime!.hour, _eventEndTime!.minute,
-      );
+  String _eventTimeLabel(CalendarEvent e) {
+    String hm(DateTime d) =>
+        '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    final s = e.eventDate.toLocal();
+    if (e.endDate != null) return '${hm(s)}–${hm(e.endDate!.toLocal())}';
+    return hm(s);
+  }
+
+  /// Returns a human-readable list of what still needs to be filled in, or an
+  /// empty list when the form is ready to submit.
+  List<String> _missingFields() {
+    final missing = <String>[];
+    if (_titleController.text.trim().isEmpty) {
+      missing.add(_mode == 'task' ? 'a task title' : 'an event title');
+    }
+    if (_mode == 'event') {
+      if (_eventDate == null) missing.add('a date');
+      if (!_allDay) {
+        if (_eventTime == null) missing.add('a start time');
+        if (_eventEndTime == null) missing.add('an end time');
+      }
+    }
+    return missing;
+  }
+
+  void _warnMissing(List<String> missing) {
+    String message;
+    if (missing.length == 1) {
+      message = 'Please add ${missing.first}.';
     } else {
-      end = start.add(const Duration(hours: 1));
+      final last = missing.removeLast();
+      message = 'Please add ${missing.join(', ')} and $last.';
     }
-    setState(() => _checkingConflicts = true);
-    try {
-      final conflicts = await _api.getCalendarConflicts(
-        start: start.toIso8601String(),
-        end: end.toIso8601String(),
-      );
-      if (!mounted) return;
-      setState(() {
-        _conflicts = conflicts;
-        _checkingConflicts = false;
-      });
-    } catch (_) {
-      // Soft-fail — never block the create flow on a conflict-check error.
-      if (!mounted) return;
-      setState(() => _checkingConflicts = false);
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: const Color(0xFFB45309),
+      ),
+    );
   }
 
   Future<void> _submit() async {
-    if (_titleController.text.trim().isEmpty) return;
-    if (_mode == 'event' && _eventDate == null) return;
+    final missing = _missingFields();
+    if (missing.isNotEmpty) {
+      _warnMissing(missing);
+      return;
+    }
+    // End must be after start when a window is set.
+    if (_mode == 'event' &&
+        !_allDay &&
+        _eventTime != null &&
+        _eventEndTime != null &&
+        _toMinutes(_eventEndTime!) <= _toMinutes(_eventTime!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('End time must be after start time.'),
+          backgroundColor: Color(0xFFB45309),
+        ),
+      );
+      return;
+    }
 
     setState(() => _submitting = true);
     final dash = context.read<DashboardProvider>();
@@ -158,7 +202,8 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
 
     if (!mounted) return;
     if (ok) {
-      Navigator.pop(context);
+      // Pop with `true` so the calendar (or any caller) can refresh its list.
+      Navigator.pop(context, true);
     } else {
       setState(() => _submitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -330,7 +375,7 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                           value: _allDay,
                           onChanged: (v) {
                             setState(() => _allDay = v);
-                            _scheduleConflictCheck();
+                            _recomputeConflicts();
                           },
                           activeTrackColor: AppTheme.brand,
                         ),
@@ -413,28 +458,13 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
     );
   }
 
-  /// Amber banner shown when the chosen event start collides with one or
-  /// more existing events. Non-blocking — the user can still submit.
+  /// Amber banner listing the timed events the chosen window overlaps.
+  /// Non-blocking — the user can still submit. Shows each conflict's title and
+  /// time so it's clear *what* it overlaps (not a vague "+N more").
   Widget _buildConflictBanner() {
-    if (_checkingConflicts) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-        child: Row(
-          children: [
-            const SizedBox(
-              width: 14, height: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            const SizedBox(width: 8),
-            Text('Checking for conflicts…',
-                style: TextStyle(fontSize: 12, color: AppTheme.textMuted(context))),
-          ],
-        ),
-      );
-    }
     if (_conflicts.isEmpty) return const SizedBox.shrink();
-    final first = _conflicts.first;
-    final extra = _conflicts.length - 1;
+    final shown = _conflicts.take(3).toList();
+    final extra = _conflicts.length - shown.length;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
       child: Container(
@@ -444,19 +474,40 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
           borderRadius: BorderRadius.circular(AppTheme.radius),
           border: Border.all(color: const Color(0xFFF59E0B)),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.warning_amber_rounded, color: Color(0xFFB45309), size: 18),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                extra == 0
-                    ? 'Conflicts with "${first.title}"'
-                    : 'Conflicts with "${first.title}" + $extra more',
-                style: const TextStyle(
-                    fontSize: 12, color: Color(0xFF92400E), fontWeight: FontWeight.w500),
-              ),
+            Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    color: Color(0xFFB45309), size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  _conflicts.length == 1
+                      ? 'Overlaps 1 event'
+                      : 'Overlaps ${_conflicts.length} events',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF92400E),
+                      fontWeight: FontWeight.w600),
+                ),
+              ],
             ),
+            const SizedBox(height: 6),
+            ...shown.map((e) => Padding(
+                  padding: const EdgeInsets.only(left: 26, top: 2),
+                  child: Text(
+                    '${e.title} · ${_eventTimeLabel(e)}',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF92400E)),
+                  ),
+                )),
+            if (extra > 0)
+              Padding(
+                padding: const EdgeInsets.only(left: 26, top: 2),
+                child: Text('+ $extra more',
+                    style: const TextStyle(
+                        fontSize: 12, color: Color(0xFF92400E))),
+              ),
           ],
         ),
       ),
@@ -477,7 +528,7 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
           value: _eventDate,
           onPicked: (d) {
             setState(() => _eventDate = d);
-            _scheduleConflictCheck();
+            _recomputeConflicts();
           },
           allowPast: true,
         ),
@@ -498,19 +549,10 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                     _timeField(
                       value: _eventTime,
                       onPicked: (t) {
-                        setState(() {
-                          _eventTime = t;
-                          // Auto-suggest end = start + 1h if end is empty or now before start.
-                          if (_eventEndTime == null ||
-                              _toMinutes(_eventEndTime!) <= _toMinutes(t)) {
-                            final endMin = (t.hour * 60 + t.minute + 60) % (24 * 60);
-                            _eventEndTime = TimeOfDay(
-                              hour: endMin ~/ 60,
-                              minute: endMin % 60,
-                            );
-                          }
-                        });
-                        _scheduleConflictCheck();
+                        // No auto-fill — the user sets start and end themselves.
+                        // The conflict check only runs once both are in.
+                        setState(() => _eventTime = t);
+                        _recomputeConflicts();
                       },
                     ),
                   ],
@@ -531,6 +573,7 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                       value: _eventEndTime,
                       onPicked: (t) {
                         setState(() => _eventEndTime = t);
+                        _recomputeConflicts();
                       },
                     ),
                   ],
@@ -541,11 +584,11 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
           if (_eventTime != null &&
               _eventEndTime != null &&
               _toMinutes(_eventEndTime!) <= _toMinutes(_eventTime!))
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
               child: Text(
                 'End time must be after start time',
-                style: const TextStyle(fontSize: 12, color: Color(0xFFB45309)),
+                style: TextStyle(fontSize: 12, color: Color(0xFFB45309)),
               ),
             ),
         ],
