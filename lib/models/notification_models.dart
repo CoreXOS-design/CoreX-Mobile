@@ -161,23 +161,36 @@ class OverdueItem {
       );
 }
 
-/// `GET /api/notification-preferences`
+/// `GET /api/v1/notification-preferences`
 class NotificationPreferencesData {
+  final String mode; // "user" | "agency"
+  final bool locked;
   final MasterChannels master;
-  final bool agencyControlled;
+  final OpenHours openHours;
+  int cooldownMinutes;
   final List<PreferenceGroup> groups;
 
   NotificationPreferencesData({
+    required this.mode,
+    required this.locked,
     required this.master,
-    required this.agencyControlled,
+    required this.openHours,
+    required this.cooldownMinutes,
     required this.groups,
   });
 
+  /// Back-compat alias used by older call sites.
+  bool get agencyControlled => locked;
+
   factory NotificationPreferencesData.fromJson(Map<String, dynamic> j) =>
       NotificationPreferencesData(
+        mode: j['mode']?.toString() ?? 'user',
+        locked: j['locked'] == true || j['agency_controlled'] == true,
         master: MasterChannels.fromJson(
             Map<String, dynamic>.from(j['master'] ?? {})),
-        agencyControlled: j['agency_controlled'] == true,
+        openHours: OpenHours.fromJson(
+            Map<String, dynamic>.from(j['open_hours'] ?? {})),
+        cooldownMinutes: _intOrNull(j['cooldown_minutes']) ?? 360,
         groups: (j['groups'] as List? ?? [])
             .whereType<Map>()
             .map((e) => PreferenceGroup.fromJson(Map<String, dynamic>.from(e)))
@@ -185,10 +198,32 @@ class NotificationPreferencesData {
       );
 
   Map<String, dynamic> toJson() => {
+        'mode': mode,
+        'locked': locked,
         'master': master.toJson(),
-        'agency_controlled': agencyControlled,
+        'open_hours': openHours.toJson(),
+        'cooldown_minutes': cooldownMinutes,
         'groups': groups.map((g) => g.toJson()).toList(),
       };
+}
+
+class OpenHours {
+  bool enabled;
+  String start; // "HH:MM"
+  String end;   // "HH:MM"
+
+  OpenHours({required this.enabled, required this.start, required this.end});
+
+  factory OpenHours.fromJson(Map<String, dynamic> j) => OpenHours(
+        enabled: j['enabled'] == true,
+        start: j['start']?.toString() ?? '09:00',
+        end: j['end']?.toString() ?? '17:00',
+      );
+
+  Map<String, dynamic> toJson() =>
+      {'enabled': enabled, 'start': start, 'end': end};
+
+  OpenHours copy() => OpenHours(enabled: enabled, start: start, end: end);
 }
 
 class MasterChannels {

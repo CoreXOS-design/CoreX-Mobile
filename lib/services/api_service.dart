@@ -682,20 +682,32 @@ class ApiService {
     throw ApiException(response.statusCode, 'Failed to load events');
   }
 
-  /// `GET /command-center/calendar?start=YYYY-MM-DD&end=YYYY-MM-DD`.
-  /// Range fetch used by the Calendar screen (Month/Week/Day/Agenda) so the
-  /// view is paged tightly around what's visible (+1 day padding handled by
-  /// the caller).
+  /// `GET /v1/mobile/calendar?year=YYYY&month=MM`.
+  /// Range fetch used by the Calendar screen (Month/Week/Day/Agenda).
+  /// Scoped server-side to the authenticated user and the same visible-class
+  /// filter the web cockpit uses.
   Future<List<CalendarEvent>> getCalendarRange({
     required String start,
     required String end,
   }) async {
     if (useMockData) return _mockEvents();
-    final uri = Uri.parse('$baseUrl/command-center/calendar').replace(
-      queryParameters: {'start': start, 'end': end},
+    final s = DateTime.tryParse(start);
+    final e = DateTime.tryParse(end);
+    final mid = (s != null && e != null)
+        ? DateTime.fromMillisecondsSinceEpoch(
+            (s.millisecondsSinceEpoch + e.millisecondsSinceEpoch) ~/ 2)
+        : (s ?? e ?? DateTime.now());
+    final uri = Uri.parse('$baseUrl/v1/mobile/calendar').replace(
+      queryParameters: {
+        'year': '${mid.year}',
+        'month': mid.month.toString().padLeft(2, '0'),
+      },
     );
+    debugPrint('[calendar] GET $uri');
     final response =
         await http.get(uri, headers: await _headers()).timeout(_timeout);
+    debugPrint('[calendar] ← ${response.statusCode} '
+        '(${response.body.length} bytes) ${response.body.length > 800 ? "${response.body.substring(0, 800)}…" : response.body}');
     if (response.statusCode == 200) {
       final body = jsonDecode(response.body);
       final list = body is List
@@ -709,16 +721,16 @@ class ApiService {
     throw ApiException(response.statusCode, 'Failed to load calendar range');
   }
 
-  /// Spec endpoint: `GET /command-center/calendar?year=YYYY&month=MM`.
-  /// Returns the events list AND a pre-built `by_date` map keyed by
-  /// `YYYY-MM-DD`. Used by the Calendar screen's month/agenda views.
+  /// `GET /v1/mobile/calendar?year=YYYY&month=MM`.
+  /// Returns the events list AND a client-grouped `by_date` map keyed by
+  /// `YYYY-MM-DD`. Scoped server-side to the authenticated user.
   Future<({List<CalendarEvent> events, Map<String, List<CalendarEvent>> byDate})>
       getCalendarByMonth(int year, int month) async {
     if (useMockData) {
       final ev = _mockEvents();
       return (events: ev, byDate: <String, List<CalendarEvent>>{});
     }
-    final uri = Uri.parse('$baseUrl/command-center/calendar').replace(queryParameters: {
+    final uri = Uri.parse('$baseUrl/v1/mobile/calendar').replace(queryParameters: {
       'year': '$year',
       'month': month.toString().padLeft(2, '0'),
     });
@@ -730,16 +742,12 @@ class ApiService {
           .map((e) => CalendarEvent.fromJson(Map<String, dynamic>.from(e)))
           .toList();
       final byDate = <String, List<CalendarEvent>>{};
-      final rawMap = body['by_date'];
-      if (rawMap is Map) {
-        rawMap.forEach((k, v) {
-          if (v is List) {
-            byDate[k.toString()] = v
-                .whereType<Map>()
-                .map((e) => CalendarEvent.fromJson(Map<String, dynamic>.from(e)))
-                .toList();
-          }
-        });
+      for (final ev in events) {
+        final d = ev.eventDate;
+        final key = '${d.year.toString().padLeft(4, '0')}-'
+            '${d.month.toString().padLeft(2, '0')}-'
+            '${d.day.toString().padLeft(2, '0')}';
+        (byDate[key] ??= <CalendarEvent>[]).add(ev);
       }
       return (events: events, byDate: byDate);
     }
@@ -1520,9 +1528,13 @@ class ApiService {
       try {
         final json = jsonDecode(body);
         if (json is Map) {
+          final aid = json['analysis_id'];
           return UploadedImage(
             url: json['url']?.toString() ?? '',
             roomTag: json['room_tag']?.toString(),
+            analysisId: aid is num
+                ? aid.toInt()
+                : (aid is String ? int.tryParse(aid) : null),
           );
         }
       } catch (_) {}
@@ -2093,7 +2105,7 @@ class ApiService {
   }) async {
     if (useMockData) return;
     final response = await http.post(
-      Uri.parse('$baseUrl/device-tokens'),
+      Uri.parse('$baseUrl/v1/device-tokens'),
       headers: await _headers(),
       body: jsonEncode({
         'platform': platform,
@@ -2110,7 +2122,7 @@ class ApiService {
   Future<void> revokeDeviceToken(String token) async {
     if (useMockData) return;
     final response = await http.delete(
-      Uri.parse('$baseUrl/device-tokens/${Uri.encodeComponent(token)}'),
+      Uri.parse('$baseUrl/v1/device-tokens/${Uri.encodeComponent(token)}'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -2186,7 +2198,7 @@ class ApiService {
 
   Future<NotificationPreferencesData> getNotificationPreferences() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/notification-preferences'),
+      Uri.parse('$baseUrl/v1/notification-preferences'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -2199,17 +2211,33 @@ class ApiService {
 
   /// Returns saved count on success. Throws [AgencyControlledException] when
   /// the server returns 409 with `{ error: "agency_controlled" }`.
+  ///
+  /// When [lockedPushOnly] is true (agency-locked screen), only `master.push`
+  /// is sent — every other field is suppressed to keep the wire clean.
   Future<int> updateNotificationPreferences({
     MasterChannels? master,
-    required List<NotificationPreference> preferences,
+    OpenHours? openHours,
+    int? cooldownMinutes,
+    List<NotificationPreference> preferences = const [],
+    bool lockedPushOnly = false,
   }) async {
-    final payload = {
-      if (master != null) 'master': master.toJson(),
-      'preferences': preferences.map((p) => p.toJson()).toList(),
-    };
+    final Map<String, dynamic> payload;
+    if (lockedPushOnly) {
+      payload = {
+        if (master != null) 'master': {'push': master.push},
+      };
+    } else {
+      payload = {
+        if (master != null) 'master': master.toJson(),
+        if (openHours != null) 'open_hours': openHours.toJson(),
+        if (cooldownMinutes != null) 'cooldown_minutes': cooldownMinutes,
+        if (preferences.isNotEmpty)
+          'preferences': preferences.map((p) => p.toJson()).toList(),
+      };
+    }
 
     final response = await http.put(
-      Uri.parse('$baseUrl/notification-preferences'),
+      Uri.parse('$baseUrl/v1/notification-preferences'),
       headers: await _headers(),
       body: jsonEncode(payload),
     ).timeout(_timeout);

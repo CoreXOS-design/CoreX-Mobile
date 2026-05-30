@@ -5,6 +5,10 @@ import '../../providers/notifications_provider.dart';
 import '../../services/messaging_service.dart';
 import '../../theme.dart';
 
+/// Dynamic notification preferences screen rendered from
+/// `GET /api/v1/notification-preferences`. Nothing on this screen is
+/// hard-coded — sections, pillars, event types, threshold units and bounds
+/// all come from the server payload.
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({super.key});
 
@@ -15,8 +19,6 @@ class NotificationSettingsScreen extends StatefulWidget {
 
 class _NotificationSettingsScreenState
     extends State<NotificationSettingsScreen> {
-  final Set<String> _expanded = {'property'};
-
   @override
   void initState() {
     super.initState();
@@ -29,14 +31,14 @@ class _NotificationSettingsScreenState
   Widget build(BuildContext context) {
     final p = context.watch<NotificationsProvider>();
     final data = p.prefs;
-    final locked = data?.agencyControlled ?? false;
+    final locked = data?.locked ?? false;
 
     return Scaffold(
       backgroundColor: AppTheme.background(context),
       appBar: AppBar(
         title: const Text('Notifications'),
         actions: [
-          if (data != null && !locked)
+          if (data != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: TextButton(
@@ -69,22 +71,17 @@ class _NotificationSettingsScreenState
                 if (locked) _agencyBanner(context),
                 _testButton(context),
                 const SizedBox(height: 12),
-                _MasterSwitches(master: data.master, locked: locked, onChanged: () {
-                  setState(() {});
-                }),
-                const SizedBox(height: 8),
-                for (final group in data.groups)
-                  _PillarGroup(
-                    group: group,
-                    expanded: _expanded.contains(group.pillar),
-                    locked: locked,
-                    onToggleExpand: () => setState(() {
-                      if (!_expanded.add(group.pillar)) {
-                        _expanded.remove(group.pillar);
-                      }
-                    }),
-                    onChanged: () => setState(() {}),
-                  ),
+                _MasterSwitches(
+                  master: data.master,
+                  locked: locked,
+                  onChanged: () => setState(() {}),
+                ),
+                const SizedBox(height: 12),
+                _OpenHoursCard(
+                  openHours: data.openHours,
+                  locked: locked,
+                  onChanged: () => setState(() {}),
+                ),
               ],
             ),
     );
@@ -102,9 +99,8 @@ class _NotificationSettingsScreenState
       final p = context.read<NotificationsProvider>();
       messenger.showSnackBar(
         SnackBar(
-          content: Text(p.prefs?.agencyControlled == true
-              ? 'Locked by agency — settings frozen.'
-              : (p.prefsError ?? 'Failed to save')),
+          content: Text(p.prefsError ?? 'Failed to save'),
+          backgroundColor: const Color(0xFFef4444),
         ),
       );
     }
@@ -121,7 +117,8 @@ class _NotificationSettingsScreenState
           try {
             await MessagingService.instance.sendTestNotification();
             messenger.showSnackBar(const SnackBar(
-              content: Text('Test notification sent — check your notification bar.'),
+              content: Text(
+                  'Test notification sent — check your notification bar.'),
             ));
           } catch (e) {
             messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
@@ -147,7 +144,8 @@ class _NotificationSettingsScreenState
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Your agency manages notification settings centrally.',
+              'Your agency has locked these settings. You can still control '
+              'mobile push for your own device.',
               style: TextStyle(
                   fontSize: 12, color: AppTheme.textPrimary(context)),
             ),
@@ -157,6 +155,42 @@ class _NotificationSettingsScreenState
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+
+class _Card extends StatelessWidget {
+  final Widget child;
+  const _Card({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.surface(context),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        border: Border.all(color: AppTheme.borderColor(context)),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String label;
+  const _SectionLabel(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(label,
+        style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textPrimary(context)));
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 class _MasterSwitches extends StatelessWidget {
   final MasterChannels master;
@@ -168,26 +202,23 @@ class _MasterSwitches extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.surface(context),
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppTheme.borderColor(context)),
-      ),
+    // Push remains editable even when locked — it's a per-device control.
+    return _Card(
       child: Column(
         children: [
-          _row(context, 'In-app', master.inApp, (v) {
+          const _SectionLabel('Channels'),
+          const SizedBox(height: 8),
+          _row(context, 'In-app', master.inApp, locked, (v) {
             master.inApp = v;
             onChanged();
           }),
           _divider(context),
-          _row(context, 'Email', master.email, (v) {
+          _row(context, 'Email', master.email, locked, (v) {
             master.email = v;
             onChanged();
           }),
           _divider(context),
-          _row(context, 'Push', master.push, (v) {
+          _row(context, 'Push (this device)', master.push, false, (v) {
             master.push = v;
             onChanged();
           }),
@@ -196,7 +227,7 @@ class _MasterSwitches extends StatelessWidget {
     );
   }
 
-  Widget _row(BuildContext context, String label, bool value,
+  Widget _row(BuildContext context, String label, bool value, bool disabled,
       ValueChanged<bool> onTap) {
     return Row(
       children: [
@@ -209,7 +240,7 @@ class _MasterSwitches extends StatelessWidget {
         ),
         Switch(
           value: value,
-          onChanged: locked ? null : onTap,
+          onChanged: disabled ? null : onTap,
           activeTrackColor: AppTheme.brand,
         ),
       ],
@@ -220,258 +251,123 @@ class _MasterSwitches extends StatelessWidget {
       Divider(height: 1, color: AppTheme.borderColor(context));
 }
 
-class _PillarGroup extends StatelessWidget {
-  final PreferenceGroup group;
-  final bool expanded;
-  final bool locked;
-  final VoidCallback onToggleExpand;
-  final VoidCallback onChanged;
+// ---------------------------------------------------------------------------
 
-  const _PillarGroup({
-    required this.group,
-    required this.expanded,
-    required this.locked,
-    required this.onToggleExpand,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.surface(context),
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppTheme.borderColor(context)),
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: onToggleExpand,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(group.label,
-                        style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textPrimary(context))),
-                  ),
-                  Icon(
-                    expanded
-                        ? Icons.keyboard_arrow_up_rounded
-                        : Icons.keyboard_arrow_down_rounded,
-                    color: AppTheme.textSecondary(context),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (expanded) ...[
-            Divider(height: 1, color: AppTheme.borderColor(context)),
-            for (var i = 0; i < group.items.length; i++) ...[
-              if (i > 0) Divider(height: 1, color: AppTheme.borderColor(context)),
-              _PrefRow(
-                pref: group.items[i],
-                locked: locked,
-                onChanged: onChanged,
-              ),
-            ],
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _PrefRow extends StatelessWidget {
-  final NotificationPreference pref;
+class _OpenHoursCard extends StatelessWidget {
+  final OpenHours openHours;
   final bool locked;
   final VoidCallback onChanged;
 
-  const _PrefRow({
-    required this.pref,
-    required this.locked,
-    required this.onChanged,
-  });
+  const _OpenHoursCard(
+      {required this.openHours,
+      required this.locked,
+      required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+    return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(pref.label,
-                        style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: AppTheme.textPrimary(context))),
-                    if (pref.description.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(pref.description,
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: AppTheme.textSecondary(context))),
-                    ],
-                  ],
-                ),
-              ),
+              const Expanded(child: _SectionLabel('Open hours')),
               Switch(
-                value: pref.enabled,
+                value: openHours.enabled,
                 onChanged: locked
                     ? null
                     : (v) {
-                        pref.enabled = v;
+                        openHours.enabled = v;
                         onChanged();
                       },
                 activeTrackColor: AppTheme.brand,
               ),
             ],
           ),
-          if (pref.enabled && pref.thresholdUnit != 'none')
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: _ThresholdStepper(pref: pref, locked: locked, onChanged: onChanged),
-            ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              _channelChip(context, 'In-app', pref.channelInApp, (v) {
-                pref.channelInApp = v;
-                onChanged();
-              }),
-              const SizedBox(width: 6),
-              _channelChip(context, 'Email', pref.channelEmail, (v) {
-                pref.channelEmail = v;
-                onChanged();
-              }),
-              const SizedBox(width: 6),
-              _channelChip(context, 'Push', pref.channelPush, (v) {
-                pref.channelPush = v;
-                onChanged();
-              }),
-            ],
+          const SizedBox(height: 4),
+          Text(
+            'Outside this window, email notifications are suppressed. '
+            'Push and in-app still arrive.',
+            style: TextStyle(
+                fontSize: 11, color: AppTheme.textSecondary(context)),
           ),
+          if (openHours.enabled) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _timeField(context, 'Start', openHours.start, (t) {
+                    openHours.start = t;
+                    onChanged();
+                  }),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _timeField(context, 'End', openHours.end, (t) {
+                    openHours.end = t;
+                    onChanged();
+                  }),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _channelChip(BuildContext context, String label, bool active,
-      ValueChanged<bool> onTap) {
-    final disabled = locked || !pref.enabled;
-    return GestureDetector(
-      onTap: disabled ? null : () => onTap(!active),
+  Widget _timeField(BuildContext context, String label, String value,
+      ValueChanged<String> onPick) {
+    return InkWell(
+      onTap: locked
+          ? null
+          : () async {
+              final parts = value.split(':');
+              final initial = TimeOfDay(
+                hour: int.tryParse(parts.elementAt(0)) ?? 9,
+                minute:
+                    int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0,
+              );
+              final picked = await showTimePicker(
+                context: context,
+                initialTime: initial,
+              );
+              if (picked != null) {
+                final hh = picked.hour.toString().padLeft(2, '0');
+                final mm = picked.minute.toString().padLeft(2, '0');
+                onPick('$hh:$mm');
+              }
+            },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: active
-              ? AppTheme.brand.withValues(alpha: 0.14)
-              : AppTheme.surface2(context),
+          color: AppTheme.surface2(context),
           borderRadius: BorderRadius.circular(AppTheme.radius),
-          border: Border.all(
-            color: active
-                ? AppTheme.brand.withValues(alpha: 0.5)
-                : AppTheme.borderColor(context),
-          ),
+          border: Border.all(color: AppTheme.borderColor(context)),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              active ? Icons.check_box : Icons.check_box_outline_blank,
-              size: 14,
-              color: active
-                  ? AppTheme.brand
-                  : (disabled
-                      ? AppTheme.textMuted(context)
-                      : AppTheme.textSecondary(context)),
+            Icon(Icons.schedule, size: 16,
+                color: AppTheme.textSecondary(context)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: AppTheme.textSecondary(context))),
+                  Text(value,
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary(context))),
+                ],
+              ),
             ),
-            const SizedBox(width: 5),
-            Text(label,
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: active
-                        ? AppTheme.brand
-                        : (disabled
-                            ? AppTheme.textMuted(context)
-                            : AppTheme.textSecondary(context)))),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _ThresholdStepper extends StatelessWidget {
-  final NotificationPreference pref;
-  final bool locked;
-  final VoidCallback onChanged;
-
-  const _ThresholdStepper(
-      {required this.pref, required this.locked, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final value = pref.threshold ?? pref.thresholdMin ?? 1;
-    final min = pref.thresholdMin ?? 1;
-    final max = pref.thresholdMax ?? 365;
-    final disabled = locked;
-
-    return Row(
-      children: [
-        Text('Threshold:',
-            style: TextStyle(
-                fontSize: 11, color: AppTheme.textSecondary(context))),
-        const SizedBox(width: 8),
-        _stepBtn(context, Icons.remove, disabled || value <= min, () {
-          pref.threshold = value - 1;
-          onChanged();
-        }),
-        SizedBox(
-          width: 36,
-          child: Center(
-            child: Text('$value',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary(context))),
-          ),
-        ),
-        _stepBtn(context, Icons.add, disabled || value >= max, () {
-          pref.threshold = value + 1;
-          onChanged();
-        }),
-        const SizedBox(width: 6),
-        Text(pref.thresholdUnit,
-            style: TextStyle(
-                fontSize: 11, color: AppTheme.textSecondary(context))),
-      ],
-    );
-  }
-
-  Widget _stepBtn(
-      BuildContext context, IconData icon, bool disabled, VoidCallback onTap) {
-    return InkWell(
-      onTap: disabled ? null : onTap,
-      borderRadius: BorderRadius.circular(4),
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: Icon(icon,
-            size: 16,
-            color: disabled
-                ? AppTheme.textMuted(context)
-                : AppTheme.brand),
       ),
     );
   }

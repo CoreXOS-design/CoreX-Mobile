@@ -35,6 +35,7 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
   String _eventType = 'manual';
   DateTime? _eventDate;
   TimeOfDay? _eventTime;
+  TimeOfDay? _eventEndTime;
   bool _allDay = false;
 
   // Conflict check (debounced 400ms on event date/time change).
@@ -61,9 +62,12 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
   /// Debounces to avoid hammering the API while the user picks.
   void _scheduleConflictCheck() {
     _conflictDebounce?.cancel();
-    if (_mode != 'event' || _eventDate == null || _allDay) {
-      if (_conflicts.isNotEmpty) {
-        setState(() => _conflicts = const []);
+    if (_mode != 'event' || _eventDate == null || _allDay || _eventTime == null) {
+      if (_conflicts.isNotEmpty || _checkingConflicts) {
+        setState(() {
+          _conflicts = const [];
+          _checkingConflicts = false;
+        });
       }
       return;
     }
@@ -71,13 +75,22 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
   }
 
   Future<void> _runConflictCheck() async {
-    if (!mounted || _eventDate == null) return;
-    final time = _eventTime ?? const TimeOfDay(hour: 9, minute: 0);
+    if (!mounted || _eventDate == null || _eventTime == null) return;
+    final time = _eventTime!;
     final start = DateTime(
       _eventDate!.year, _eventDate!.month, _eventDate!.day,
       time.hour, time.minute,
     );
-    final end = start.add(const Duration(hours: 1));
+    DateTime end;
+    if (_eventEndTime != null &&
+        _toMinutes(_eventEndTime!) > _toMinutes(time)) {
+      end = DateTime(
+        _eventDate!.year, _eventDate!.month, _eventDate!.day,
+        _eventEndTime!.hour, _eventEndTime!.minute,
+      );
+    } else {
+      end = start.add(const Duration(hours: 1));
+    }
     setState(() => _checkingConflicts = true);
     try {
       final conflicts = await _api.getCalendarConflicts(
@@ -121,9 +134,18 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
         _eventDate!.year, _eventDate!.month, _eventDate!.day,
         time.hour, time.minute,
       );
+      String? endIso;
+      if (!_allDay && _eventEndTime != null) {
+        final end = DateTime(
+          _eventDate!.year, _eventDate!.month, _eventDate!.day,
+          _eventEndTime!.hour, _eventEndTime!.minute,
+        );
+        endIso = end.isAfter(dt) ? end.toIso8601String() : null;
+      }
       ok = await dash.createEvent(
         title: _titleController.text.trim(),
         eventDate: dt.toIso8601String(),
+        endDate: endIso,
         eventType: _eventType,
         priority: _priority,
         allDay: _allDay,
@@ -442,78 +464,129 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
   }
 
   Widget _buildEventDateTime() {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        Text('Date',
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: AppTheme.textSecondary(context))),
+        const SizedBox(height: 8),
+        _datePicker(
+          value: _eventDate,
+          onPicked: (d) {
+            setState(() => _eventDate = d);
+            _scheduleConflictCheck();
+          },
+          allowPast: true,
+        ),
+        if (!_allDay) ...[
+          const SizedBox(height: 12),
+          Row(
             children: [
-              Text('Date',
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: AppTheme.textSecondary(context))),
-              const SizedBox(height: 8),
-              _datePicker(
-                value: _eventDate,
-                onPicked: (d) {
-                  setState(() => _eventDate = d);
-                  _scheduleConflictCheck();
-                },
-                allowPast: true,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Start time',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.textSecondary(context))),
+                    const SizedBox(height: 8),
+                    _timeField(
+                      value: _eventTime,
+                      onPicked: (t) {
+                        setState(() {
+                          _eventTime = t;
+                          // Auto-suggest end = start + 1h if end is empty or now before start.
+                          if (_eventEndTime == null ||
+                              _toMinutes(_eventEndTime!) <= _toMinutes(t)) {
+                            final endMin = (t.hour * 60 + t.minute + 60) % (24 * 60);
+                            _eventEndTime = TimeOfDay(
+                              hour: endMin ~/ 60,
+                              minute: endMin % 60,
+                            );
+                          }
+                        });
+                        _scheduleConflictCheck();
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('End time',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.textSecondary(context))),
+                    const SizedBox(height: 8),
+                    _timeField(
+                      value: _eventEndTime,
+                      onPicked: (t) {
+                        setState(() => _eventEndTime = t);
+                      },
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-        ),
-        if (!_allDay) ...[
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Time',
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: AppTheme.textSecondary(context))),
-                const SizedBox(height: 8),
-                GestureDetector(
-                  onTap: () async {
-                    final picked = await showTimePicker(
-                      context: context,
-                      initialTime: _eventTime ?? TimeOfDay.now(),
-                    );
-                    if (picked != null) {
-                      setState(() => _eventTime = picked);
-                      _scheduleConflictCheck();
-                    }
-                  },
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surface2(context),
-                      borderRadius: BorderRadius.circular(AppTheme.radius),
-                      border: Border.all(color: AppTheme.borderColor(context)),
-                    ),
-                    child: Text(
-                      _eventTime != null
-                          ? '${_eventTime!.hour.toString().padLeft(2, '0')}:${_eventTime!.minute.toString().padLeft(2, '0')}'
-                          : 'Select',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: _eventTime != null
-                            ? AppTheme.textPrimary(context)
-                            : AppTheme.textMuted(context),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+          if (_eventTime != null &&
+              _eventEndTime != null &&
+              _toMinutes(_eventEndTime!) <= _toMinutes(_eventTime!))
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'End time must be after start time',
+                style: const TextStyle(fontSize: 12, color: Color(0xFFB45309)),
+              ),
             ),
-          ),
         ],
       ],
+    );
+  }
+
+  int _toMinutes(TimeOfDay t) => t.hour * 60 + t.minute;
+
+  Widget _timeField({
+    required TimeOfDay? value,
+    required ValueChanged<TimeOfDay> onPicked,
+  }) {
+    return GestureDetector(
+      onTap: () async {
+        final picked = await showTimePicker(
+          context: context,
+          initialTime: value ?? TimeOfDay.now(),
+        );
+        if (picked != null) onPicked(picked);
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppTheme.surface2(context),
+          borderRadius: BorderRadius.circular(AppTheme.radius),
+          border: Border.all(color: AppTheme.borderColor(context)),
+        ),
+        child: Text(
+          value != null
+              ? '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}'
+              : 'Select',
+          style: TextStyle(
+            fontSize: 14,
+            color: value != null
+                ? AppTheme.textPrimary(context)
+                : AppTheme.textMuted(context),
+          ),
+        ),
+      ),
     );
   }
 

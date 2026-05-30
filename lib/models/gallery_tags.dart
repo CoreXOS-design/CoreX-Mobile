@@ -55,9 +55,13 @@ class GalleryTagsData {
 }
 
 /// Result of a successful `POST /api/mobile/properties/{id}/images`.
+///
+/// [analysisId] is non-null only when image-AI is enabled for the user +
+/// agency; the caller uses it to drive the `/ai-suggestions` poll batch.
 class UploadedImage {
   final String url;
   final String? roomTag;
+  final int? analysisId;
 
-  const UploadedImage({required this.url, this.roomTag});
+  const UploadedImage({required this.url, this.roomTag, this.analysisId});
 }

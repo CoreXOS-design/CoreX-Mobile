@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../models/gallery_tags.dart';
 import '../models/property.dart';
 import '../models/visibility.dart';
 import '../services/api_service.dart';
@@ -101,13 +102,20 @@ class PropertyProvider extends ChangeNotifier {
   }
 
   Future<bool> uploadImage(int propertyId, File image, String? roomTag) async {
+    final result = await uploadImageWithResult(propertyId, image, roomTag);
+    return result != null;
+  }
+
+  /// Same as [uploadImage] but returns the [UploadedImage] so callers can
+  /// pick up the AI [UploadedImage.analysisId] when image-AI is enabled.
+  Future<UploadedImage?> uploadImageWithResult(
+      int propertyId, File image, String? roomTag) async {
     try {
-      await _api.uploadPropertyImage(propertyId, image, roomTag);
-      return true;
+      return await _api.uploadPropertyImage(propertyId, image, roomTag);
     } catch (e) {
       error = e.toString();
       notifyListeners();
-      return false;
+      return null;
     }
   }
 }

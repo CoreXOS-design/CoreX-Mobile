@@ -32,12 +32,18 @@ dependencies:
   tabler_icons: ^2.5.0+1
   share_plus: ^10.0.0
   gal: ^2.3.0
+  record: ^5.2.1
+  path_provider: ^2.1.4
 
 dependency_overrides:
   # Patched local copy: original tabler_icons subclasses IconData, which is
   # now `final` in Flutter >= 3.40 and breaks the build.
   tabler_icons:
     path: third_party/tabler_icons
+  # record_linux 0.7.2 (transitively pulled by record 5.2.1) doesn't implement
+  # the startStream / updated hasPermission API on record_platform_interface
+  # 1.6.0, breaking even Android builds. Force the newer record_linux.
+  record_linux: ^1.0.0
 
 dev_dependencies:
   flutter_test:

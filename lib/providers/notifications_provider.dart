@@ -6,7 +6,15 @@ import '../models/notification_models.dart';
 import '../services/api_service.dart';
 
 class NotificationsProvider extends ChangeNotifier {
-  static const _kPrefsCacheKey = 'notification_prefs_cache_v1';
+  static const _kPrefsCacheKey = 'notification_prefs_cache_v2';
+  static const _kPrefsCacheStampKey = 'notification_prefs_cache_v2_at';
+  static const Duration _prefsCacheTtl = Duration(minutes: 5);
+  DateTime? _prefsFetchedAt;
+
+  /// Whether the local user has push enabled (mirrors `master.push`). Used by
+  /// [MessagingService] to belt-and-braces suppress foreground notifications
+  /// when push is locally disabled.
+  bool get localPushEnabled => _prefs?.master.push ?? true;
 
   final ApiService _api = ApiService();
 
@@ -136,7 +144,18 @@ class NotificationsProvider extends ChangeNotifier {
     if (!force) {
       final cached = await _readCachedPrefs();
       if (cached != null) {
-        _prefs = cached;
+        _prefs = cached.data;
+        _prefsFetchedAt = cached.fetchedAt;
+      }
+      // Cache is fresh enough — skip the network hop. Settings can change
+      // agency-side, so we cap this at _prefsCacheTtl (5 min).
+      final stamp = _prefsFetchedAt;
+      if (stamp != null &&
+          DateTime.now().difference(stamp) < _prefsCacheTtl &&
+          _prefs != null) {
+        _loadingPrefs = false;
+        notifyListeners();
+        return;
       }
     }
     notifyListeners();
@@ -144,6 +163,7 @@ class NotificationsProvider extends ChangeNotifier {
     try {
       final fresh = await _api.getNotificationPreferences();
       _prefs = fresh;
+      _prefsFetchedAt = DateTime.now();
       await _writeCachedPrefs(fresh);
     } catch (e) {
       _prefsError = e.toString();
@@ -158,18 +178,27 @@ class NotificationsProvider extends ChangeNotifier {
   Future<bool> savePreferences() async {
     final p = _prefs;
     if (p == null) return false;
-    if (p.agencyControlled) return false;
 
     _saving = true;
     _prefsError = null;
     notifyListeners();
 
-    final flat = p.groups.expand((g) => g.items).toList();
     try {
-      await _api.updateNotificationPreferences(
-        master: p.master,
-        preferences: flat,
-      );
+      if (p.locked) {
+        // Locked: server ignores anything but master.push — keep the wire clean.
+        await _api.updateNotificationPreferences(
+          master: p.master,
+          lockedPushOnly: true,
+        );
+      } else {
+        final flat = p.groups.expand((g) => g.items).toList();
+        await _api.updateNotificationPreferences(
+          master: p.master,
+          openHours: p.openHours,
+          cooldownMinutes: p.cooldownMinutes,
+          preferences: flat,
+        );
+      }
       await _writeCachedPrefs(p);
       _saving = false;
       notifyListeners();
@@ -177,8 +206,11 @@ class NotificationsProvider extends ChangeNotifier {
     } on AgencyControlledException {
       // Server flipped to agency-controlled since the form loaded.
       _prefs = NotificationPreferencesData(
+        mode: 'agency',
+        locked: true,
         master: p.master,
-        agencyControlled: true,
+        openHours: p.openHours,
+        cooldownMinutes: p.cooldownMinutes,
         groups: p.groups,
       );
       _saving = false;
@@ -192,13 +224,19 @@ class NotificationsProvider extends ChangeNotifier {
     }
   }
 
-  Future<NotificationPreferencesData?> _readCachedPrefs() async {
+  Future<({NotificationPreferencesData data, DateTime fetchedAt})?>
+      _readCachedPrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_kPrefsCacheKey);
       if (raw == null) return null;
-      return NotificationPreferencesData.fromJson(
+      final data = NotificationPreferencesData.fromJson(
           Map<String, dynamic>.from(jsonDecode(raw)));
+      final stamp = prefs.getInt(_kPrefsCacheStampKey);
+      final fetchedAt = stamp != null
+          ? DateTime.fromMillisecondsSinceEpoch(stamp)
+          : DateTime.fromMillisecondsSinceEpoch(0);
+      return (data: data, fetchedAt: fetchedAt);
     } catch (_) {
       return null;
     }
@@ -208,6 +246,8 @@ class NotificationsProvider extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kPrefsCacheKey, jsonEncode(data.toJson()));
+      await prefs.setInt(
+          _kPrefsCacheStampKey, DateTime.now().millisecondsSinceEpoch);
     } catch (_) {}
   }
 

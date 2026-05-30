@@ -13,7 +13,14 @@ import 'shared/quick_add_sheet.dart';
 
 class CalendarScreen extends StatefulWidget {
   final bool embedded;
-  const CalendarScreen({super.key, this.embedded = false});
+  final DateTime? initialDate;
+  final int? openEventId;
+  const CalendarScreen({
+    super.key,
+    this.embedded = false,
+    this.initialDate,
+    this.openEventId,
+  });
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -33,12 +40,28 @@ class _CalendarScreenState extends State<CalendarScreen>
   @override
   void initState() {
     super.initState();
-    _currentMonth = DateTime(DateTime.now().year, DateTime.now().month);
-    _selectedDate = DateTime.now();
+    final anchor = widget.initialDate ?? DateTime.now();
+    _currentMonth = DateTime(anchor.year, anchor.month);
+    _selectedDate = DateTime(anchor.year, anchor.month, anchor.day);
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _reload();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _reload();
+      if (!mounted) return;
       context.read<DashboardProvider>().loadInvitations();
+      final openId = widget.openEventId;
+      if (openId != null) {
+        final events = context.read<DashboardProvider>().events;
+        CalendarEvent? match;
+        for (final e in events) {
+          if (e.id == openId) {
+            match = e;
+            break;
+          }
+        }
+        if (match != null && mounted) {
+          await showEventActionsSheet(context, match);
+        }
+      }
     });
   }
 

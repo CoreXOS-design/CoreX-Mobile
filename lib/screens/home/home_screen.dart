@@ -16,6 +16,7 @@ import '../../widgets/corex/corex_today_focus.dart';
 import '../../providers/portal_leads_provider.dart';
 import '../coming_soon_screen.dart';
 import '../contacts/contacts_list_screen.dart';
+import '../ellie/ellie_screen.dart';
 import '../core_matches/core_matches_list_screen.dart';
 import '../portal_leads/portal_leads_screen.dart';
 import '../profile_screen.dart';
@@ -82,13 +83,7 @@ class HomeScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 18),
                         CorexEllieTeaser(
-                          onTap: () => _push(
-                            context,
-                            const ComingSoonScreen(
-                              feature: 'Ellie',
-                              description: 'Your AI assistant for CoreX',
-                            ),
-                          ),
+                          onTap: () => _push(context, const EllieScreen()),
                         ),
                         const SizedBox(height: 16),
                         _kpiRow(),

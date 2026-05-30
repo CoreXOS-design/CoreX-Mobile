@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../screens/calendar_screen.dart';
-import '../../screens/coming_soon_screen.dart';
+import '../../screens/ellie/ellie_screen.dart';
 import '../../screens/home/home_screen.dart';
 import '../../screens/profile_screen.dart';
 import '../../screens/today/today_screen.dart';
@@ -55,10 +55,7 @@ void corexNavigateTo(BuildContext context, CorexNavTab tab, CorexNavTab from) {
       target = const CalendarScreen();
       break;
     case CorexNavTab.ellie:
-      target = const ComingSoonScreen(
-        feature: 'Ellie',
-        description: 'Your AI assistant for CoreX',
-      );
+      target = const EllieScreen();
       break;
     case CorexNavTab.me:
       target = const ProfileScreen();

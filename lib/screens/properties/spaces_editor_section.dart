@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/space.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
+import '../../widgets/ai/ai_suggestions_section.dart';
 
 /// Self-contained editor for a property's `spaces_json`:
 /// - Loads the catalog (cached) + current spaces state.
@@ -45,10 +46,20 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
   bool _dirty = false;
   String? _loadError;
 
+  late final AiSuggestionsController _aiCtrl =
+      AiSuggestionsController(widget.propertyId);
+
   @override
   void initState() {
     super.initState();
     _load();
+    _aiCtrl.load();
+  }
+
+  @override
+  void dispose() {
+    _aiCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -486,7 +497,9 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                 (i) => _buildSpaceCard(i),
               ),
             ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 12),
+          AiSuggestionsSection(controller: _aiCtrl),
+          const SizedBox(height: 12),
           Text(
             'Property Features',
             style: TextStyle(

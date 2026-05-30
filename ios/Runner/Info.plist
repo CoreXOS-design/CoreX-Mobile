@@ -51,6 +51,8 @@
 		<string>This app needs camera access to take photos of properties.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
 		<string>This app needs photo library access to save property images.</string>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>CoreX uses the microphone so Ellie can hear your voice commands.</string>
 		<key>NSAppTransportSecurity</key>
 		<dict>
 			<key>NSAllowsArbitraryLoads</key>

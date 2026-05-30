@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../providers/notifications_provider.dart';
 import '../providers/portal_leads_provider.dart';
 import 'api_service.dart';
 import 'deep_link_router.dart';
@@ -125,6 +126,17 @@ class MessagingService {
   void _onForegroundMessage(RemoteMessage msg) {
     final ctx = navigatorKey?.currentContext;
     if (ctx == null) return;
+
+    // Belt-and-braces: if the local user disabled push, swallow the foreground
+    // presentation. The server should already be suppressing, but a stale
+    // device-token or in-flight delivery can race the preference change.
+    try {
+      if (!Provider.of<NotificationsProvider>(ctx, listen: false)
+          .localPushEnabled) {
+        return;
+      }
+    } catch (_) {}
+
     final title = msg.notification?.title ?? msg.data['title']?.toString();
     final body = msg.notification?.body ?? msg.data['body']?.toString();
     if (title == null && body == null) return;
