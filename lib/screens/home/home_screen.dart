@@ -19,6 +19,7 @@ import '../contacts/contacts_list_screen.dart';
 import '../ellie/ellie_screen.dart';
 import '../notifications/notifications_screen.dart';
 import '../core_matches/core_matches_list_screen.dart';
+import '../my_agent_qr_screen.dart';
 import '../portal_leads/portal_leads_screen.dart';
 import '../profile_screen.dart';
 import '../properties/property_list_screen.dart';
@@ -52,6 +53,7 @@ class HomeScreen extends StatelessWidget {
                     onMenuTap: () => Scaffold.of(ctx).openDrawer(),
                     onBellTap: () => _push(ctx, const NotificationsScreen()),
                     onAvatarTap: () => _push(ctx, const ProfileScreen()),
+                    onQrTap: () => _push(ctx, const MyAgentQrScreen()),
                   ),
                 ),
                 Expanded(

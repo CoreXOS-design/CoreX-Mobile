@@ -10,6 +10,7 @@ class CorexAppBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onMenuTap;
   final VoidCallback? onBellTap;
   final VoidCallback? onAvatarTap;
+  final VoidCallback? onQrTap;
 
   const CorexAppBar({
     super.key,
@@ -18,6 +19,7 @@ class CorexAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.onMenuTap,
     this.onBellTap,
     this.onAvatarTap,
+    this.onQrTap,
   });
 
   @override
@@ -42,6 +44,13 @@ class CorexAppBar extends StatelessWidget implements PreferredSizeWidget {
               const SizedBox(width: 4),
               _Wordmark(accent: t.accent),
               const Spacer(),
+              if (onQrTap != null)
+                IconButton(
+                  tooltip: 'My QR Code',
+                  onPressed: onQrTap,
+                  icon: Icon(TablerIcons.qrcode,
+                      color: CorexTokens.textPrimary(context)),
+                ),
               Stack(
                 clipBehavior: Clip.none,
                 children: [
