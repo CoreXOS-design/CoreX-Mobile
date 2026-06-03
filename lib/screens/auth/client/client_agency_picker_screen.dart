@@ -20,11 +20,23 @@ class ClientAgencyPickerScreen extends StatefulWidget {
       _ClientAgencyPickerScreenState();
 }
 
+/// What should happen on future app opens once an agency is picked.
+enum _AgencyPref {
+  /// Ask again every time the app is opened (default).
+  askEachTime,
+
+  /// Remember as the preferred agency — pre-selected next time, still asks.
+  favourite,
+
+  /// Only ever use this agency — never ask again.
+  lockOnly,
+}
+
 class _ClientAgencyPickerScreenState extends State<ClientAgencyPickerScreen> {
   final _api = ClientAuthService();
 
   int? _selectedId;
-  bool _lock = false;
+  _AgencyPref _pref = _AgencyPref.askEachTime;
   bool _busy = false;
   String? _error;
 
@@ -53,10 +65,27 @@ class _ClientAgencyPickerScreenState extends State<ClientAgencyPickerScreen> {
                   onTap: () => setState(() => _selectedId = a.id),
                 ),
               ),
-            const SizedBox(height: 4),
-            _LockToggle(
-              value: _lock,
-              onChanged: (v) => setState(() => _lock = v),
+            const SizedBox(height: 8),
+            _PrefOption(
+              icon: Icons.refresh_rounded,
+              title: 'Ask me each time',
+              subtitle: 'Choose an agency every time you open the app.',
+              selected: _pref == _AgencyPref.askEachTime,
+              onTap: () => setState(() => _pref = _AgencyPref.askEachTime),
+            ),
+            _PrefOption(
+              icon: Icons.star_rounded,
+              title: 'Set as my favourite',
+              subtitle: 'Pre-selected next time — you can still switch.',
+              selected: _pref == _AgencyPref.favourite,
+              onTap: () => setState(() => _pref = _AgencyPref.favourite),
+            ),
+            _PrefOption(
+              icon: Icons.lock_rounded,
+              title: 'Only use this agency',
+              subtitle: 'Skip this picker from now on.',
+              selected: _pref == _AgencyPref.lockOnly,
+              onTap: () => setState(() => _pref = _AgencyPref.lockOnly),
             ),
             if (_error != null) AuthError(_error!),
             const SizedBox(height: 20),
@@ -80,8 +109,8 @@ class _ClientAgencyPickerScreenState extends State<ClientAgencyPickerScreen> {
     try {
       final result = await _api.selectAgency(
         agencyId: _selectedId!,
-        lock: _lock,
-        favourite: false,
+        lock: _pref == _AgencyPref.lockOnly,
+        favourite: _pref == _AgencyPref.favourite,
       );
       if (!mounted) return;
       context.read<ClientSessionProvider>().applyAgencySelection(
@@ -194,37 +223,54 @@ class _AgencyRow extends StatelessWidget {
   }
 }
 
-class _LockToggle extends StatelessWidget {
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  const _LockToggle({required this.value, required this.onChanged});
+class _PrefOption extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PrefOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final brand = BrandColors.of(context);
+    final accent = brand.button;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(AppTheme.radius),
-        onTap: () => onChanged(!value),
+        onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
           child: Row(
             children: [
               Icon(
-                value
-                    ? Icons.check_box_rounded
-                    : Icons.check_box_outline_blank_rounded,
-                color: value ? brand.button : AppTheme.textMuted(context),
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                color: selected ? accent : AppTheme.textMuted(context),
                 size: 22,
               ),
               const SizedBox(width: 10),
+              Icon(
+                icon,
+                size: 18,
+                color: selected ? accent : AppTheme.textSecondary(context),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Only use this agency',
+                      title,
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -232,7 +278,7 @@ class _LockToggle extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      'Skips this picker on future sign-ins.',
+                      subtitle,
                       style: TextStyle(
                         fontSize: 12,
                         color: AppTheme.textSecondary(context),

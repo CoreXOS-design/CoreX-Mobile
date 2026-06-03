@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:tabler_icons/tabler_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/client_models.dart';
 import '../../services/api_service.dart' show ApiException;
 import '../../services/client_auth_service.dart';
-import '../../theme.dart';
+import '../../theme/corex_accent_theme.dart';
+import '../../theme/corex_tokens.dart';
 import '../../widgets/client/not_for_me_sheet.dart';
 import '../../widgets/client/reaction_bar.dart';
+import '../../widgets/corex/corex_card.dart';
+import '../../widgets/corex/corex_chip.dart';
+import '../../widgets/corex/corex_primary_button.dart';
+import '../../widgets/corex/corex_scaffold.dart';
+import '../../widgets/corex/corex_secondary_button.dart';
 
 typedef ReactionChanged = void Function(String reaction, String? note);
 
@@ -141,11 +148,12 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Property')),
+    return CorexScaffold(
+      title: 'Property',
       body: _body(),
-      bottomNavigationBar: (widget.matchId != null && _property != null)
+      bottomBar: (widget.matchId != null && _property != null)
           ? SafeArea(
+              top: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
                 child: ReactionBar(
@@ -167,159 +175,155 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
     if (_error != null && _property == null) {
       return Padding(
         padding: const EdgeInsets.all(24),
-        child: Center(child: Text(_error!)),
+        child: Center(
+          child: Text(
+            _error!,
+            style: TextStyle(color: CorexTokens.textSecondary(context)),
+          ),
+        ),
       );
     }
+    final t = CorexAccentTheme.of(context);
     final p = _property!;
     final images = p.images.isNotEmpty
         ? p.images
         : (p.thumbnail != null ? [p.thumbnail!] : <String>[]);
 
     return ListView(
-      padding: EdgeInsets.zero,
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       children: [
         if (images.isNotEmpty)
-          AspectRatio(
-            aspectRatio: 16 / 10,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                PageView.builder(
-                  controller: _pageController,
-                  itemCount: images.length,
-                  onPageChanged: (i) => setState(() => _imageIndex = i),
-                  itemBuilder: (_, i) => Image.network(
-                    images[i],
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      color: AppTheme.surface2(context),
-                      child: Icon(Icons.broken_image_outlined,
-                          color: AppTheme.textMuted(context)),
-                    ),
-                  ),
-                ),
-                if (images.length > 1)
-                  Positioned(
-                    bottom: 8,
-                    left: 0,
-                    right: 0,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        for (var i = 0; i < images.length; i++)
-                          Container(
-                            margin:
-                                const EdgeInsets.symmetric(horizontal: 3),
-                            width: 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: i == _imageIndex
-                                  ? Colors.white
-                                  : Colors.white.withValues(alpha: 0.45),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (p.title != null && p.title!.isNotEmpty)
-                Text(
-                  p.title!,
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.w700),
-                ),
-              if (p.address != null && p.address!.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    p.address!,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppTheme.textSecondary(context),
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 8),
-              Text(
-                p.priceDisplay ??
-                    (p.price != null ? 'R ${_money(p.price!)}' : ''),
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.brand,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
+          ClipRRect(
+            borderRadius: BorderRadius.circular(CorexTokens.radius),
+            child: AspectRatio(
+              aspectRatio: 16 / 10,
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  if (p.beds != null) _stat(Icons.bed_rounded, '${p.beds} bd'),
-                  if (p.baths != null)
-                    _stat(Icons.bathtub_outlined, '${p.baths} ba'),
-                  if (p.garages != null)
-                    _stat(Icons.garage_outlined, '${p.garages} garage'),
-                  if (p.parking != null)
-                    _stat(Icons.local_parking_rounded, '${p.parking} parking'),
-                  if (p.floorSize != null)
-                    _stat(Icons.straighten_rounded, '${p.floorSize}m² floor'),
-                  if (p.erfSize != null)
-                    _stat(Icons.crop_square_rounded, '${p.erfSize}m² erf'),
+                  PageView.builder(
+                    controller: _pageController,
+                    itemCount: images.length,
+                    onPageChanged: (i) => setState(() => _imageIndex = i),
+                    itemBuilder: (_, i) => Image.network(
+                      images[i],
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        color: CorexTokens.surfaceTop(context),
+                        child: Icon(TablerIcons.photo_off,
+                            color: CorexTokens.textTertiary(context)),
+                      ),
+                    ),
+                  ),
+                  if (images.length > 1)
+                    Positioned(
+                      bottom: 8,
+                      left: 0,
+                      right: 0,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          for (var i = 0; i < images.length; i++)
+                            Container(
+                              margin:
+                                  const EdgeInsets.symmetric(horizontal: 3),
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: i == _imageIndex
+                                    ? Colors.white
+                                    : Colors.white.withValues(alpha: 0.45),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
-              if (p.description != null && p.description!.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                _description(p.description!),
-              ],
-              if (p.features.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                const Text('Features',
-                    style: TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: p.features
-                      .map((f) => Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: AppTheme.surface2(context),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(f,
-                                style: const TextStyle(fontSize: 12)),
-                          ))
-                      .toList(),
-                ),
-              ],
-              if (p.agent != null) ...[
-                const SizedBox(height: 20),
-                _agentCard(p.agent!, p.branch),
-              ],
-              if (p.webPreviewUrl != null && p.webPreviewUrl!.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Center(
-                  child: TextButton.icon(
-                    icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                    label: const Text('View on web'),
-                    onPressed: () => _launch(p.webPreviewUrl!),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
-            ],
+            ),
+          ),
+        const SizedBox(height: 16),
+        if (p.title != null && p.title!.isNotEmpty)
+          Text(
+            p.title!,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: CorexTokens.textPrimary(context),
+            ),
+          ),
+        if (p.address != null && p.address!.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              p.address!,
+              style: TextStyle(
+                fontSize: 13,
+                color: CorexTokens.textSecondary(context),
+              ),
+            ),
+          ),
+        const SizedBox(height: 8),
+        Text(
+          p.priceDisplay ?? (p.price != null ? 'R ${_money(p.price!)}' : ''),
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+            color: t.accentMoney,
           ),
         ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            if (p.beds != null) _stat(TablerIcons.bed, '${p.beds} bd'),
+            if (p.baths != null) _stat(TablerIcons.bath, '${p.baths} ba'),
+            if (p.garages != null) _stat(TablerIcons.car, '${p.garages} garage'),
+            if (p.parking != null)
+              _stat(TablerIcons.parking, '${p.parking} parking'),
+            if (p.floorSize != null)
+              _stat(TablerIcons.ruler_2, '${p.floorSize}m² floor'),
+            if (p.erfSize != null)
+              _stat(TablerIcons.square, '${p.erfSize}m² erf'),
+          ],
+        ),
+        if (p.description != null && p.description!.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _description(p.description!),
+        ],
+        if (p.features.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text(
+            'Features',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: CorexTokens.textPrimary(context),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: p.features.map((f) => CorexChip(label: f)).toList(),
+          ),
+        ],
+        if (p.agent != null) ...[
+          const SizedBox(height: 20),
+          _agentCard(p.agent!, p.branch),
+        ],
+        if (p.webPreviewUrl != null && p.webPreviewUrl!.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Center(
+            child: TextButton.icon(
+              icon: const Icon(TablerIcons.external_link, size: 16),
+              label: const Text('View on web'),
+              onPressed: () => _launch(p.webPreviewUrl!),
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
       ],
     );
   }
@@ -327,9 +331,13 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
   Widget _stat(IconData icon, String label) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: AppTheme.textSecondary(context)),
+          Icon(icon, size: 16, color: CorexTokens.textSecondary(context)),
           const SizedBox(width: 4),
-          Text(label, style: const TextStyle(fontSize: 13)),
+          Text(
+            label,
+            style: TextStyle(
+                fontSize: 13, color: CorexTokens.textPrimary(context)),
+          ),
         ],
       );
 
@@ -339,7 +347,14 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(visible, style: const TextStyle(fontSize: 13, height: 1.4)),
+        Text(
+          visible,
+          style: TextStyle(
+            fontSize: 13,
+            height: 1.4,
+            color: CorexTokens.textSecondary(context),
+          ),
+        ),
         if (long)
           TextButton(
             onPressed: () => setState(() => _descExpanded = !_descExpanded),
@@ -350,24 +365,28 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
   }
 
   Widget _agentCard(ClientPropertyAgent agent, String? branch) {
+    final t = CorexAccentTheme.of(context);
     final phone = agent.phone;
     final email = agent.email;
     final whatsappPhone = phone?.replaceAll(RegExp(r'[^0-9]'), '');
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.surface2(context),
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-      ),
+    return CorexCard(
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              CircleAvatar(
-                backgroundColor: AppTheme.brand.withValues(alpha: 0.15),
-                child: Icon(Icons.person_rounded, color: AppTheme.brand),
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: t.accentSoft,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: t.accentBorder),
+                ),
+                alignment: Alignment.center,
+                child: Icon(TablerIcons.user, color: t.accent),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -376,15 +395,20 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
                   children: [
                     Text(
                       agent.name ?? 'Your agent',
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: CorexTokens.textPrimary(context),
+                      ),
                     ),
                     if (branch != null && branch.isNotEmpty)
-                      Text(branch,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.textSecondary(context),
-                          )),
+                      Text(
+                        branch,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: CorexTokens.textSecondary(context),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -392,14 +416,10 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
           ),
           if (phone != null && phone.isNotEmpty) ...[
             const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.call_rounded, size: 18),
-                label: Text('Call ${agent.name?.split(' ').first ?? 'agent'}'),
-                onPressed: () => _launch('tel:$phone'),
-              ),
+            CorexPrimaryButton(
+              label: 'Call ${agent.name?.split(' ').first ?? 'agent'}',
+              leading: TablerIcons.phone,
+              onPressed: () => _launch('tel:$phone'),
             ),
           ],
           if ((whatsappPhone != null && whatsappPhone.isNotEmpty) ||
@@ -409,14 +429,11 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
               children: [
                 if (whatsappPhone != null && whatsappPhone.isNotEmpty)
                   Expanded(
-                    child: SizedBox(
-                      height: 44,
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.chat_rounded, size: 16),
-                        label: const Text('WhatsApp'),
-                        onPressed: () =>
-                            _launch('https://wa.me/$whatsappPhone'),
-                      ),
+                    child: CorexSecondaryButton(
+                      label: 'WhatsApp',
+                      leading: TablerIcons.brand_whatsapp,
+                      onPressed: () =>
+                          _launch('https://wa.me/$whatsappPhone'),
                     ),
                   ),
                 if (whatsappPhone != null &&
@@ -426,13 +443,10 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
                   const SizedBox(width: 8),
                 if (email != null && email.isNotEmpty)
                   Expanded(
-                    child: SizedBox(
-                      height: 44,
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.email_rounded, size: 16),
-                        label: const Text('Email'),
-                        onPressed: () => _launch('mailto:$email'),
-                      ),
+                    child: CorexSecondaryButton(
+                      label: 'Email',
+                      leading: TablerIcons.mail,
+                      onPressed: () => _launch('mailto:$email'),
                     ),
                   ),
               ],

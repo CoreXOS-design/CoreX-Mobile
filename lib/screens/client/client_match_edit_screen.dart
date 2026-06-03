@@ -4,7 +4,10 @@ import 'package:flutter/services.dart';
 import '../../models/client_models.dart';
 import '../../services/api_service.dart' show ApiException;
 import '../../services/client_auth_service.dart';
-import '../../theme.dart';
+import '../../theme/corex_accent_theme.dart';
+import '../../theme/corex_tokens.dart';
+import '../../widgets/corex/corex_primary_button.dart';
+import '../../widgets/corex/corex_scaffold.dart';
 import '../../widgets/p24_suburbs_picker.dart';
 
 /// Used in both create and edit modes — pass [existing] for edit, omit for create.
@@ -170,16 +173,14 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.isEdit ? 'Edit search' : 'Set up my search'),
-        actions: [
-          TextButton(
-            onPressed: _saving ? null : _save,
-            child: Text(_saving ? 'Saving…' : 'Save'),
-          ),
-        ],
-      ),
+    return CorexScaffold(
+      title: widget.isEdit ? 'Edit search' : 'Set up my search',
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : _save,
+          child: Text(_saving ? 'Saving…' : 'Save'),
+        ),
+      ],
       body: _loadingOptions
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -190,7 +191,8 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Text(
                       'Could not load options: $_optionsError',
-                      style: TextStyle(color: AppTheme.textSecondary(context)),
+                      style:
+                          TextStyle(color: CorexTokens.textSecondary(context)),
                     ),
                   ),
                 _section('Looking to'),
@@ -267,14 +269,10 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                SizedBox(
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: _saving ? null : _save,
-                    child: Text(_saving
-                        ? 'Saving…'
-                        : (widget.isEdit ? 'Save changes' : 'Create search')),
-                  ),
+                CorexPrimaryButton(
+                  label: widget.isEdit ? 'Save changes' : 'Create search',
+                  loading: _saving,
+                  onPressed: _saving ? null : _save,
                 ),
                 const SizedBox(height: 32),
               ],
@@ -288,8 +286,8 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
           label,
           style: TextStyle(
             fontSize: 13,
-            fontWeight: FontWeight.w500,
-            color: AppTheme.textSecondary(context),
+            fontWeight: FontWeight.w600,
+            color: CorexTokens.textSecondary(context),
           ),
         ),
       );
@@ -299,10 +297,12 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
     required List<(String, String)> options,
     required ValueChanged<String?> onChanged,
   }) {
+    final accent = CorexAccentTheme.of(context).accent;
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surface2(context),
-        borderRadius: BorderRadius.circular(AppTheme.radius),
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(CorexTokens.radius),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
       padding: const EdgeInsets.all(4),
       child: Row(
@@ -310,14 +310,14 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
           final selected = value == o.$1;
           return Expanded(
             child: InkWell(
-              borderRadius: BorderRadius.circular(AppTheme.radius),
+              borderRadius: BorderRadius.circular(CorexTokens.radius),
               onTap: () => onChanged(o.$1),
               child: Container(
                 alignment: Alignment.center,
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: selected ? AppTheme.brand : Colors.transparent,
-                  borderRadius: BorderRadius.circular(AppTheme.radius),
+                  color: selected ? accent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(CorexTokens.radius),
                 ),
                 child: Text(
                   o.$2,
@@ -325,7 +325,7 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
                     fontWeight: FontWeight.w700,
                     color: selected
                         ? Colors.white
-                        : AppTheme.textPrimary(context),
+                        : CorexTokens.textPrimary(context),
                   ),
                 ),
               ),

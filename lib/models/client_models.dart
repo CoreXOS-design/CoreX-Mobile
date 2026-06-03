@@ -119,15 +119,24 @@ class ClientContact {
     this.agencyId,
   });
 
-  factory ClientContact.fromJson(Map<String, dynamic> json) => ClientContact(
-        id: (json['id'] as num).toInt(),
-        firstName: json['first_name']?.toString(),
-        lastName: json['last_name']?.toString(),
-        fullName: json['full_name']?.toString() ?? '',
-        email: json['email']?.toString(),
-        phone: json['phone']?.toString(),
-        agencyId: _asInt(json['agency_id']),
-      );
+  factory ClientContact.fromJson(Map<String, dynamic> json) {
+    final first = json['first_name']?.toString().trim() ?? '';
+    final last = json['last_name']?.toString().trim() ?? '';
+    final full = json['full_name']?.toString().trim() ?? '';
+    // Prefer the server-composed name, but fall back to first + last so a
+    // payload that only carries the parts still yields a usable name.
+    final resolved =
+        full.isNotEmpty ? full : [first, last].where((s) => s.isNotEmpty).join(' ');
+    return ClientContact(
+      id: (json['id'] as num).toInt(),
+      firstName: first.isEmpty ? null : first,
+      lastName: last.isEmpty ? null : last,
+      fullName: resolved,
+      email: json['email']?.toString(),
+      phone: json['phone']?.toString(),
+      agencyId: _asInt(json['agency_id']),
+    );
+  }
 }
 
 class ClientLoginResponse {

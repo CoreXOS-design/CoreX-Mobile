@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../models/client_models.dart';
 import '../../screens/core_matches/core_matches_common.dart';
 import '../../services/api_service.dart' show ApiException;
 import '../../services/client_auth_service.dart';
-import '../../theme.dart';
+import '../../theme/corex_accent_theme.dart';
+import '../../theme/corex_tokens.dart';
 import '../../widgets/client/client_property_card.dart';
 import '../../widgets/client/not_for_me_sheet.dart';
+import '../../widgets/corex/corex_chip.dart';
+import '../../widgets/corex/corex_scaffold.dart';
+import '../../widgets/corex/corex_secondary_button.dart';
 import 'client_match_edit_screen.dart';
 import 'client_property_screen.dart';
 
@@ -185,29 +190,30 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_detail?.match.name ?? 'My match'),
-        actions: [
-          IconButton(
-            tooltip: _hideRejected ? 'Show rejected' : 'Hide rejected',
-            icon: Icon(_hideRejected
-                ? Icons.visibility_off_rounded
-                : Icons.visibility_rounded),
-            onPressed: _detail == null
-                ? null
-                : () => setState(() => _hideRejected = !_hideRejected),
+    final t = CorexAccentTheme.of(context);
+    return CorexScaffold(
+      title: _detail?.match.name ?? 'My match',
+      actions: [
+        IconButton(
+          tooltip: _hideRejected ? 'Show rejected' : 'Hide rejected',
+          icon: Icon(
+            _hideRejected ? TablerIcons.eye_off : TablerIcons.eye,
+            color: CorexTokens.textPrimary(context),
           ),
-          IconButton(
-            tooltip: 'Edit search',
-            icon: const Icon(Icons.tune_rounded),
-            onPressed: _detail == null ? null : _edit,
-          ),
-        ],
-      ),
+          onPressed: _detail == null
+              ? null
+              : () => setState(() => _hideRejected = !_hideRejected),
+        ),
+        IconButton(
+          tooltip: 'Edit search',
+          icon: Icon(TablerIcons.adjustments_horizontal,
+              color: CorexTokens.textPrimary(context)),
+          onPressed: _detail == null ? null : _edit,
+        ),
+      ],
       body: RefreshIndicator(
-        color: AppTheme.brand,
-        backgroundColor: AppTheme.surface(context),
+        color: t.accent,
+        backgroundColor: CorexTokens.surfaceTop(context),
         onRefresh: _load,
         child: _body(),
       ),
@@ -220,13 +226,18 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
     }
     if (_error != null && _detail == null) {
       return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(24),
         children: [
           const SizedBox(height: 64),
-          Icon(Icons.error_outline,
-              size: 48, color: Theme.of(context).hintColor),
+          Icon(TablerIcons.alert_circle,
+              size: 48, color: CorexTokens.textTertiary(context)),
           const SizedBox(height: 12),
-          Text(_error!, textAlign: TextAlign.center),
+          Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: CorexTokens.textSecondary(context)),
+          ),
         ],
       );
     }
@@ -248,8 +259,11 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
             Expanded(
               child: Text(
                 m.name ?? 'My match',
-                style: const TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: CorexTokens.textPrimary(context),
+                ),
               ),
             ),
             statusPill(m.status),
@@ -260,7 +274,7 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
           '${fb.interested}/$total interested',
           style: TextStyle(
             fontSize: 12,
-            color: AppTheme.textSecondary(context),
+            color: CorexTokens.textSecondary(context),
           ),
         ),
         const SizedBox(height: 10),
@@ -268,12 +282,18 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
         const SizedBox(height: 12),
         Row(
           children: [
-            const Icon(Icons.visibility_off_outlined, size: 16),
+            Icon(TablerIcons.eye_off,
+                size: 16, color: CorexTokens.textSecondary(context)),
             const SizedBox(width: 6),
-            const Text('Hide rejected', style: TextStyle(fontSize: 13)),
+            Text(
+              'Hide rejected',
+              style: TextStyle(
+                  fontSize: 13, color: CorexTokens.textSecondary(context)),
+            ),
             const Spacer(),
             Switch(
               value: _hideRejected,
+              activeTrackColor: CorexAccentTheme.of(context).accent,
               onChanged: (v) => setState(() => _hideRejected = v),
             ),
           ],
@@ -284,27 +304,33 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
             padding: const EdgeInsets.symmetric(vertical: 48),
             child: Column(
               children: [
-                Icon(Icons.search_off_rounded,
-                    size: 48, color: Theme.of(context).hintColor),
+                Icon(TablerIcons.search_off,
+                    size: 48, color: CorexTokens.textTertiary(context)),
                 const SizedBox(height: 12),
-                const Text(
+                Text(
                   'No properties match yet',
                   style: TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: CorexTokens.textPrimary(context),
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Try widening your filters.',
                   style: TextStyle(
                     fontSize: 13,
-                    color: Theme.of(context).hintColor,
+                    color: CorexTokens.textSecondary(context),
                   ),
                 ),
                 const SizedBox(height: 16),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.tune_rounded),
-                  label: const Text('Edit search'),
-                  onPressed: _edit,
+                SizedBox(
+                  width: 200,
+                  child: CorexSecondaryButton(
+                    label: 'Edit search',
+                    leading: TablerIcons.adjustments_horizontal,
+                    onPressed: _edit,
+                  ),
                 ),
               ],
             ),
@@ -355,25 +381,9 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
       spacing: 6,
       runSpacing: 6,
       children: chips
-          .map((c) => InkWell(
+          .map((c) => GestureDetector(
                 onTap: _edit,
-                borderRadius: BorderRadius.circular(999),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface2(context),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    c,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textSecondary(context),
-                    ),
-                  ),
-                ),
+                child: CorexChip(label: c),
               ))
           .toList(),
     );

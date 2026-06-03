@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../models/client_models.dart';
-import '../../theme.dart';
+import '../../theme/corex_accent_theme.dart';
+import '../../theme/corex_tokens.dart';
+import '../corex/corex_card.dart';
 import 'reaction_bar.dart';
 
 class ClientPropertyCard extends StatelessWidget {
@@ -18,14 +21,15 @@ class ClientPropertyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = CorexAccentTheme.of(context);
     final price = result.priceDisplay ??
         (result.price != null ? 'R ${_money(result.price!)}' : null);
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      margin: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: CorexCard(
         onTap: onTap,
+        padding: EdgeInsets.zero,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -40,16 +44,16 @@ class ClientPropertyCard extends StatelessWidget {
                       result.thumbnail!,
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Container(
-                        color: AppTheme.surface2(context),
-                        child: Icon(Icons.broken_image_outlined,
-                            color: AppTheme.textMuted(context)),
+                        color: CorexTokens.surfaceTop(context),
+                        child: Icon(TablerIcons.photo_off,
+                            color: CorexTokens.textTertiary(context)),
                       ),
                     )
                   else
                     Container(
-                      color: AppTheme.surface2(context),
-                      child: Icon(Icons.home_outlined,
-                          color: AppTheme.textMuted(context), size: 36),
+                      color: CorexTokens.surfaceTop(context),
+                      child: Icon(TablerIcons.home,
+                          color: CorexTokens.textTertiary(context), size: 36),
                     ),
                   if (result.matchScore != null)
                     Positioned(
@@ -92,7 +96,7 @@ class ClientPropertyCard extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
-                        color: AppTheme.brand,
+                        color: t.accentMoney,
                       ),
                     ),
                   const SizedBox(height: 2),
@@ -100,8 +104,11 @@ class ClientPropertyCard extends StatelessWidget {
                     result.address,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: CorexTokens.textPrimary(context),
+                    ),
                   ),
                   if (result.suburb != null && result.suburb!.isNotEmpty)
                     Padding(
@@ -110,7 +117,7 @@ class ClientPropertyCard extends StatelessWidget {
                         result.suburb!,
                         style: TextStyle(
                           fontSize: 12,
-                          color: AppTheme.textSecondary(context),
+                          color: CorexTokens.textSecondary(context),
                         ),
                       ),
                     ),
@@ -118,27 +125,36 @@ class ClientPropertyCard extends StatelessWidget {
                   Row(
                     children: [
                       if (result.beds != null) ...[
-                        Icon(Icons.bed_rounded,
-                            size: 14, color: AppTheme.textSecondary(context)),
+                        Icon(TablerIcons.bed,
+                            size: 14,
+                            color: CorexTokens.textSecondary(context)),
                         const SizedBox(width: 2),
                         Text('${result.beds}',
-                            style: const TextStyle(fontSize: 12)),
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: CorexTokens.textPrimary(context))),
                         const SizedBox(width: 10),
                       ],
                       if (result.baths != null) ...[
-                        Icon(Icons.bathtub_outlined,
-                            size: 14, color: AppTheme.textSecondary(context)),
+                        Icon(TablerIcons.bath,
+                            size: 14,
+                            color: CorexTokens.textSecondary(context)),
                         const SizedBox(width: 2),
                         Text('${result.baths}',
-                            style: const TextStyle(fontSize: 12)),
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: CorexTokens.textPrimary(context))),
                         const SizedBox(width: 10),
                       ],
                       if (result.garages != null) ...[
-                        Icon(Icons.garage_outlined,
-                            size: 14, color: AppTheme.textSecondary(context)),
+                        Icon(TablerIcons.car,
+                            size: 14,
+                            color: CorexTokens.textSecondary(context)),
                         const SizedBox(width: 2),
                         Text('${result.garages}',
-                            style: const TextStyle(fontSize: 12)),
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: CorexTokens.textPrimary(context))),
                       ],
                     ],
                   ),
@@ -152,7 +168,7 @@ class ClientPropertyCard extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 11,
                           fontStyle: FontStyle.italic,
-                          color: AppTheme.textMuted(context),
+                          color: CorexTokens.textTertiary(context),
                         ),
                       ),
                     ),

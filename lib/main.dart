@@ -17,6 +17,7 @@ import 'providers/portal_leads_provider.dart';
 import 'providers/property_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/visibility_provider.dart';
+import 'screens/auth/client/client_agency_picker_screen.dart';
 import 'screens/auth/client/client_set_password_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/client/client_home_screen.dart';
@@ -186,6 +187,12 @@ class AuthGate extends StatelessWidget {
             );
           },
         );
+      }
+      // Show the agency picker on every app open until the client locks to a
+      // specific agency. Driven entirely here so it never appears mid-flow
+      // when tapping into a feature.
+      if (clientSession.mustPickAgency) {
+        return const ClientAgencyPickerScreen(initialPick: true);
       }
       return const ClientHomeScreen();
     }

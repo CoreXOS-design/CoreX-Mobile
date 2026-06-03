@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../providers/client_session_provider.dart';
 import '../../services/api_service.dart' show ApiException;
 import '../../services/client_auth_service.dart';
+import '../../theme/corex_accent_theme.dart';
+import '../../theme/corex_tokens.dart';
+import '../../widgets/corex/corex_card.dart';
+import '../../widgets/corex/corex_scaffold.dart';
 import '../auth/client/client_agency_picker_screen.dart';
+
+const Color _kDanger = Color(0xFFEF4444);
 
 class ClientSettingsScreen extends StatelessWidget {
   const ClientSettingsScreen({super.key});
@@ -12,35 +19,73 @@ class ClientSettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = context.watch<ClientSessionProvider>();
+    final t = CorexAccentTheme.of(context);
     final canSwitch = session.agencies.length > 1 &&
         session.client?.lockedToAgencyId == null;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+    return CorexScaffold(
+      title: 'Settings',
       body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
           if (session.contact != null)
-            ListTile(
-              leading: const Icon(Icons.person_outline),
-              title: Text(session.contact!.fullName),
-              subtitle:
-                  Text(session.client?.email ?? session.contact!.email ?? ''),
+            CorexCard(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: t.accentSoft,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: t.accentBorder),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(TablerIcons.user, color: t.accent),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          session.contact!.fullName,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: CorexTokens.textPrimary(context),
+                          ),
+                        ),
+                        Text(
+                          session.client?.email ??
+                              session.contact!.email ??
+                              '',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: CorexTokens.textSecondary(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.lock_outline),
-            title: const Text('Change password'),
-            trailing: const Icon(Icons.chevron_right),
+          const SizedBox(height: 16),
+          _SettingsRow(
+            icon: TablerIcons.lock,
+            label: 'Change password',
             onTap: () => showDialog(
               context: context,
               builder: (_) => const _ChangePasswordDialog(),
             ),
           ),
-          ListTile(
-            leading: const Icon(Icons.swap_horiz),
-            title: const Text('Switch agency'),
+          const SizedBox(height: 10),
+          _SettingsRow(
+            icon: TablerIcons.arrows_left_right,
+            label: 'Switch agency',
             enabled: canSwitch,
-            trailing: const Icon(Icons.chevron_right),
             onTap: canSwitch
                 ? () => Navigator.of(context).push(
                       MaterialPageRoute(
@@ -50,17 +95,66 @@ class ClientSettingsScreen extends StatelessWidget {
                     )
                 : null,
           ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.logout, color: Colors.redAccent),
-            title: const Text('Sign out',
-                style: TextStyle(color: Colors.redAccent)),
+          const SizedBox(height: 10),
+          _SettingsRow(
+            icon: TablerIcons.logout,
+            label: 'Sign out',
+            tint: _kDanger,
             onTap: () async {
               await context.read<ClientSessionProvider>().signOut();
-              if (context.mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+              if (context.mounted) {
+                Navigator.of(context).popUntil((r) => r.isFirst);
+              }
             },
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SettingsRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool enabled;
+  final Color? tint;
+
+  const _SettingsRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.enabled = true,
+    this.tint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CorexAccentTheme.of(context);
+    final color = tint ?? t.accent;
+    return Opacity(
+      opacity: enabled ? 1 : 0.45,
+      child: CorexCard(
+        onTap: enabled ? onTap : null,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: tint ?? CorexTokens.textPrimary(context),
+                ),
+              ),
+            ),
+            Icon(TablerIcons.chevron_right,
+                size: 18, color: CorexTokens.textTertiary(context)),
+          ],
+        ),
       ),
     );
   }

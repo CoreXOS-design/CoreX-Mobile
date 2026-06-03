@@ -12,7 +12,6 @@ import '../../theme/corex_tokens.dart';
 import '../../widgets/corex/corex_monogram.dart';
 import '../../widgets/corex/corex_primary_button.dart';
 import '../../widgets/corex/corex_secondary_button.dart';
-import 'client/client_agency_picker_screen.dart';
 import 'client/client_agent_qr_scanner_screen.dart';
 import 'client/client_auth_shared.dart';
 import 'client/client_otp_screen.dart';
@@ -23,13 +22,15 @@ import 'client/client_set_password_screen.dart';
 /// Flow:
 /// 1. Try AuthProvider.login (user app).
 /// 2. On failure, call ClientAuthService.lookup(email):
-///    - !exists → generic error
+///    - !exists → onboarding hint (ask your agency / scan agent QR)
 ///    - requiresOtp → push ClientOtpScreen (activation)
 ///    - requiresPassword → ClientAuthService.login; on success → AuthGate
 ///      flips to ClientHomeScreen; on fail → generic error.
 ///
-/// Generic error string is identical across every failure path so the screen
-/// cannot be used to enumerate accounts.
+/// Wrong-password failures all share one generic error string so the screen
+/// can't be used to brute-force passwords. The unknown-email case is called
+/// out separately on purpose: a new user needs to know they aren't in the
+/// system yet, not that they mistyped a password.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -106,9 +107,12 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (!result.exists) {
+        // Truly unknown email — not a user and not a client. Guide them to get
+        // onboarded rather than implying a wrong password.
         setState(() {
           _busy = false;
-          _error = _genericError;
+          _error = 'We couldn’t find that email. Ask your agency to add you, '
+              'or scan your agent’s QR code to get started.';
         });
         return;
       }
@@ -170,18 +174,9 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      if (resp.client.lockedToAgencyId == null &&
-          resp.client.currentAgencyId == null &&
-          resp.agencies.length > 1) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) => const ClientAgencyPickerScreen(initialPick: true),
-          ),
-          (r) => false,
-        );
-        return;
-      }
-      // AuthGate will flip to ClientHomeScreen on the next frame.
+      // AuthGate decides what comes next from session state — agency picker
+      // (if multiple agencies and not locked) or the client home — on the next
+      // frame. Nothing to push here.
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {

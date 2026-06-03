@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../theme/corex_tokens.dart';
+
 /// Slide-up sheet asking why this property isn't for the client.
 /// Returns the entered note on Send (may be empty), or null on Cancel.
 Future<String?> showNotForMeSheet(BuildContext context,
@@ -12,8 +14,9 @@ Future<String?> showNotForMeSheet(BuildContext context,
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
+    backgroundColor: CorexTokens.surfaceTop(context),
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
     builder: (ctx) {
       return Padding(
@@ -27,9 +30,13 @@ Future<String?> showNotForMeSheet(BuildContext context,
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+            Text(
               'Not for me',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: CorexTokens.textPrimary(ctx),
+              ),
             ),
             const SizedBox(height: 12),
             TextField(

@@ -7,7 +7,6 @@ import '../../../services/client_auth_service.dart';
 import '../../../widgets/ui/auth_scaffold.dart';
 import '../../../widgets/ui/glow_button.dart';
 import 'client_auth_shared.dart';
-import 'client_agency_picker_screen.dart';
 
 class ClientSetPasswordScreen extends StatefulWidget {
   final String bearerToken;
@@ -62,18 +61,9 @@ class _ClientSetPasswordScreenState extends State<ClientSetPasswordScreen> {
       session.applyLogin(resp);
       session.clearPasswordMustChange();
 
-      if (resp.agencies.length > 1 &&
-          resp.client.lockedToAgencyId == null &&
-          resp.client.currentAgencyId == null) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) => const ClientAgencyPickerScreen(initialPick: true),
-          ),
-          (r) => false,
-        );
-      } else {
-        Navigator.of(context).popUntil((r) => r.isFirst);
-      }
+      // Return to the root: AuthGate renders the agency picker (if multiple
+      // agencies and not locked) or the client home from session state.
+      Navigator.of(context).popUntil((r) => r.isFirst);
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {

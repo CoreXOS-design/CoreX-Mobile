@@ -20,6 +20,11 @@ class ClientSessionProvider extends ChangeNotifier {
   List<ClientAgency> _agencies = const [];
   bool _passwordMustChange = false;
 
+  // Set once the client has chosen an agency for the *current* app run. It is
+  // intentionally in-memory only: a cold start clears it so the picker shows
+  // again on every app open — until the client locks to a specific agency.
+  bool _agencyChosenThisSession = false;
+
   bool get isChecking => _checking;
   bool get isLoggedIn => _isLoggedIn;
   bool get passwordMustChange => _passwordMustChange;
@@ -38,10 +43,14 @@ class ClientSessionProvider extends ChangeNotifier {
     return _agencies.isNotEmpty ? _agencies.first : null;
   }
 
-  bool get needsAgencyPicker {
+  /// Whether the agency picker should be shown on app open. It keeps asking on
+  /// every cold start until the client locks to a specific agency
+  /// ([ClientProfile.lockedToAgencyId]). Choosing without locking only
+  /// dismisses it for the current run.
+  bool get mustPickAgency {
     if (_agencies.length <= 1) return false;
     if (_client?.lockedToAgencyId != null) return false;
-    return _client?.currentAgencyId == null;
+    return !_agencyChosenThisSession;
   }
 
   /// Cold-start: do we have a token and is it still valid?
@@ -90,6 +99,8 @@ class ClientSessionProvider extends ChangeNotifier {
     _agencies = resp.agencies;
     _passwordMustChange = resp.client.passwordMustChange;
     _isLoggedIn = true;
+    // A fresh sign-in starts a new run: ask for the agency again unless locked.
+    _agencyChosenThisSession = false;
     notifyListeners();
   }
 
@@ -121,6 +132,7 @@ class ClientSessionProvider extends ChangeNotifier {
   }) {
     _client = client;
     _agencies = agencies;
+    _agencyChosenThisSession = true;
     notifyListeners();
   }
 
@@ -153,6 +165,7 @@ class ClientSessionProvider extends ChangeNotifier {
     _contact = null;
     _agencies = const [];
     _passwordMustChange = false;
+    _agencyChosenThisSession = false;
     notifyListeners();
   }
 }

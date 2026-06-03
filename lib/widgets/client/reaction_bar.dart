@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../screens/core_matches/core_matches_common.dart';
-import '../../theme.dart';
+import '../../theme/corex_tokens.dart';
 
 typedef ReactionPicked = void Function(String reaction);
 
@@ -62,21 +62,23 @@ class ReactionBar extends StatelessWidget {
     required VoidCallback onTap,
   }) {
     final bg = active ? color.withValues(alpha: 0.12) : Colors.transparent;
-    final fg = active ? color : AppTheme.textSecondary(context);
+    final fg = active ? color : CorexTokens.textSecondary(context);
     return Expanded(
       child: SizedBox(
         height: dense ? 44 : 56,
         child: InkWell(
-          borderRadius: BorderRadius.circular(AppTheme.radius),
+          borderRadius: BorderRadius.circular(CorexTokens.radius),
           onTap: onTap,
           child: Container(
             padding: EdgeInsets.symmetric(
                 horizontal: 6, vertical: dense ? 6 : 10),
             decoration: BoxDecoration(
               color: bg,
-              borderRadius: BorderRadius.circular(AppTheme.radius),
+              borderRadius: BorderRadius.circular(CorexTokens.radius),
               border: Border.all(
-                color: active ? color : AppTheme.borderColor(context),
+                color: active
+                    ? color
+                    : Colors.white.withValues(alpha: 0.08),
               ),
             ),
             child: Column(

@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../models/client_models.dart';
 import '../../providers/client_session_provider.dart';
 import '../../screens/core_matches/core_matches_common.dart';
 import '../../services/api_service.dart' show ApiException;
 import '../../services/client_auth_service.dart';
-import '../../theme.dart';
+import '../../theme/corex_accent_theme.dart';
+import '../../theme/corex_tokens.dart';
+import '../../widgets/corex/corex_card.dart';
+import '../../widgets/corex/corex_chip.dart';
+import '../../widgets/corex/corex_primary_button.dart';
+import '../../widgets/corex/corex_scaffold.dart';
 import '../auth/client/client_agency_picker_screen.dart';
 import 'client_match_detail_screen.dart';
 import 'client_match_edit_screen.dart';
@@ -84,21 +90,24 @@ class _ClientMatchesListScreenState extends State<ClientMatchesListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Core Matches')),
-      body: RefreshIndicator(
-        color: AppTheme.brand,
-        backgroundColor: AppTheme.surface(context),
-        onRefresh: _refresh,
-        child: _body(),
-      ),
+    final t = CorexAccentTheme.of(context);
+    return CorexScaffold(
+      title: 'Core Matches',
       floatingActionButton: _matches.isEmpty
           ? null
           : FloatingActionButton.extended(
               onPressed: _createMatch,
-              icon: const Icon(Icons.add),
+              backgroundColor: t.accent,
+              foregroundColor: Colors.white,
+              icon: const Icon(TablerIcons.plus),
               label: const Text('New search'),
             ),
+      body: RefreshIndicator(
+        color: t.accent,
+        backgroundColor: CorexTokens.surfaceTop(context),
+        onRefresh: _refresh,
+        child: _body(),
+      ),
     );
   }
 
@@ -108,16 +117,21 @@ class _ClientMatchesListScreenState extends State<ClientMatchesListScreen> {
     }
     if (_error != null && _matches.isEmpty) {
       return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(24),
         children: [
           const SizedBox(height: 64),
-          Icon(Icons.error_outline,
-              size: 48, color: Theme.of(context).hintColor),
+          Icon(TablerIcons.alert_circle,
+              size: 48, color: CorexTokens.textTertiary(context)),
           const SizedBox(height: 12),
-          Text(_error!, textAlign: TextAlign.center),
+          Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: CorexTokens.textSecondary(context)),
+          ),
           const SizedBox(height: 16),
           Center(
-            child: OutlinedButton(
+            child: TextButton(
                 onPressed: _refresh, child: const Text('Retry')),
           ),
         ],
@@ -125,16 +139,21 @@ class _ClientMatchesListScreenState extends State<ClientMatchesListScreen> {
     }
     if (_matches.isEmpty) {
       return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(24),
         children: [
-          const SizedBox(height: 80),
-          Icon(Icons.search_rounded,
-              size: 56, color: Theme.of(context).hintColor),
+          const SizedBox(height: 72),
+          Icon(TablerIcons.search,
+              size: 56, color: CorexTokens.textTertiary(context)),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             'Tell us what you\'re looking for',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: CorexTokens.textPrimary(context),
+            ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -142,23 +161,21 @@ class _ClientMatchesListScreenState extends State<ClientMatchesListScreen> {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 13,
-              color: Theme.of(context).hintColor,
+              color: CorexTokens.textSecondary(context),
             ),
           ),
           const SizedBox(height: 24),
-          SizedBox(
-            height: 48,
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.tune_rounded),
-              label: const Text('Set up my search'),
-              onPressed: _createMatch,
-            ),
+          CorexPrimaryButton(
+            label: 'Set up my search',
+            leading: TablerIcons.adjustments_horizontal,
+            onPressed: _createMatch,
           ),
         ],
       );
     }
 
     return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       itemCount: _matches.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -186,76 +203,71 @@ class _MatchCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fb = match.feedbackSummary;
-    return InkWell(
+    return CorexCard(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppTheme.radius),
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.surface(context),
-          borderRadius: BorderRadius.circular(AppTheme.radius),
-          border: Border.all(color: AppTheme.borderColor(context)),
-        ),
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _title(match),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.textPrimary(context),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                statusPill(match.status),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                if (match.priceMin != null || match.priceMax != null)
-                  _chip(context, _priceRange(match)),
-                if (match.bedsMin != null && match.bedsMin! > 0)
-                  _chip(context, '${match.bedsMin}+ beds'),
-                if (match.suburb != null && match.suburb!.isNotEmpty)
-                  _chip(context, match.suburb!)
-                else if (match.suburbs.isNotEmpty)
-                  _chip(context, match.suburbs.first),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                _tally(Icons.favorite_rounded, kReactionInterested,
-                    fb.interested),
-                const SizedBox(width: 12),
-                _tally(Icons.star_rounded, kReactionSaved, fb.saved),
-                const SizedBox(width: 12),
-                _tally(Icons.close_rounded, kReactionNotInterested,
-                    fb.notInterested),
-                const Spacer(),
-                Text(
-                  _relative(match.lastEngagedAt ??
-                      match.updatedAt ??
-                      match.createdAt),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _title(match),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 11,
-                    color: AppTheme.textSecondary(context),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: CorexTokens.textPrimary(context),
                   ),
                 ),
-              ],
-            ),
-          ],
-        ),
+              ),
+              const SizedBox(width: 8),
+              statusPill(match.status),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              if (match.priceMin != null || match.priceMax != null)
+                CorexChip(
+                  label: _priceRange(match),
+                  variant: CorexChipVariant.money,
+                ),
+              if (match.bedsMin != null && match.bedsMin! > 0)
+                CorexChip(label: '${match.bedsMin}+ beds'),
+              if (match.suburb != null && match.suburb!.isNotEmpty)
+                CorexChip(label: match.suburb!)
+              else if (match.suburbs.isNotEmpty)
+                CorexChip(label: match.suburbs.first),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _tally(Icons.favorite_rounded, kReactionInterested,
+                  fb.interested),
+              const SizedBox(width: 12),
+              _tally(Icons.star_rounded, kReactionSaved, fb.saved),
+              const SizedBox(width: 12),
+              _tally(Icons.close_rounded, kReactionNotInterested,
+                  fb.notInterested),
+              const Spacer(),
+              Text(
+                _relative(match.lastEngagedAt ??
+                    match.updatedAt ??
+                    match.createdAt),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: CorexTokens.textTertiary(context),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -283,22 +295,6 @@ class _MatchCard extends StatelessWidget {
     if (hi.isEmpty) return 'R from $lo';
     return 'R $lo–$hi';
   }
-
-  Widget _chip(BuildContext context, String text) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: AppTheme.surface2(context),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          text,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: AppTheme.textSecondary(context),
-          ),
-        ),
-      );
 
   Widget _tally(IconData icon, Color color, int count) {
     return Row(
