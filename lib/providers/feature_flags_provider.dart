@@ -18,6 +18,11 @@ class FeatureFlagsProvider extends ChangeNotifier {
   bool get aiVoice => _flags.aiVoice;
   bool get aiImageRecognition => _flags.aiImageRecognition;
 
+  /// True when the agency's Advanced AI Features are enabled (either AI
+  /// capability available to this user). Drives whether Ellie surfaces at
+  /// all — the home "Meet Ellie" card and the Ellie bottom-nav tab.
+  bool get aiEnabled => _flags.aiVoice || _flags.aiImageRecognition;
+
   bool get _stale =>
       _fetchedAt == null || DateTime.now().difference(_fetchedAt!) > _ttl;
 

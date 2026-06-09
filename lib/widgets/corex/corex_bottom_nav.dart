@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
+import '../../providers/feature_flags_provider.dart';
 import '../../screens/calendar_screen.dart';
 import '../../screens/ellie/ellie_screen.dart';
 import '../../screens/home/home_screen.dart';
@@ -83,6 +85,7 @@ class CorexBottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = CorexAccentTheme.of(context);
     final radius = BorderRadius.circular(20);
+    final aiEnabled = context.watch<FeatureFlagsProvider>().aiEnabled;
 
     return SafeArea(
       top: false,
@@ -113,7 +116,9 @@ class CorexBottomNav extends StatelessWidget {
                       'Today'),
                   _item(context, t, CorexNavTab.calendar, TablerIcons.calendar,
                       'Calendar'),
-                  _item(context, t, CorexNavTab.ellie, TablerIcons.sparkles, 'Ellie'),
+                  if (aiEnabled)
+                    _item(context, t, CorexNavTab.ellie, TablerIcons.sparkles,
+                        'Ellie'),
                   _item(context, t, CorexNavTab.me, TablerIcons.user_circle, 'Me'),
                 ],
               ),
