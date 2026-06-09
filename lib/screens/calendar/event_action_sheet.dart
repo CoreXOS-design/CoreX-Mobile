@@ -426,9 +426,10 @@ class _EventEditFormState extends State<_EventEditForm> {
     final pad = MediaQuery.of(context).viewInsets.bottom;
     return Padding(
       padding: EdgeInsets.only(bottom: pad),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Edit event', style: Theme.of(context).textTheme.titleMedium),
@@ -529,6 +530,7 @@ class _EventEditFormState extends State<_EventEditForm> {
               ],
             ),
           ],
+          ),
         ),
       ),
     );

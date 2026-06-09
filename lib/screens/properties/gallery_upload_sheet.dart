@@ -427,10 +427,12 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
               top: 16,
               bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildHeader(ctx),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildHeader(ctx),
                 Expanded(
                   child: ListView(
                     controller: scrollCtrl,
@@ -456,6 +458,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                 const SizedBox(height: 8),
                 _buildUploadButton(),
               ],
+              ),
             ),
           ),
         );

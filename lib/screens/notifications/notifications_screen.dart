@@ -51,7 +51,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
         ],
       ),
-      body: RefreshIndicator(
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(
         color: Theme.of(context).colorScheme.primary,
         onRefresh: () => context.read<NotificationsProvider>().loadFeed(),
         child: p.loadingFeed && p.items.isEmpty
@@ -68,6 +70,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       const SizedBox(height: 32),
                     ],
                   ),
+      ),
       ),
     );
   }

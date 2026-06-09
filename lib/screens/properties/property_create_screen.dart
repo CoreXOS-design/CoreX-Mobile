@@ -563,41 +563,44 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
             ),
           ],
         ),
-        body: Column(
-          children: [
-            Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              child: Row(
-                children: List.generate(4, (i) {
-                  final active = i <= _currentStep;
-                  return Expanded(
-                    child: Container(
-                      height: 4,
-                      margin: EdgeInsets.only(right: i < 3 ? 8 : 0),
-                      decoration: BoxDecoration(
-                        color:
-                            active ? AppTheme.brand : AppTheme.darkSurface2,
-                        borderRadius: BorderRadius.circular(2),
+        body: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                child: Row(
+                  children: List.generate(4, (i) {
+                    final active = i <= _currentStep;
+                    return Expanded(
+                      child: Container(
+                        height: 4,
+                        margin: EdgeInsets.only(right: i < 3 ? 8 : 0),
+                        decoration: BoxDecoration(
+                          color:
+                              active ? AppTheme.brand : AppTheme.darkSurface2,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
-                    ),
-                  );
-                }),
+                    );
+                  }),
+                ),
               ),
-            ),
-            Expanded(
-              child: PageView(
-                controller: _pageController,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  _stepAddress(),
-                  _stepDetails(),
-                  _stepSpaces(),
-                  _stepGallery(),
-                ],
+              Expanded(
+                child: PageView(
+                  controller: _pageController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    _stepAddress(),
+                    _stepDetails(),
+                    _stepSpaces(),
+                    _stepGallery(),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

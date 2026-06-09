@@ -74,10 +74,13 @@ class _ArchivedTasksScreenState extends State<ArchivedTasksScreen> {
       appBar: AppBar(
         title: Text('Archived${data != null ? ' · ${data.total}' : ''}'),
       ),
-      body: RefreshIndicator(
-        color: AppTheme.brand,
-        onRefresh: _load,
-        child: _body(data),
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(
+          color: AppTheme.brand,
+          onRefresh: _load,
+          child: _body(data),
+        ),
       ),
     );
   }

@@ -171,21 +171,24 @@ class CardFallbackScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(card.title)),
-      body: card.items.isEmpty
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  'Nothing to show yet.',
-                  style: Theme.of(context).textTheme.bodyMedium,
+      body: SafeArea(
+        top: false,
+        child: card.items.isEmpty
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'Nothing to show yet.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
                 ),
+              )
+            : ListView.separated(
+                itemCount: card.items.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, i) => _itemTile(card.cardId, card.items[i]),
               ),
-            )
-          : ListView.separated(
-              itemCount: card.items.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, i) => _itemTile(card.cardId, card.items[i]),
-            ),
+      ),
       bottomNavigationBar: card.viewAllUrl == null
           ? null
           : SafeArea(

@@ -19,38 +19,41 @@ class DealShowScreen extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
+      body: SafeArea(
+        top: false,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.handshake_outlined, size: 34, color: Color(0xFF3B82F6)),
                 ),
-                child: const Icon(Icons.handshake_outlined, size: 34, color: Color(0xFF3B82F6)),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Deal details coming in next release',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                  color: AppTheme.textPrimary(context),
+                const SizedBox(height: 16),
+                Text(
+                  'Deal details coming in next release',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: AppTheme.textPrimary(context),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'This pillar link is wired — the full show screen lands next.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: AppTheme.textMuted(context)),
-              ),
-            ],
+                const SizedBox(height: 6),
+                Text(
+                  'This pillar link is wired — the full show screen lands next.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 13, color: AppTheme.textMuted(context)),
+                ),
+              ],
+            ),
           ),
         ),
       ),

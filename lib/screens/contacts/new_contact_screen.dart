@@ -134,9 +134,11 @@ class _NewContactScreenState extends State<NewContactScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('New Contact')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
           _label('First Name *'),
           _field(_firstName, 'first_name'),
           _label('Last Name *'),
@@ -192,7 +194,8 @@ class _NewContactScreenState extends State<NewContactScreen> {
                   : const Text('Create Contact'),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }

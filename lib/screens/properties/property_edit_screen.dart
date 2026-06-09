@@ -196,12 +196,14 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
             if (v is! List) return;
             final urls = <String>[];
             for (final item in v) {
+              // Image URLs from the mobile property API are already absolute
+              // (https://host/storage/...). Use them as-is — no host-prefixing.
               if (item is String) {
-                urls.add(_absoluteImageUrl(item));
+                if (item.isNotEmpty) urls.add(item);
               } else if (item is Map) {
                 final u = item['url'] ?? item['src'] ?? item['path'];
                 if (u is String && u.isNotEmpty) {
-                  urls.add(_absoluteImageUrl(u));
+                  urls.add(u);
                 }
               }
             }
@@ -446,40 +448,77 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
         ),
         body: !_loaded && provider.isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  child: Row(
-                    children: List.generate(4, (i) {
-                      final active = i <= _currentStep;
-                      return Expanded(
-                        child: Container(
-                          height: 4,
-                          margin: EdgeInsets.only(right: i < 3 ? 8 : 0),
-                          decoration: BoxDecoration(
-                            color: active ? AppTheme.brand : AppTheme.surface2(context),
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      );
-                    }),
+          : SafeArea(
+              top: false,
+              child: Column(
+                children: [
+                  _tabBar(),
+                  Expanded(
+                    child: PageView(
+                      controller: _pageController,
+                      physics: const NeverScrollableScrollPhysics(),
+                      children: [
+                        _stepAddress(),
+                        _stepDetails(),
+                        _stepSpaces(),
+                        _stepGallery(),
+                      ],
+                    ),
                   ),
-                ),
-                Expanded(
-                  child: PageView(
-                    controller: _pageController,
-                    physics: const NeverScrollableScrollPhysics(),
-                    children: [
-                      _stepAddress(),
-                      _stepDetails(),
-                      _stepSpaces(),
-                      _stepGallery(),
-                    ],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
+      ),
+    );
+  }
+
+  static const _stepTitles = ['Address', 'Details', 'Spaces', 'Gallery'];
+
+  /// Tappable step tabs that replace the old progress lines. The agent can
+  /// jump straight to any section (e.g. Gallery) instead of stepping through
+  /// the wizard with Next. The brand underline still marks the active step.
+  Widget _tabBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: List.generate(_stepTitles.length, (i) {
+          final active = i == _currentStep;
+          return Expanded(
+            child: InkWell(
+              onTap: () => _goTo(i),
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+                child: Column(
+                  children: [
+                    Text(
+                      _stepTitles[i],
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                        color: active
+                            ? AppTheme.brand
+                            : AppTheme.textSecondary(context),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      height: 3,
+                      decoration: BoxDecoration(
+                        color:
+                            active ? AppTheme.brand : AppTheme.surface2(context),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -797,15 +836,6 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
       r'^(Bedroom|Bathroom|Garage|Kitchen|Lounge|Dining Room|Study|Patio|Garden|Pool|Flatlet)( \d+)?$');
 
   bool _isDerivedTag(String tag) => _derivedTagPattern.hasMatch(tag);
-
-  /// Backend sometimes returns relative paths (`/storage/...`) — prepend the
-  /// API host so `Image.network` can actually fetch them.
-  String _absoluteImageUrl(String url) {
-    if (url.isEmpty) return url;
-    if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    final base = ApiService.baseUrl.replaceAll(RegExp(r'/api/?$'), '');
-    return url.startsWith('/') ? '$base$url' : '$base/$url';
-  }
 
   Widget _customTagManager(List<String> liveTags) {
     // Custom tags = anything in the live list that isn't derived from a

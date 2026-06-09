@@ -94,9 +94,11 @@ class _NewMatchScreenState extends State<NewMatchScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('New Match')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
           _label('Listing Type *'),
           Wrap(
             spacing: 8,
@@ -204,7 +206,8 @@ class _NewMatchScreenState extends State<NewMatchScreen> {
                   : const Text('Create Match'),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }

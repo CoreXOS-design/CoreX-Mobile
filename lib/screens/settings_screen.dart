@@ -35,11 +35,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      body: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             const SectionHeader(label: 'Appearance'),
             const SizedBox(height: 12),
             _SettingsCard(children: [
@@ -98,6 +100,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
           ],
+          ),
         ),
       ),
     );

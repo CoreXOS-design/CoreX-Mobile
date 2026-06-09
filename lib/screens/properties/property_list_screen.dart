@@ -356,7 +356,9 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
         );
         if (mounted) context.read<PropertyProvider>().fetchProperties();
       }),
-      body: Column(
+      body: SafeArea(
+        top: false,
+        child: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -437,6 +439,7 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                           ),
           ),
         ],
+        ),
       ),
     );
   }

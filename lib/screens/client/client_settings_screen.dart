@@ -20,94 +20,97 @@ class ClientSettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final session = context.watch<ClientSessionProvider>();
     final t = CorexAccentTheme.of(context);
-    final canSwitch = session.agencies.length > 1 &&
-        session.client?.lockedToAgencyId == null;
+    final canSwitch =
+        session.agencies.length > 1 && session.client?.lockedToAgencyId == null;
 
     return CorexScaffold(
       title: 'Settings',
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        children: [
-          if (session.contact != null)
-            CorexCard(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: t.accentSoft,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: t.accentBorder),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          children: [
+            if (session.contact != null)
+              CorexCard(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: t.accentSoft,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: t.accentBorder),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(TablerIcons.user, color: t.accent),
                     ),
-                    alignment: Alignment.center,
-                    child: Icon(TablerIcons.user, color: t.accent),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          session.contact!.fullName,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: CorexTokens.textPrimary(context),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            session.contact!.fullName,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: CorexTokens.textPrimary(context),
+                            ),
                           ),
-                        ),
-                        Text(
-                          session.client?.email ??
-                              session.contact!.email ??
-                              '',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: CorexTokens.textSecondary(context),
+                          Text(
+                            session.client?.email ??
+                                session.contact!.email ??
+                                '',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: CorexTokens.textSecondary(context),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
+              ),
+            const SizedBox(height: 16),
+            _SettingsRow(
+              icon: TablerIcons.lock,
+              label: 'Change password',
+              onTap: () => showDialog(
+                context: context,
+                builder: (_) => const _ChangePasswordDialog(),
               ),
             ),
-          const SizedBox(height: 16),
-          _SettingsRow(
-            icon: TablerIcons.lock,
-            label: 'Change password',
-            onTap: () => showDialog(
-              context: context,
-              builder: (_) => const _ChangePasswordDialog(),
+            const SizedBox(height: 10),
+            _SettingsRow(
+              icon: TablerIcons.arrows_left_right,
+              label: 'Switch agency',
+              enabled: canSwitch,
+              onTap: canSwitch
+                  ? () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ClientAgencyPickerScreen(
+                              initialPick: false),
+                        ),
+                      )
+                  : null,
             ),
-          ),
-          const SizedBox(height: 10),
-          _SettingsRow(
-            icon: TablerIcons.arrows_left_right,
-            label: 'Switch agency',
-            enabled: canSwitch,
-            onTap: canSwitch
-                ? () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const ClientAgencyPickerScreen(
-                            initialPick: false),
-                      ),
-                    )
-                : null,
-          ),
-          const SizedBox(height: 10),
-          _SettingsRow(
-            icon: TablerIcons.logout,
-            label: 'Sign out',
-            tint: _kDanger,
-            onTap: () async {
-              await context.read<ClientSessionProvider>().signOut();
-              if (context.mounted) {
-                Navigator.of(context).popUntil((r) => r.isFirst);
-              }
-            },
-          ),
-        ],
+            const SizedBox(height: 10),
+            _SettingsRow(
+              icon: TablerIcons.logout,
+              label: 'Sign out',
+              tint: _kDanger,
+              onTap: () async {
+                await context.read<ClientSessionProvider>().signOut();
+                if (context.mounted) {
+                  Navigator.of(context).popUntil((r) => r.isFirst);
+                }
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -229,10 +232,8 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
             TextFormField(
               controller: _current,
               obscureText: true,
-              decoration:
-                  const InputDecoration(labelText: 'Current password'),
-              validator: (v) =>
-                  (v == null || v.isEmpty) ? 'Required' : null,
+              decoration: const InputDecoration(labelText: 'Current password'),
+              validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
             ),
             TextFormField(
               controller: _password,
@@ -251,8 +252,7 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Text(_error!,
-                  style: const TextStyle(color: Colors.redAccent)),
+              Text(_error!, style: const TextStyle(color: Colors.redAccent)),
             ],
           ],
         ),

@@ -102,11 +102,14 @@ class _ClientMatchesListScreenState extends State<ClientMatchesListScreen> {
               icon: const Icon(TablerIcons.plus),
               label: const Text('New search'),
             ),
-      body: RefreshIndicator(
-        color: t.accent,
-        backgroundColor: CorexTokens.surfaceTop(context),
-        onRefresh: _refresh,
-        child: _body(),
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(
+          color: t.accent,
+          backgroundColor: CorexTokens.surfaceTop(context),
+          onRefresh: _refresh,
+          child: _body(),
+        ),
       ),
     );
   }
@@ -131,8 +134,7 @@ class _ClientMatchesListScreenState extends State<ClientMatchesListScreen> {
           ),
           const SizedBox(height: 16),
           Center(
-            child: TextButton(
-                onPressed: _refresh, child: const Text('Retry')),
+            child: TextButton(onPressed: _refresh, child: const Text('Retry')),
           ),
         ],
       );
@@ -184,8 +186,7 @@ class _ClientMatchesListScreenState extends State<ClientMatchesListScreen> {
         onTap: () async {
           await Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) =>
-                  ClientMatchDetailScreen(matchId: _matches[i].id),
+              builder: (_) => ClientMatchDetailScreen(matchId: _matches[i].id),
             ),
           );
           if (mounted) _refresh();
@@ -248,8 +249,8 @@ class _MatchCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              _tally(Icons.favorite_rounded, kReactionInterested,
-                  fb.interested),
+              _tally(
+                  Icons.favorite_rounded, kReactionInterested, fb.interested),
               const SizedBox(width: 12),
               _tally(Icons.star_rounded, kReactionSaved, fb.saved),
               const SizedBox(width: 12),
@@ -257,9 +258,8 @@ class _MatchCard extends StatelessWidget {
                   fb.notInterested),
               const Spacer(),
               Text(
-                _relative(match.lastEngagedAt ??
-                    match.updatedAt ??
-                    match.createdAt),
+                _relative(
+                    match.lastEngagedAt ?? match.updatedAt ?? match.createdAt),
                 style: TextStyle(
                   fontSize: 11,
                   color: CorexTokens.textTertiary(context),
@@ -288,6 +288,7 @@ class _MatchCard extends StatelessWidget {
       if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)}k';
       return n.toStringAsFixed(0);
     }
+
     final lo = fmt(m.priceMin);
     final hi = fmt(m.priceMax);
     if (lo.isEmpty && hi.isEmpty) return '';

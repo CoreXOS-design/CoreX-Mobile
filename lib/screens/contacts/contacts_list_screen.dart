@@ -112,8 +112,10 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Contacts')),
       floatingActionButton: _GlowFab(onPressed: _openNew),
-      body: Column(
-        children: [
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: TextField(
@@ -147,7 +149,8 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
               child: _buildList(),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }

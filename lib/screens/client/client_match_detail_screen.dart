@@ -142,8 +142,8 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
       createdAt: m.createdAt,
       updatedAt: m.updatedAt,
       lastEngagedAt: DateTime.now().toIso8601String(),
-      feedbackSummary: ClientFeedbackSummary(
-          interested: i, notInterested: n, saved: s),
+      feedbackSummary:
+          ClientFeedbackSummary(interested: i, notInterested: n, saved: s),
       category: m.category,
       propertyType: m.propertyType,
       priceMin: m.priceMin,
@@ -161,8 +161,8 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
   Future<void> _react(ClientMatchResult r, String reaction) async {
     String? note;
     if (reaction == 'not_interested') {
-      final entered = await showNotForMeSheet(context,
-          initialNote: r.reactionNote);
+      final entered =
+          await showNotForMeSheet(context, initialNote: r.reactionNote);
       if (entered == null) return; // cancelled
       note = entered;
     }
@@ -211,11 +211,14 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
           onPressed: _detail == null ? null : _edit,
         ),
       ],
-      body: RefreshIndicator(
-        color: t.accent,
-        backgroundColor: CorexTokens.surfaceTop(context),
-        onRefresh: _load,
-        child: _body(),
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(
+          color: t.accent,
+          backgroundColor: CorexTokens.surfaceTop(context),
+          onRefresh: _load,
+          child: _body(),
+        ),
       ),
     );
   }
@@ -355,13 +358,17 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
         if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)}k';
         return n.toStringAsFixed(0);
       }
+
       final lo = fmt(m.priceMin);
       final hi = fmt(m.priceMax);
-      chips.add(
-          lo.isEmpty ? 'R up to $hi' : (hi.isEmpty ? 'R from $lo' : 'R $lo–$hi'));
+      chips.add(lo.isEmpty
+          ? 'R up to $hi'
+          : (hi.isEmpty ? 'R from $lo' : 'R $lo–$hi'));
     }
     if (m.bedsMin != null && m.bedsMin! > 0) chips.add('${m.bedsMin}+ beds');
-    if (m.bathsMin != null && m.bathsMin! > 0) chips.add('${m.bathsMin}+ baths');
+    if (m.bathsMin != null && m.bathsMin! > 0) {
+      chips.add('${m.bathsMin}+ baths');
+    }
 
     final subs = m.suburbs;
     if (subs.isNotEmpty) {

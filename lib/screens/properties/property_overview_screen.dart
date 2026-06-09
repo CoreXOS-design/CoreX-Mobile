@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/property_compliance.dart';
 import '../../models/property_overview.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
 import 'add_contact_sheet.dart';
@@ -221,14 +223,17 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? _ErrorState(message: _error!, onRetry: () => _load(forceRefresh: true))
-              : RefreshIndicator(
-                  onRefresh: () => _load(forceRefresh: true),
-                  child: _buildBody(_data!),
-                ),
+      body: SafeArea(
+        top: false,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+                ? _ErrorState(message: _error!, onRetry: () => _load(forceRefresh: true))
+                : RefreshIndicator(
+                    onRefresh: () => _load(forceRefresh: true),
+                    child: _buildBody(_data!),
+                  ),
+      ),
     );
   }
 
@@ -270,7 +275,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
         ],
         _sectionTitle('Where this listing is published'),
         const SizedBox(height: 8),
-        _placementsBlock(p.placements),
+        _portalLinksBlock(p.portalLinks),
         const SizedBox(height: 16),
         if (p.agent != null) ...[
           _sectionTitle('Listing Agent'),
@@ -457,8 +462,17 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
     );
   }
 
-  Widget _placementsBlock(List<Placement> placements) {
-    if (placements.isEmpty) {
+  /// Renders the canonical, ordered [PortalLink] list. We iterate — never
+  /// hardcode or filter on `portal` — so a new portal the backend adds shows
+  /// up automatically with no app change. Live entries are tappable; entries
+  /// that aren't published yet render greyed (not hidden) so the agent can see
+  /// where they can still syndicate.
+  Widget _portalLinksBlock(List<PortalLink> links) {
+    final anyLive = links.any((l) => l.isLive);
+
+    // Nothing live anywhere: lead with a small directive state. Still list the
+    // (greyed) portals beneath it when we know the targets.
+    if (links.isEmpty || !anyLive) {
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -470,7 +484,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
                   Icon(Icons.cloud_off,
                       size: 18, color: AppTheme.textMuted(context)),
                   const SizedBox(width: 8),
-                  Text('Not yet published',
+                  Text('Not yet published to any portal',
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimary(context),
@@ -479,22 +493,31 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                "This listing isn't published anywhere yet — open Syndication on the desktop to publish.",
+                "This listing isn't live anywhere yet — open Syndication on the desktop to publish.",
                 style: TextStyle(
                     color: AppTheme.textSecondary(context), fontSize: 13),
               ),
+              if (links.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                ...links.map(_portalLinkCard),
+              ],
             ],
           ),
         ),
       );
     }
+
     return Column(
-      children: placements.map(_placementCard).toList(),
+      children: links.map(_portalLinkCard).toList(),
     );
   }
 
-  IconData _portalIcon(String key) {
-    switch (key) {
+  /// Icon is chosen from the stable `portal` key ONLY, with a generic fallback
+  /// for any key we've never seen — so unknown/future portals still render.
+  IconData _portalIcon(String portal) {
+    switch (portal) {
+      case 'website':
+        return Icons.language;
       case 'hfc_premium':
         return Icons.star_rounded;
       case 'private_property':
@@ -502,74 +525,122 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
       case 'property24':
         return Icons.public;
       default:
-        return Icons.language;
+        return Icons.link; // generic fallback for unknown/future portals
     }
   }
 
-  Widget _placementCard(Placement p) {
+  /// The agency/company display name from the logged-in user, walking the few
+  /// shapes the profile payload uses. Returns null when unavailable.
+  String? _companyName() {
+    final user = context.read<AuthProvider>().user;
+    if (user == null) return null;
+    final candidates = <dynamic>[
+      user['agency_name'],
+      (user['agency'] is Map) ? (user['agency'] as Map)['name'] : null,
+      (user['user'] is Map && (user['user'] as Map)['agency'] is Map)
+          ? ((user['user'] as Map)['agency'] as Map)['name']
+          : null,
+    ];
+    for (final c in candidates) {
+      if (c is String && c.trim().isNotEmpty) return c.trim();
+    }
+    return null;
+  }
+
+  /// Label to show for a portal row. For the company website we prefer the
+  /// actual company name over the generic server label ("Company Website");
+  /// everything else uses the server-provided label verbatim.
+  String _portalLabel(PortalLink p) {
+    if (p.portal == 'website') {
+      final name = _companyName();
+      if (name != null && name.isNotEmpty) return name;
+    }
+    return p.label;
+  }
+
+  Widget _portalLinkCard(PortalLink p) {
+    final live = p.isLive;
+    final label = _portalLabel(p);
+    final muted = AppTheme.textMuted(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppTheme.radius),
-        onTap: () => _open(p.url),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppTheme.surface2(context),
-                  borderRadius: BorderRadius.circular(AppTheme.radius),
+        // Open the exact url we were given — never build a portal URL here.
+        // Greyed/not-published rows have no tap.
+        onTap: live ? () => _open(p.url) : null,
+        child: Opacity(
+          opacity: live ? 1 : 0.55,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface2(context),
+                    borderRadius: BorderRadius.circular(AppTheme.radius),
+                  ),
+                  child: Icon(_portalIcon(p.portal),
+                      color: live ? AppTheme.brand : muted, size: 22),
                 ),
-                child: Icon(_portalIcon(p.key),
-                    color: AppTheme.brand, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(p.label,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary(context),
-                        )),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        if (p.live)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text(
-                              'Live',
-                              style: TextStyle(
-                                color: Colors.green,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary(context),
+                          )),
+                      const SizedBox(height: 2),
+                      if (live)
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'Live',
+                                style: TextStyle(
+                                  color: Colors.green,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
-                          ),
-                        const SizedBox(width: 8),
-                        Text('View on portal',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.brand,
-                                fontWeight: FontWeight.w600)),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text('View on $label',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: AppTheme.brand,
+                                      fontWeight: FontWeight.w600)),
+                            ),
+                          ],
+                        )
+                      else
+                        Text('Not published',
+                            style: TextStyle(fontSize: 12, color: muted)),
+                      if ((p.ref ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text('Ref ${p.ref}',
+                            style: TextStyle(fontSize: 11, color: muted)),
                       ],
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              Icon(Icons.open_in_new,
-                  size: 16, color: AppTheme.textMuted(context)),
-            ],
+                Icon(live ? Icons.open_in_new : Icons.lock_outline,
+                    size: 16, color: muted),
+              ],
+            ),
           ),
         ),
       ),

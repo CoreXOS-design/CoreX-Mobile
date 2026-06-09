@@ -181,102 +181,97 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
           child: Text(_saving ? 'Saving…' : 'Save'),
         ),
       ],
-      body: _loadingOptions
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (_optionsError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      'Could not load options: $_optionsError',
-                      style:
-                          TextStyle(color: CorexTokens.textSecondary(context)),
+      body: SafeArea(
+        top: false,
+        child: _loadingOptions
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  if (_optionsError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        'Could not load options: $_optionsError',
+                        style: TextStyle(
+                            color: CorexTokens.textSecondary(context)),
+                      ),
+                    ),
+                  _section('Looking to'),
+                  _segmented(
+                    value: _listingType,
+                    options: const [
+                      ('sale', 'Buy'),
+                      ('rental', 'Rent'),
+                    ],
+                    onChanged: (v) => setState(() => _listingType = v),
+                  ),
+                  if (_fieldErrors['listing_type'] != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _fieldErrors['listing_type']!,
+                        style: const TextStyle(color: Colors.red, fontSize: 12),
+                      ),
+                    ),
+                  _section('Property type'),
+                  _dropdown(
+                    value: _propertyType,
+                    items: _options.propertyTypes,
+                    onChanged: (v) => setState(() => _propertyType = v),
+                  ),
+                  _section('Category'),
+                  _dropdown(
+                    value: _category,
+                    items: _options.categories.isEmpty
+                        ? const ['Residential', 'Commercial', 'Agricultural']
+                        : _options.categories,
+                    onChanged: (v) => setState(() => _category = v),
+                  ),
+                  _section('Price (ZAR)'),
+                  Row(
+                    children: [
+                      Expanded(child: _moneyField(_priceMin, 'Min')),
+                      const SizedBox(width: 12),
+                      Expanded(child: _moneyField(_priceMax, 'Max')),
+                    ],
+                  ),
+                  _section('Beds'),
+                  _stepper(_bedsMin, (v) => setState(() => _bedsMin = v)),
+                  _section('Baths'),
+                  _stepper(_bathsMin, (v) => setState(() => _bathsMin = v)),
+                  _section('Garages'),
+                  _stepper(_garagesMin, (v) => setState(() => _garagesMin = v)),
+                  _section('Suburbs'),
+                  _suburbsPicker(),
+                  _section('Notes'),
+                  TextField(
+                    controller: _notes,
+                    maxLines: 3,
+                    maxLength: 500,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      hintText: 'Anything else we should know?',
                     ),
                   ),
-                _section('Looking to'),
-                _segmented(
-                  value: _listingType,
-                  options: const [
-                    ('sale', 'Buy'),
-                    ('rental', 'Rent'),
-                  ],
-                  onChanged: (v) => setState(() => _listingType = v),
-                ),
-                if (_fieldErrors['listing_type'] != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      _fieldErrors['listing_type']!,
-                      style: const TextStyle(
-                          color: Colors.red, fontSize: 12),
+                  _section('Name (optional)'),
+                  TextField(
+                    controller: _name,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      hintText: 'Beach house under R2.5m',
                     ),
                   ),
-
-                _section('Property type'),
-                _dropdown(
-                  value: _propertyType,
-                  items: _options.propertyTypes,
-                  onChanged: (v) => setState(() => _propertyType = v),
-                ),
-
-                _section('Category'),
-                _dropdown(
-                  value: _category,
-                  items: _options.categories.isEmpty
-                      ? const ['Residential', 'Commercial', 'Agricultural']
-                      : _options.categories,
-                  onChanged: (v) => setState(() => _category = v),
-                ),
-
-                _section('Price (ZAR)'),
-                Row(
-                  children: [
-                    Expanded(child: _moneyField(_priceMin, 'Min')),
-                    const SizedBox(width: 12),
-                    Expanded(child: _moneyField(_priceMax, 'Max')),
-                  ],
-                ),
-
-                _section('Beds'),
-                _stepper(_bedsMin, (v) => setState(() => _bedsMin = v)),
-                _section('Baths'),
-                _stepper(_bathsMin, (v) => setState(() => _bathsMin = v)),
-                _section('Garages'),
-                _stepper(_garagesMin, (v) => setState(() => _garagesMin = v)),
-
-                _section('Suburbs'),
-                _suburbsPicker(),
-
-                _section('Notes'),
-                TextField(
-                  controller: _notes,
-                  maxLines: 3,
-                  maxLength: 500,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    hintText: 'Anything else we should know?',
+                  const SizedBox(height: 24),
+                  CorexPrimaryButton(
+                    label: widget.isEdit ? 'Save changes' : 'Create search',
+                    loading: _saving,
+                    onPressed: _saving ? null : _save,
                   ),
-                ),
-
-                _section('Name (optional)'),
-                TextField(
-                  controller: _name,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    hintText: 'Beach house under R2.5m',
-                  ),
-                ),
-                const SizedBox(height: 24),
-                CorexPrimaryButton(
-                  label: widget.isEdit ? 'Save changes' : 'Create search',
-                  loading: _saving,
-                  onPressed: _saving ? null : _save,
-                ),
-                const SizedBox(height: 32),
-              ],
-            ),
+                  const SizedBox(height: 32),
+                ],
+              ),
+      ),
     );
   }
 
@@ -349,8 +344,8 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
       ),
       items: [
         const DropdownMenuItem<String?>(value: null, child: Text('Any')),
-        ...items.map((e) =>
-            DropdownMenuItem<String?>(value: e, child: Text(e))),
+        ...items
+            .map((e) => DropdownMenuItem<String?>(value: e, child: Text(e))),
       ],
       onChanged: onChanged,
     );
@@ -370,8 +365,7 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
         final n = num.tryParse(c.text);
         if (n != null) {
           c.text = _money(n);
-          c.selection =
-              TextSelection.collapsed(offset: c.text.length);
+          c.selection = TextSelection.collapsed(offset: c.text.length);
         }
       },
     );
@@ -426,4 +420,3 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
     return buf.toString();
   }
 }
-

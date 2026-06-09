@@ -191,7 +191,7 @@ class _TasksScreenState extends State<TasksScreen> with WidgetsBindingObserver {
     }
     return Scaffold(
       backgroundColor: AppTheme.background(context),
-      body: body,
+      body: SafeArea(child: body),
       floatingActionButton: _tab == _TasksTab.active ? fab : null,
     );
   }

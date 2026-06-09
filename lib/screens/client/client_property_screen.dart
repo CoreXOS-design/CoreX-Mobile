@@ -189,142 +189,146 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
         ? p.images
         : (p.thumbnail != null ? [p.thumbnail!] : <String>[]);
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      children: [
-        if (images.isNotEmpty)
-          ClipRRect(
-            borderRadius: BorderRadius.circular(CorexTokens.radius),
-            child: AspectRatio(
-              aspectRatio: 16 / 10,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  PageView.builder(
-                    controller: _pageController,
-                    itemCount: images.length,
-                    onPageChanged: (i) => setState(() => _imageIndex = i),
-                    itemBuilder: (_, i) => Image.network(
-                      images[i],
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: CorexTokens.surfaceTop(context),
-                        child: Icon(TablerIcons.photo_off,
-                            color: CorexTokens.textTertiary(context)),
+    return SafeArea(
+      top: false,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+        children: [
+          if (images.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(CorexTokens.radius),
+              child: AspectRatio(
+                aspectRatio: 16 / 10,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    PageView.builder(
+                      controller: _pageController,
+                      itemCount: images.length,
+                      onPageChanged: (i) => setState(() => _imageIndex = i),
+                      itemBuilder: (_, i) => Image.network(
+                        images[i],
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: CorexTokens.surfaceTop(context),
+                          child: Icon(TablerIcons.photo_off,
+                              color: CorexTokens.textTertiary(context)),
+                        ),
                       ),
                     ),
-                  ),
-                  if (images.length > 1)
-                    Positioned(
-                      bottom: 8,
-                      left: 0,
-                      right: 0,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          for (var i = 0; i < images.length; i++)
-                            Container(
-                              margin:
-                                  const EdgeInsets.symmetric(horizontal: 3),
-                              width: 6,
-                              height: 6,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: i == _imageIndex
-                                    ? Colors.white
-                                    : Colors.white.withValues(alpha: 0.45),
+                    if (images.length > 1)
+                      Positioned(
+                        bottom: 8,
+                        left: 0,
+                        right: 0,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            for (var i = 0; i < images.length; i++)
+                              Container(
+                                margin:
+                                    const EdgeInsets.symmetric(horizontal: 3),
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: i == _imageIndex
+                                      ? Colors.white
+                                      : Colors.white.withValues(alpha: 0.45),
+                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        const SizedBox(height: 16),
-        if (p.title != null && p.title!.isNotEmpty)
-          Text(
-            p.title!,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: CorexTokens.textPrimary(context),
-            ),
-          ),
-        if (p.address != null && p.address!.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              p.address!,
+          const SizedBox(height: 16),
+          if (p.title != null && p.title!.isNotEmpty)
+            Text(
+              p.title!,
               style: TextStyle(
-                fontSize: 13,
-                color: CorexTokens.textSecondary(context),
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: CorexTokens.textPrimary(context),
               ),
             ),
-          ),
-        const SizedBox(height: 8),
-        Text(
-          p.priceDisplay ?? (p.price != null ? 'R ${_money(p.price!)}' : ''),
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            color: t.accentMoney,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          children: [
-            if (p.beds != null) _stat(TablerIcons.bed, '${p.beds} bd'),
-            if (p.baths != null) _stat(TablerIcons.bath, '${p.baths} ba'),
-            if (p.garages != null) _stat(TablerIcons.car, '${p.garages} garage'),
-            if (p.parking != null)
-              _stat(TablerIcons.parking, '${p.parking} parking'),
-            if (p.floorSize != null)
-              _stat(TablerIcons.ruler_2, '${p.floorSize}m² floor'),
-            if (p.erfSize != null)
-              _stat(TablerIcons.square, '${p.erfSize}m² erf'),
-          ],
-        ),
-        if (p.description != null && p.description!.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          _description(p.description!),
-        ],
-        if (p.features.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Text(
-            'Features',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: CorexTokens.textPrimary(context),
+          if (p.address != null && p.address!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                p.address!,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: CorexTokens.textSecondary(context),
+                ),
+              ),
             ),
-          ),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: p.features.map((f) => CorexChip(label: f)).toList(),
-          ),
-        ],
-        if (p.agent != null) ...[
-          const SizedBox(height: 20),
-          _agentCard(p.agent!, p.branch),
-        ],
-        if (p.webPreviewUrl != null && p.webPreviewUrl!.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Center(
-            child: TextButton.icon(
-              icon: const Icon(TablerIcons.external_link, size: 16),
-              label: const Text('View on web'),
-              onPressed: () => _launch(p.webPreviewUrl!),
+          Text(
+            p.priceDisplay ?? (p.price != null ? 'R ${_money(p.price!)}' : ''),
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: t.accentMoney,
             ),
           ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              if (p.beds != null) _stat(TablerIcons.bed, '${p.beds} bd'),
+              if (p.baths != null) _stat(TablerIcons.bath, '${p.baths} ba'),
+              if (p.garages != null)
+                _stat(TablerIcons.car, '${p.garages} garage'),
+              if (p.parking != null)
+                _stat(TablerIcons.parking, '${p.parking} parking'),
+              if (p.floorSize != null)
+                _stat(TablerIcons.ruler_2, '${p.floorSize}m² floor'),
+              if (p.erfSize != null)
+                _stat(TablerIcons.square, '${p.erfSize}m² erf'),
+            ],
+          ),
+          if (p.description != null && p.description!.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _description(p.description!),
+          ],
+          if (p.features.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text(
+              'Features',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: CorexTokens.textPrimary(context),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: p.features.map((f) => CorexChip(label: f)).toList(),
+            ),
+          ],
+          if (p.agent != null) ...[
+            const SizedBox(height: 20),
+            _agentCard(p.agent!, p.branch),
+          ],
+          if (p.webPreviewUrl != null && p.webPreviewUrl!.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Center(
+              child: TextButton.icon(
+                icon: const Icon(TablerIcons.external_link, size: 16),
+                label: const Text('View on web'),
+                onPressed: () => _launch(p.webPreviewUrl!),
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
         ],
-        const SizedBox(height: 8),
-      ],
+      ),
     );
   }
 
@@ -343,7 +347,8 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
 
   Widget _description(String desc) {
     final long = desc.length > 200;
-    final visible = !long || _descExpanded ? desc : '${desc.substring(0, 200)}…';
+    final visible =
+        !long || _descExpanded ? desc : '${desc.substring(0, 200)}…';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -432,8 +437,7 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
                     child: CorexSecondaryButton(
                       label: 'WhatsApp',
                       leading: TablerIcons.brand_whatsapp,
-                      onPressed: () =>
-                          _launch('https://wa.me/$whatsappPhone'),
+                      onPressed: () => _launch('https://wa.me/$whatsappPhone'),
                     ),
                   ),
                 if (whatsappPhone != null &&

@@ -1,3 +1,63 @@
+/// A single portal placement from the canonical `portal_links` array.
+///
+/// This is the portal-agnostic shape: the backend owns the ordered list and
+/// any new portal simply appears as another entry. The app renders by
+/// iterating — it never hardcodes or switches on [portal] to decide whether a
+/// row shows. [portal] is used ONLY to pick an icon (with a generic fallback).
+class PortalLink {
+  /// Stable machine key (website / property24 / private_property / …).
+  /// Use only to choose an icon — never to filter rows.
+  final String portal;
+
+  /// Display text. Always present.
+  final String label;
+
+  /// "live" or "not_published".
+  final String status;
+
+  /// Public page URL. Non-null only when live. Open this exact value — never
+  /// build a portal URL in the app.
+  final String? url;
+
+  /// Portal listing reference (display/support). May be null.
+  final String? ref;
+
+  const PortalLink({
+    required this.portal,
+    required this.label,
+    this.status = 'not_published',
+    this.url,
+    this.ref,
+  });
+
+  /// Live ⇔ a working public page exists. Treat a missing/empty url as
+  /// not-openable defensively, even if status claims "live".
+  bool get isLive => status == 'live' && url != null && url!.isNotEmpty;
+
+  factory PortalLink.fromJson(Map<String, dynamic> j) {
+    final rawUrl = j['url']?.toString();
+    final rawRef = j['ref']?.toString();
+    return PortalLink(
+      portal: j['portal']?.toString() ?? '',
+      label: j['label']?.toString() ?? '',
+      status: j['status']?.toString() ?? 'not_published',
+      url: (rawUrl == null || rawUrl.isEmpty) ? null : rawUrl,
+      ref: (rawRef == null || rawRef.isEmpty) ? null : rawRef,
+    );
+  }
+
+  /// Bridge a legacy [Placement] (live-only) into the portal-link shape so a
+  /// response that still only returns `placements` keeps rendering.
+  factory PortalLink.fromPlacement(Placement p) => PortalLink(
+        portal: p.key,
+        label: p.label,
+        status: p.live ? 'live' : 'not_published',
+        url: p.url.isEmpty ? null : p.url,
+      );
+}
+
+/// DEPRECATED legacy placement shape (live-only). Kept so older responses
+/// still parse; new code reads [PropertyOverview.portalLinks] instead.
 class Placement {
   final String key;
   final String label;
@@ -78,6 +138,12 @@ class PropertyOverview {
   final String? description;
   final String? livePreviewUrl;
   final String? virtualTourUrl;
+
+  /// Canonical, ordered, portal-agnostic placement list. Render by iterating.
+  final List<PortalLink> portalLinks;
+
+  /// DEPRECATED legacy live-only list. Retained for back-compat; prefer
+  /// [portalLinks].
   final List<Placement> placements;
   final ContactRef? agent;
   final ContactRef? owner;
@@ -102,6 +168,7 @@ class PropertyOverview {
     this.description,
     this.livePreviewUrl,
     this.virtualTourUrl,
+    this.portalLinks = const [],
     this.placements = const [],
     this.agent,
     this.owner,
@@ -130,6 +197,17 @@ class PropertyOverview {
             .toList()
         : <Placement>[];
 
+    // Prefer the canonical `portal_links` array (live + not_published). Fall
+    // back to deriving from the deprecated `placements` (live-only) so older
+    // responses still show their portals.
+    final portalLinksRaw = j['portal_links'];
+    final portalLinks = portalLinksRaw is List
+        ? portalLinksRaw
+            .whereType<Map>()
+            .map((e) => PortalLink.fromJson(Map<String, dynamic>.from(e)))
+            .toList()
+        : placements.map(PortalLink.fromPlacement).toList();
+
     final agentRaw = j['agent'];
     final ownerRaw = j['owner'];
     final kdRaw = j['key_dates'];
@@ -153,6 +231,7 @@ class PropertyOverview {
       description: j['description']?.toString(),
       livePreviewUrl: j['live_preview_url']?.toString(),
       virtualTourUrl: j['virtual_tour_url']?.toString(),
+      portalLinks: portalLinks,
       placements: placements,
       agent: agentRaw is Map
           ? ContactRef.fromJson(Map<String, dynamic>.from(agentRaw))

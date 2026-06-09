@@ -150,9 +150,14 @@ class MessagingService {
       } catch (_) {}
     }
 
-    ScaffoldMessenger.of(ctx).showSnackBar(
-      SnackBar(
-        duration: const Duration(seconds: 5),
+    final messenger = ScaffoldMessenger.of(ctx);
+
+    // Show a banner pinned to the top of the screen (instead of a bottom
+    // snackbar) with an explicit X to dismiss. Auto-dismiss after 5s to match
+    // the previous behaviour.
+    messenger.clearMaterialBanners();
+    final controller = messenger.showMaterialBanner(
+      MaterialBanner(
         content: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -163,14 +168,29 @@ class MessagingService {
             if (body != null) Text(body, style: const TextStyle(fontSize: 12)),
           ],
         ),
-        action: action != null
-            ? SnackBarAction(
-                label: 'View',
-                onPressed: () => DeepLinkRouter.open(ctx, action),
-              )
-            : null,
+        leading: const Icon(Icons.notifications),
+        actions: [
+          if (action != null)
+            TextButton(
+              onPressed: () {
+                messenger.hideCurrentMaterialBanner();
+                DeepLinkRouter.open(ctx, action);
+              },
+              child: const Text('View'),
+            ),
+          IconButton(
+            icon: const Icon(Icons.close),
+            tooltip: 'Dismiss',
+            onPressed: messenger.hideCurrentMaterialBanner,
+          ),
+        ],
       ),
     );
+
+    // Auto-dismiss after 5 seconds if this banner is still showing.
+    Future<void>.delayed(const Duration(seconds: 5), () {
+      controller.close();
+    });
   }
 
   void _onMessageTap(RemoteMessage msg) {

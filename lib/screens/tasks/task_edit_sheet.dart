@@ -105,7 +105,8 @@ class _TaskEditFormState extends State<_TaskEditForm> {
     final pad = MediaQuery.of(context).viewInsets.bottom;
     return Padding(
       padding: EdgeInsets.only(bottom: pad),
-      child: SingleChildScrollView(
+      child: SafeArea(
+        child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -192,6 +193,7 @@ class _TaskEditFormState extends State<_TaskEditForm> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

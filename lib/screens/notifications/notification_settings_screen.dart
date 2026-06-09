@@ -55,7 +55,9 @@ class _NotificationSettingsScreenState
             ),
         ],
       ),
-      body: data == null
+      body: SafeArea(
+        top: false,
+        child: data == null
           ? Center(
               child: p.prefsError != null
                   ? Padding(
@@ -84,6 +86,7 @@ class _NotificationSettingsScreenState
                 ),
               ],
             ),
+      ),
     );
   }
 

@@ -1280,9 +1280,14 @@ class ApiService {
               ? raw['property'] as Map<String, dynamic>
               : raw)
           : <String, dynamic>{};
-      // The backend returns the full property record at the top level with a
-      // sibling `placements` array; if `placements` lives outside `property`
-      // when wrapped, fold it in so the model sees a flat shape.
+      // The backend returns the full property record at the top level with
+      // sibling `portal_links` / `placements` arrays; if they live outside
+      // `property` when wrapped, fold them in so the model sees a flat shape.
+      if (raw is Map<String, dynamic> &&
+          raw['portal_links'] != null &&
+          map['portal_links'] == null) {
+        map['portal_links'] = raw['portal_links'];
+      }
       if (raw is Map<String, dynamic> &&
           raw['placements'] != null &&
           map['placements'] == null) {

@@ -228,131 +228,135 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                   top: 16,
                   bottom: MediaQuery.of(ctx2).viewInsets.bottom + 16,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(_iconForType(space.type), color: AppTheme.brand),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            space.type,
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.textPrimary(context),
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close),
-                          color: AppTheme.textSecondary(context),
-                          onPressed: () => Navigator.of(ctx).pop(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    if (showPerUnit)
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Row(
                         children: [
-                          _tabButton('All Units', tab == 0,
-                              () => setSheet(() => tab = 0)),
+                          Icon(_iconForType(space.type), color: AppTheme.brand),
                           const SizedBox(width: 8),
-                          _tabButton('Per Unit', tab == 1,
-                              () => setSheet(() => tab = 1)),
+                          Expanded(
+                            child: Text(
+                              space.type,
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textPrimary(context),
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            color: AppTheme.textSecondary(context),
+                            onPressed: () => Navigator.of(ctx).pop(),
+                          ),
                         ],
                       ),
-                    if (tab == 1 && showPerUnit) ...[
+                      const SizedBox(height: 8),
+                      if (showPerUnit)
+                        Row(
+                          children: [
+                            _tabButton('All Units', tab == 0,
+                                () => setSheet(() => tab = 0)),
+                            const SizedBox(width: 8),
+                            _tabButton('Per Unit', tab == 1,
+                                () => setSheet(() => tab = 1)),
+                          ],
+                        ),
+                      if (tab == 1 && showPerUnit) ...[
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 40,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: space.units.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(width: 8),
+                            itemBuilder: (_, i) {
+                              final selected = i == unitIndex;
+                              return ChoiceChip(
+                                label: Text(space.units[i].label),
+                                selected: selected,
+                                onSelected: (_) =>
+                                    setSheet(() => unitIndex = i),
+                                backgroundColor: AppTheme.darkSurface2,
+                                selectedColor: AppTheme.brand,
+                                labelStyle: TextStyle(
+                                  color: selected
+                                      ? Colors.white
+                                      : AppTheme.textPrimary(context),
+                                ),
+                                side: BorderSide.none,
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
-                      SizedBox(
-                        height: 40,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: space.units.length,
-                          separatorBuilder: (_, __) => const SizedBox(width: 8),
-                          itemBuilder: (_, i) {
-                            final selected = i == unitIndex;
-                            return ChoiceChip(
-                              label: Text(space.units[i].label),
-                              selected: selected,
-                              onSelected: (_) =>
-                                  setSheet(() => unitIndex = i),
-                              backgroundColor: AppTheme.darkSurface2,
-                              selectedColor: AppTheme.brand,
-                              labelStyle: TextStyle(
-                                color: selected
-                                    ? Colors.white
-                                    : AppTheme.textPrimary(context),
+                      Expanded(
+                        child: ListView(
+                          controller: scrollCtrl,
+                          children: groups.entries
+                              .where((e) => e.value.isNotEmpty)
+                              .map((entry) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    entry.key,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.textSecondary(context),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: entry.value.map((f) {
+                                      final selected =
+                                          currentList().contains(f);
+                                      return FilterChip(
+                                        label: Text(f),
+                                        selected: selected,
+                                        onSelected: (_) => toggle(f),
+                                        backgroundColor: AppTheme.darkSurface2,
+                                        selectedColor: AppTheme.brand,
+                                        checkmarkColor: Colors.white,
+                                        labelStyle: TextStyle(
+                                          color: selected
+                                              ? Colors.white
+                                              : AppTheme.textPrimary(context),
+                                        ),
+                                        side: BorderSide.none,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                              AppTheme.radius),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ],
                               ),
-                              side: BorderSide.none,
                             );
-                          },
+                          }).toList(),
+                        ),
+                      ),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          child: const Text('Done'),
                         ),
                       ),
                     ],
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: ListView(
-                        controller: scrollCtrl,
-                        children: groups.entries
-                            .where((e) => e.value.isNotEmpty)
-                            .map((entry) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  entry.key,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.textSecondary(context),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: entry.value.map((f) {
-                                    final selected =
-                                        currentList().contains(f);
-                                    return FilterChip(
-                                      label: Text(f),
-                                      selected: selected,
-                                      onSelected: (_) => toggle(f),
-                                      backgroundColor: AppTheme.darkSurface2,
-                                      selectedColor: AppTheme.brand,
-                                      checkmarkColor: Colors.white,
-                                      labelStyle: TextStyle(
-                                        color: selected
-                                            ? Colors.white
-                                            : AppTheme.textPrimary(context),
-                                      ),
-                                      side: BorderSide.none,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(
-                                            AppTheme.radius),
-                                      ),
-                                    );
-                                  }).toList(),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.of(ctx).pop(),
-                        child: const Text('Done'),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               );
             },
@@ -404,8 +408,8 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
       setState(() {
         _spaces = result.spaces;
         _features = Map<String, List<String>>.from(result.features);
-        for (final key in _catalog?.featureCategories.keys ??
-            const <String>[]) {
+        for (final key
+            in _catalog?.featureCategories.keys ?? const <String>[]) {
           _features.putIfAbsent(key, () => <String>[]);
         }
         _dirty = false;
@@ -607,9 +611,8 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                 ),
               ),
               IconButton(
-                onPressed: space.count > 0
-                    ? () => _stepCount(index, -delta)
-                    : null,
+                onPressed:
+                    space.count > 0 ? () => _stepCount(index, -delta) : null,
                 icon: const Icon(Icons.remove_circle_outline),
                 color: AppTheme.brand,
                 visualDensity: VisualDensity.compact,
@@ -703,9 +706,8 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                   selectedColor: AppTheme.brand,
                   checkmarkColor: Colors.white,
                   labelStyle: TextStyle(
-                    color: selected
-                        ? Colors.white
-                        : AppTheme.textPrimary(context),
+                    color:
+                        selected ? Colors.white : AppTheme.textPrimary(context),
                   ),
                   side: BorderSide.none,
                   shape: RoundedRectangleBorder(

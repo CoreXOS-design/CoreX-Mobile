@@ -32,19 +32,22 @@ class _InvitationsScreenState extends State<InvitationsScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Invitations')),
-      body: RefreshIndicator(
-        onRefresh: () => dash.loadInvitations(),
-        child: invites.isEmpty
-            ? ListView(children: const [
-                SizedBox(height: 120),
-                Center(child: Text('No invitations')),
-              ])
-            : ListView.separated(
-                padding: const EdgeInsets.all(12),
-                itemCount: invites.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (_, i) => _InvitationCard(invitation: invites[i]),
-              ),
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(
+          onRefresh: () => dash.loadInvitations(),
+          child: invites.isEmpty
+              ? ListView(children: const [
+                  SizedBox(height: 120),
+                  Center(child: Text('No invitations')),
+                ])
+              : ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: invites.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) => _InvitationCard(invitation: invites[i]),
+                ),
+        ),
       ),
     );
   }

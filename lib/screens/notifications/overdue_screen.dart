@@ -24,7 +24,9 @@ class OverdueScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.background(context),
       appBar: AppBar(title: Text(title)),
-      body: RefreshIndicator(
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(
         color: AppTheme.brand,
         onRefresh: () =>
             context.read<NotificationsProvider>().loadOverdue(),
@@ -49,6 +51,7 @@ class OverdueScreen extends StatelessWidget {
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) => _OverdueRow(item: items[i]),
               ),
+      ),
       ),
     );
   }

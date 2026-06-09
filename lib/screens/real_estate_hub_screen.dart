@@ -44,7 +44,6 @@ class RealEstateHubScreen extends StatelessWidget {
         body: Container(
           decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
           child: SafeArea(
-            bottom: false,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

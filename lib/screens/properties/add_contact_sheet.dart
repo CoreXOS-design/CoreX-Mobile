@@ -61,10 +61,12 @@ class _AddContactSheetState extends State<AddContactSheet> {
           constraints: BoxConstraints(
             maxHeight: MediaQuery.of(context).size.height * 0.9,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 10),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 10),
               Container(
                 width: 40,
                 height: 4,
@@ -99,6 +101,7 @@ class _AddContactSheetState extends State<AddContactSheet> {
                 ),
               ),
             ],
+            ),
           ),
         ),
       ),

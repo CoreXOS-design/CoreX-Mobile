@@ -9,8 +9,7 @@ import '../../theme/corex_tokens.dart';
 import '../../widgets/corex/corex_app_bar.dart';
 import '../../widgets/corex/corex_bottom_nav.dart';
 import '../../widgets/corex/corex_drawer.dart';
-import '../../widgets/corex/corex_ellie_teaser.dart';
-import '../../widgets/corex/corex_kpi_tile.dart';
+import '../../widgets/corex/corex_ellie_card.dart';
 import '../../widgets/corex/corex_module_tile.dart';
 import '../../widgets/corex/corex_next_appointment.dart';
 import '../../providers/portal_leads_provider.dart';
@@ -86,11 +85,9 @@ class HomeScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 18),
-                        CorexEllieTeaser(
+                        CorexEllieCard(
                           onTap: () => _push(context, const EllieScreen()),
                         ),
-                        const SizedBox(height: 16),
-                        _kpiRow(),
                         const SizedBox(height: 16),
                         const CorexNextAppointment(),
                         const SizedBox(height: 22),
@@ -115,24 +112,6 @@ class HomeScreen extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _kpiRow() {
-    return const Row(
-      children: [
-        Expanded(child: CorexKpiTile(label: 'Coming soon', value: '—')),
-        SizedBox(width: 10),
-        Expanded(child: CorexKpiTile(label: 'Coming soon', value: '—')),
-        SizedBox(width: 10),
-        Expanded(
-          child: CorexKpiTile(
-            label: 'Coming soon',
-            value: '—',
-            money: true,
-          ),
-        ),
-      ],
     );
   }
 

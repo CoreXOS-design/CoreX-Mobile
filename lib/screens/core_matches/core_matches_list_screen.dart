@@ -64,11 +64,14 @@ class _CoreMatchesListScreenState extends State<CoreMatchesListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Core Matches')),
-      body: RefreshIndicator(
-        color: Theme.of(context).colorScheme.primary,
-        backgroundColor: AppTheme.surface(context),
-        onRefresh: _load,
-        child: _buildBody(),
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(
+          color: Theme.of(context).colorScheme.primary,
+          backgroundColor: AppTheme.surface(context),
+          onRefresh: _load,
+          child: _buildBody(),
+        ),
       ),
     );
   }

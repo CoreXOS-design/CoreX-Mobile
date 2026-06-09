@@ -136,16 +136,19 @@ class _ContactShowScreenState extends State<ContactShowScreen> {
                 ),
               ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? _ErrorState(message: _error!, onRetry: _load)
-              : RefreshIndicator(
-                  color: AppTheme.brand,
-                  backgroundColor: AppTheme.surface(context),
-                  onRefresh: _load,
-                  child: _buildBody(),
-                ),
+      body: SafeArea(
+        top: false,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+                ? _ErrorState(message: _error!, onRetry: _load)
+                : RefreshIndicator(
+                    color: AppTheme.brand,
+                    backgroundColor: AppTheme.surface(context),
+                    onRefresh: _load,
+                    child: _buildBody(),
+                  ),
+      ),
     );
   }
 

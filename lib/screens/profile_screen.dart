@@ -17,10 +17,12 @@ class ProfileScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        child: Column(
-          children: [
+      body: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          child: Column(
+            children: [
             const SizedBox(height: 12),
             Container(
               width: 96,
@@ -79,6 +81,7 @@ class ProfileScreen extends StatelessWidget {
               _InfoRow(label: 'Role', value: user?['role'] ?? '-'),
             ]),
           ],
+          ),
         ),
       ),
     );

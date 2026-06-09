@@ -385,11 +385,14 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        color: AppTheme.brand,
-        backgroundColor: AppTheme.surface(context),
-        onRefresh: _load,
-        child: _buildBody(),
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(
+          color: AppTheme.brand,
+          backgroundColor: AppTheme.surface(context),
+          onRefresh: _load,
+          child: _buildBody(),
+        ),
       ),
     );
   }
