@@ -156,10 +156,10 @@ class MobileFeatureFlags {
 
   factory MobileFeatureFlags.fromJson(Map<String, dynamic> j) =>
       MobileFeatureFlags(
-        aiVoice: j['ai_voice'] == true,
-        aiImageRecognition: j['ai_image_recognition'] == true,
-        agencyId: (j['agency_id'] is num) ? (j['agency_id'] as num).toInt() : null,
-        userId: (j['user_id'] is num) ? (j['user_id'] as num).toInt() : null,
+        aiVoice: j['aiVoice'] == true,
+        aiImageRecognition: j['aiImageRecognition'] == true,
+        agencyId: (j['agencyId'] is num) ? (j['agencyId'] as num).toInt() : null,
+        userId: (j['userId'] is num) ? (j['userId'] as num).toInt() : null,
       );
 }
 
