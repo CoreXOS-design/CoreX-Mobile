@@ -7,6 +7,7 @@ import '../../providers/dashboard_provider.dart';
 import '../../screens/calendar_screen.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
+import '../../utils/app_time.dart';
 import 'corex_card.dart';
 import 'corex_chip.dart';
 
@@ -45,9 +46,9 @@ class _CorexNextAppointmentState extends State<CorexNextAppointment> {
 
   /// First event today whose start is still ahead of now, earliest first.
   CalendarEvent? _nextToday(List<CalendarEvent> events) {
-    final now = DateTime.now();
+    final now = jhb(DateTime.now());
     final upcoming = events.where((e) {
-      final d = e.eventDate;
+      final d = jhb(e.eventDate);
       return d.year == now.year &&
           d.month == now.month &&
           d.day == now.day &&
@@ -61,7 +62,7 @@ class _CorexNextAppointmentState extends State<CorexNextAppointment> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => CalendarScreen(
-          initialDate: event.eventDate,
+          initialDate: jhb(event.eventDate),
           openEventId: event.id,
         ),
       ),
@@ -151,7 +152,7 @@ class _AppointmentShell extends StatelessWidget {
     final colour = _eventColour();
     final chips = <Widget>[
       CorexChip(
-        label: e.allDay ? 'All day' : _formatTime(e.eventDate),
+        label: e.allDay ? 'All day' : _formatTime(jhb(e.eventDate)),
         variant: CorexChipVariant.accent,
       ),
       if (!e.allDay) CorexChip(label: _relative(e.eventDate)),
@@ -212,8 +213,11 @@ class _AppointmentShell extends StatelessWidget {
     );
   }
 
-  String _formatTime(DateTime dt) =>
-      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  String _formatTime(DateTime dt) {
+    // Stored times are UTC; show them in the device's local timezone.
+    final local = dt.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
 
   /// "Now" / "in 45 min" / "in 2h" / "in 2h 15m" — scoped to today.
   String _relative(DateTime dt) {

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../models/dashboard_data.dart';
 import '../../providers/dashboard_provider.dart';
 import '../../theme.dart';
+import '../../utils/app_time.dart';
 
 /// One sheet, two modes — replaces the separate create-task and create-event
 /// sheets. Accepts [initialMode] so callers (Today FAB, Tasks FAB, Calendar
@@ -73,17 +74,17 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
       if (_conflicts.isNotEmpty) setState(() => _conflicts = const []);
       return;
     }
-    final start = DateTime(_eventDate!.year, _eventDate!.month, _eventDate!.day,
-        _eventTime!.hour, _eventTime!.minute);
-    final end = DateTime(_eventDate!.year, _eventDate!.month, _eventDate!.day,
-        _eventEndTime!.hour, _eventEndTime!.minute);
+    final start = jhbWallClock(_eventDate!.year, _eventDate!.month,
+        _eventDate!.day, _eventTime!.hour, _eventTime!.minute);
+    final end = jhbWallClock(_eventDate!.year, _eventDate!.month,
+        _eventDate!.day, _eventEndTime!.hour, _eventEndTime!.minute);
 
     final events = context.read<DashboardProvider>().events;
     final overlaps = <CalendarEvent>[];
     for (final e in events) {
       if (e.allDay) continue; // all-day events don't block a timed slot
-      final eStart = e.eventDate.toLocal();
-      final eEnd = (e.endDate ?? e.eventDate).toLocal();
+      final eStart = jhb(e.eventDate);
+      final eEnd = jhb(e.endDate ?? e.eventDate);
       // Half-open overlap: [start,end) intersects [eStart,eEnd].
       final intersects = start.isBefore(eEnd) && eStart.isBefore(end);
       // Zero-length (point) events: overlap only if strictly inside the window.
@@ -98,8 +99,8 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
   String _eventTimeLabel(CalendarEvent e) {
     String hm(DateTime d) =>
         '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-    final s = e.eventDate.toLocal();
-    if (e.endDate != null) return '${hm(s)}–${hm(e.endDate!.toLocal())}';
+    final s = jhb(e.eventDate);
+    if (e.endDate != null) return '${hm(s)}–${hm(jhb(e.endDate!))}';
     return hm(s);
   }
 
@@ -174,21 +175,24 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
       );
     } else {
       final time = _eventTime ?? const TimeOfDay(hour: 9, minute: 0);
-      final dt = DateTime(
+      // Interpret the picked wall-clock time as Africa/Johannesburg, then send
+      // the equivalent UTC instant so the stored time matches what the user
+      // picked regardless of the device's timezone.
+      final dt = jhbWallClock(
         _eventDate!.year, _eventDate!.month, _eventDate!.day,
         time.hour, time.minute,
       );
       String? endIso;
       if (!_allDay && _eventEndTime != null) {
-        final end = DateTime(
+        final end = jhbWallClock(
           _eventDate!.year, _eventDate!.month, _eventDate!.day,
           _eventEndTime!.hour, _eventEndTime!.minute,
         );
-        endIso = end.isAfter(dt) ? end.toIso8601String() : null;
+        endIso = end.isAfter(dt) ? end.toUtc().toIso8601String() : null;
       }
       ok = await dash.createEvent(
         title: _titleController.text.trim(),
-        eventDate: dt.toIso8601String(),
+        eventDate: dt.toUtc().toIso8601String(),
         endDate: endIso,
         eventType: _eventType,
         priority: _priority,

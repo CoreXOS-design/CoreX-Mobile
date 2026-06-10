@@ -25,6 +25,7 @@ import 'screens/home/home_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/client_auth_service.dart';
 import 'services/messaging_service.dart';
+import 'utils/app_time.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -36,6 +37,9 @@ void main() async {
   );
   await dotenv.load(fileName: '.env');
   Env.apiBaseUrl;
+  // Warm the timezone DB so event times render in Africa/Johannesburg
+  // regardless of the device's zone.
+  initAppTime();
   try {
     await Firebase.initializeApp();
     await MessagingService.instance.init(navigatorKey: rootNavigatorKey);

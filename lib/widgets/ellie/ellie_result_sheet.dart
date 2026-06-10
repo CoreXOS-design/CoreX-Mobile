@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../services/ai_api.dart';
+import '../../utils/app_time.dart';
 import '../ai/ai_badge.dart';
 
 /// Modal bottom sheet rendered after an Ellie voice command completes.
@@ -58,7 +59,7 @@ class _EllieResultSheetState extends State<EllieResultSheet> {
       String when = '';
       if (dateStr != null) {
         try {
-          final dt = DateTime.parse(dateStr).toLocal();
+          final dt = jhb(DateTime.parse(dateStr));
           when = _formatWhen(dt);
         } catch (_) {
           when = dateStr;

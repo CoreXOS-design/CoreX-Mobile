@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/branding.dart';
 import '../models/dashboard_data.dart';
 import '../theme.dart';
+import '../utils/app_time.dart';
 import 'priority_badge.dart';
 
 class EventCard extends StatelessWidget {
@@ -95,7 +96,7 @@ class EventCard extends StatelessWidget {
                             Text(
                               event.allDay
                                   ? 'All day'
-                                  : _formatTime(event.eventDate),
+                                  : _formatTime(jhb(event.eventDate)),
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
@@ -163,6 +164,9 @@ class EventCard extends StatelessWidget {
     );
   }
 
-  String _formatTime(DateTime dt) =>
-      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  String _formatTime(DateTime dt) {
+    // Stored times are UTC; show them in the device's local timezone.
+    final local = dt.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
 }

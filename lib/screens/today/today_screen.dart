@@ -11,6 +11,7 @@ import '../../services/api_service.dart';
 import '../../services/deep_link_router.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
+import '../../utils/app_time.dart';
 import '../../widgets/corex/corex_bottom_nav.dart';
 import '../../widgets/corex/corex_card.dart';
 
@@ -665,8 +666,8 @@ class _ScheduleItem {
         v is num ? v.toInt() : (v is String ? int.tryParse(v) : null);
     DateTime? toDate(dynamic v) {
       if (v == null) return null;
-      final s = v.toString();
-      return DateTime.tryParse(s)?.toLocal();
+      final parsed = DateTime.tryParse(v.toString());
+      return parsed == null ? null : jhb(parsed);
     }
 
     Color? toColor(dynamic v) {

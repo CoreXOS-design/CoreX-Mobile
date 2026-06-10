@@ -1,3 +1,5 @@
+import '../utils/app_time.dart';
+
 class PortalLead {
   final int id;
   final String portal;
@@ -42,8 +44,11 @@ class PortalLead {
   });
 
   factory PortalLead.fromJson(Map<String, dynamic> j) {
-    DateTime? p(dynamic v) =>
-        v is String && v.isNotEmpty ? DateTime.tryParse(v)?.toLocal() : null;
+    DateTime? p(dynamic v) {
+      if (v is! String || v.isEmpty) return null;
+      final parsed = DateTime.tryParse(v);
+      return parsed == null ? null : jhb(parsed);
+    }
     int? i(dynamic v) => v is num ? v.toInt() : (v is String ? int.tryParse(v) : null);
     return PortalLead(
       id: i(j['id']) ?? 0,

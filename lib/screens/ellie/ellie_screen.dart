@@ -10,6 +10,7 @@ import '../../services/api_service.dart';
 import '../../services/ellie_voice_recorder.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
+import '../../utils/app_time.dart';
 import '../../widgets/ai/ai_badge.dart';
 import '../../widgets/corex/corex_bottom_nav.dart';
 import '../../widgets/ellie/ellie_result_sheet.dart';
@@ -124,7 +125,7 @@ class _EllieScreenState extends State<EllieScreen>
           final raw = ev?['event_date']?.toString();
           if (raw != null && raw.isNotEmpty) {
             try {
-              when = DateTime.parse(raw).toLocal();
+              when = jhb(DateTime.parse(raw));
             } catch (_) {}
           }
           Navigator.of(context).push(

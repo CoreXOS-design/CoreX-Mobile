@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -187,10 +188,13 @@ class MessagingService {
       ),
     );
 
-    // Auto-dismiss after 5 seconds if this banner is still showing.
-    Future<void>.delayed(const Duration(seconds: 5), () {
-      controller.close();
-    });
+    // Auto-dismiss after 5 seconds if this banner is still showing. Cancel the
+    // timer the moment the banner closes by any other means (the X, the View
+    // action, or a replacing banner) — otherwise `controller.close()` runs
+    // against an already-removed banner and throws "Bad state: No element",
+    // crashing the app.
+    final autoDismiss = Timer(const Duration(seconds: 5), controller.close);
+    controller.closed.then((_) => autoDismiss.cancel());
   }
 
   void _onMessageTap(RemoteMessage msg) {

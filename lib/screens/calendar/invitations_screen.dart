@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/dashboard_data.dart';
 import '../../providers/dashboard_provider.dart';
+import '../../utils/app_time.dart';
 
 /// Pending calendar invitations from other users. Surfaced from the Today
 /// "Pending Invitations" card and from the Calendar screen's overflow menu.
@@ -134,7 +135,7 @@ class _InvitationCard extends StatelessWidget {
   }
 
   String _formatWhen(CalendarEvent e) {
-    final d = e.eventDate;
+    final d = jhb(e.eventDate);
     final dt = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')} '
         '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
     return e.allDay ? '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')} (all day)' : dt;

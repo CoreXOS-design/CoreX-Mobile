@@ -1,10 +1,10 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/dashboard_data.dart';
 import '../../providers/dashboard_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
+import '../../utils/app_time.dart';
 
 /// Bottom sheet shown when tapping a calendar event. Surfaces the four spec
 /// quick-actions (Complete / Dismiss / Edit / Delete) plus the Resolve
@@ -262,13 +262,13 @@ class _EventDetailSheet extends StatelessWidget {
   }
 
   String _fullTimeLabel(CalendarEvent e) {
-    final s = e.eventDate.toLocal();
+    final s = jhb(e.eventDate);
     String fmt(DateTime d) =>
         '${d.year}-${d.month.toString().padLeft(2, '0')}-'
         '${d.day.toString().padLeft(2, '0')} '
         '${d.hour.toString().padLeft(2, '0')}:'
         '${d.minute.toString().padLeft(2, '0')}';
-    if (e.endDate != null) return '${fmt(s)} – ${fmt(e.endDate!.toLocal())}';
+    if (e.endDate != null) return '${fmt(s)} – ${fmt(jhb(e.endDate!))}';
     return fmt(s);
   }
 }
@@ -303,9 +303,7 @@ class _EventEditFormState extends State<_EventEditForm> {
   late String _priority;
   late bool _allDay;
 
-  Timer? _conflictDebounce;
   List<CalendarEvent> _conflicts = const [];
-  bool _checking = false;
   bool _saving = false;
 
   @override
@@ -313,8 +311,12 @@ class _EventEditFormState extends State<_EventEditForm> {
     super.initState();
     _title = TextEditingController(text: widget.event.title);
     _description = TextEditingController(text: widget.event.description ?? '');
-    _start = widget.event.eventDate;
-    _end = widget.event.endDate;
+    // Event times are anchored to Africa/Johannesburg. Keep working state in
+    // that zone (not the device zone) so pickers and labels match what the user
+    // sees elsewhere regardless of device timezone. `_save` converts the SA
+    // wall-clock value back to a UTC instant on the way out.
+    _start = jhb(widget.event.eventDate);
+    _end = widget.event.endDate == null ? null : jhb(widget.event.endDate!);
     _priority = widget.event.priority;
     _allDay = widget.event.allDay;
   }
@@ -323,34 +325,38 @@ class _EventEditFormState extends State<_EventEditForm> {
   void dispose() {
     _title.dispose();
     _description.dispose();
-    _conflictDebounce?.cancel();
     super.dispose();
   }
 
-  void _scheduleConflictCheck() {
-    _conflictDebounce?.cancel();
-    _conflictDebounce = Timer(const Duration(milliseconds: 400), _runConflictCheck);
-  }
-
-  Future<void> _runConflictCheck() async {
-    setState(() => _checking = true);
-    try {
-      final end = _end ?? _start.add(const Duration(hours: 1));
-      final list = await ApiService().getCalendarConflicts(
-        start: _start.toUtc().toIso8601String(),
-        end: end.toUtc().toIso8601String(),
-        excludeEventId: widget.event.id,
-      );
-      if (!mounted) return;
-      setState(() => _conflicts = list);
-    } catch (_) {
-      // silent — conflict UI is informational
-    } finally {
-      if (mounted) setState(() => _checking = false);
+  /// Recompute overlapping events locally against the events already loaded for
+  /// the calendar — same approach as the Quick Add sheet, no server round-trip
+  /// and no timezone ambiguity. Crucially excludes the event being edited so it
+  /// never conflicts with its own (old) slot. Skipped for all-day events and
+  /// invalid (end-not-after-start) windows.
+  void _recomputeConflicts() {
+    final end = _end ?? _start.add(const Duration(hours: 1));
+    if (_allDay || !end.isAfter(_start)) {
+      if (_conflicts.isNotEmpty) setState(() => _conflicts = const []);
+      return;
     }
+    final events = context.read<DashboardProvider>().events;
+    final overlaps = <CalendarEvent>[];
+    for (final e in events) {
+      if (e.id == widget.event.id) continue; // never conflict with self
+      if (e.allDay) continue; // all-day events don't block a timed slot
+      final eStart = jhb(e.eventDate);
+      final eEnd = jhb(e.endDate ?? e.eventDate);
+      // Half-open overlap: [start,end) intersects [eStart,eEnd].
+      final intersects = _start.isBefore(eEnd) && eStart.isBefore(end);
+      // Zero-length (point) events: overlap only if strictly inside the window.
+      final pointInside =
+          eEnd == eStart && !eStart.isBefore(_start) && eStart.isBefore(end);
+      if (eEnd == eStart ? pointInside : intersects) overlaps.add(e);
+    }
+    setState(() => _conflicts = overlaps);
   }
 
-  Future<void> _pickStart() async {
+  Future<void> _pickStartDate() async {
     final date = await showDatePicker(
       context: context,
       initialDate: _start,
@@ -358,21 +364,27 @@ class _EventEditFormState extends State<_EventEditForm> {
       lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
     );
     if (date == null) return;
-    if (!_allDay && mounted) {
-      final time = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay.fromDateTime(_start),
-      );
-      if (time == null) return;
-      _start = DateTime(date.year, date.month, date.day, time.hour, time.minute);
-    } else {
-      _start = DateTime(date.year, date.month, date.day);
-    }
-    setState(() {});
-    _scheduleConflictCheck();
+    setState(() {
+      _start = jhbWallClock(
+          date.year, date.month, date.day, _start.hour, _start.minute);
+    });
+    _recomputeConflicts();
   }
 
-  Future<void> _pickEnd() async {
+  Future<void> _pickStartTime() async {
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_start),
+    );
+    if (time == null) return;
+    setState(() {
+      _start = jhbWallClock(
+          _start.year, _start.month, _start.day, time.hour, time.minute);
+    });
+    _recomputeConflicts();
+  }
+
+  Future<void> _pickEndDate() async {
     final initial = _end ?? _start.add(const Duration(hours: 1));
     final date = await showDatePicker(
       context: context,
@@ -381,18 +393,25 @@ class _EventEditFormState extends State<_EventEditForm> {
       lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
     );
     if (date == null) return;
-    if (!_allDay && mounted) {
-      final time = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay.fromDateTime(initial),
-      );
-      if (time == null) return;
-      _end = DateTime(date.year, date.month, date.day, time.hour, time.minute);
-    } else {
-      _end = DateTime(date.year, date.month, date.day);
-    }
-    setState(() {});
-    _scheduleConflictCheck();
+    setState(() {
+      _end = jhbWallClock(
+          date.year, date.month, date.day, initial.hour, initial.minute);
+    });
+    _recomputeConflicts();
+  }
+
+  Future<void> _pickEndTime() async {
+    final initial = _end ?? _start.add(const Duration(hours: 1));
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(initial),
+    );
+    if (time == null) return;
+    setState(() {
+      _end = jhbWallClock(
+          initial.year, initial.month, initial.day, time.hour, time.minute);
+    });
+    _recomputeConflicts();
   }
 
   Future<void> _save() async {
@@ -445,22 +464,67 @@ class _EventEditFormState extends State<_EventEditForm> {
               value: _allDay,
               onChanged: (v) {
                 setState(() => _allDay = v);
-                _scheduleConflictCheck();
+                _recomputeConflicts();
               },
             ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.access_time),
-              title: Text('Start: ${_fmt(_start)}'),
-              onTap: _pickStart,
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.access_time_filled),
-              title: Text('End: ${_end == null ? '—' : _fmt(_end!)}'),
-              onTap: _pickEnd,
-            ),
+            // Start & end dates stacked underneath each other.
+            _fieldLabel('Start date'),
             const SizedBox(height: 8),
+            _pickerBox(
+              icon: Icons.calendar_today_outlined,
+              text: _fmtDate(_start),
+              onTap: _pickStartDate,
+            ),
+            const SizedBox(height: 12),
+            _fieldLabel('End date'),
+            const SizedBox(height: 8),
+            _pickerBox(
+              icon: Icons.calendar_today_outlined,
+              text: _fmtDate(_end ?? _start.add(const Duration(hours: 1))),
+              placeholder: _end == null,
+              onTap: _pickEndDate,
+            ),
+            // Start & end times side by side.
+            if (!_allDay) ...[
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _fieldLabel('Start time'),
+                        const SizedBox(height: 8),
+                        _pickerBox(
+                          icon: Icons.access_time,
+                          text: _fmtTime(_start),
+                          onTap: _pickStartTime,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _fieldLabel('End time'),
+                        const SizedBox(height: 8),
+                        _pickerBox(
+                          icon: Icons.access_time,
+                          text: _fmtTime(
+                              _end ?? _start.add(const Duration(hours: 1))),
+                          placeholder: _end == null,
+                          onTap: _pickEndTime,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 16),
             DropdownButtonFormField<String>(
               initialValue: _priority,
               decoration: const InputDecoration(labelText: 'Priority'),
@@ -478,10 +542,6 @@ class _EventEditFormState extends State<_EventEditForm> {
               maxLines: 3,
               decoration: const InputDecoration(labelText: 'Description'),
             ),
-            if (_checking) ...[
-              const SizedBox(height: 12),
-              const LinearProgressIndicator(minHeight: 2),
-            ],
             if (_conflicts.isNotEmpty) ...[
               const SizedBox(height: 12),
               Container(
@@ -536,9 +596,57 @@ class _EventEditFormState extends State<_EventEditForm> {
     );
   }
 
-  String _fmt(DateTime d) {
-    final dd = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-    if (_allDay) return dd;
-    return '$dd ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  /// Section label above a field — matches the Quick Add sheet styling.
+  Widget _fieldLabel(String text) => Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: AppTheme.textSecondary(context),
+        ),
+      );
+
+  /// Tappable boxed field matching Quick Add's `_datePicker`/`_timeField`:
+  /// full-width, `surface2` fill, bordered, rounded. `placeholder` dims the
+  /// value text when the underlying value is still unset.
+  Widget _pickerBox({
+    required IconData icon,
+    required String text,
+    required VoidCallback onTap,
+    bool placeholder = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppTheme.surface2(context),
+          borderRadius: BorderRadius.circular(AppTheme.radius),
+          border: Border.all(color: AppTheme.borderColor(context)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: AppTheme.textMuted(context)),
+            const SizedBox(width: 10),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: 14,
+                color: placeholder
+                    ? AppTheme.textMuted(context)
+                    : AppTheme.textPrimary(context),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
+
+  String _fmtDate(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  String _fmtTime(DateTime d) =>
+      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 }

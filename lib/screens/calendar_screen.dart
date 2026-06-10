@@ -6,6 +6,7 @@ import '../theme/corex_tokens.dart';
 import '../widgets/corex/corex_bottom_nav.dart';
 import '../providers/dashboard_provider.dart';
 import '../models/dashboard_data.dart';
+import '../utils/app_time.dart';
 import '../widgets/event_card.dart';
 import 'calendar/event_action_sheet.dart';
 import 'calendar/invitations_screen.dart';
@@ -466,13 +467,14 @@ class _MonthView extends StatelessWidget {
     final firstDay = DateTime(currentMonth.year, currentMonth.month, 1);
     final startWeekday = firstDay.weekday; // 1=Mon
     final daysInMonth = DateTime(currentMonth.year, currentMonth.month + 1, 0).day;
-    final today = DateTime.now();
+    final today = jhb(DateTime.now());
 
     // Group events by day
     final byDay = <int, List<CalendarEvent>>{};
     for (final e in events) {
-      if (e.eventDate.year == currentMonth.year && e.eventDate.month == currentMonth.month) {
-        byDay.putIfAbsent(e.eventDate.day, () => []).add(e);
+      final d = jhb(e.eventDate);
+      if (d.year == currentMonth.year && d.month == currentMonth.month) {
+        byDay.putIfAbsent(d.day, () => []).add(e);
       }
     }
 
@@ -666,11 +668,12 @@ class _AgendaView extends StatelessWidget {
     // Group by date
     final grouped = <String, List<CalendarEvent>>{};
     for (final e in events) {
-      final key = '${e.eventDate.year}-${e.eventDate.month.toString().padLeft(2, '0')}-${e.eventDate.day.toString().padLeft(2, '0')}';
+      final d = jhb(e.eventDate);
+      final key = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
       grouped.putIfAbsent(key, () => []).add(e);
     }
     final sortedKeys = grouped.keys.toList()..sort();
-    final today = DateTime.now();
+    final today = jhb(DateTime.now());
 
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
@@ -760,10 +763,12 @@ class _WeekViewState extends State<_WeekView> {
   Widget build(BuildContext context) {
     final start = _weekStart;
     final days = List.generate(7, (i) => start.add(Duration(days: i)));
-    final focusedEvents = widget.events.where((e) =>
-        e.eventDate.year == _focus.year &&
-        e.eventDate.month == _focus.month &&
-        e.eventDate.day == _focus.day).toList()
+    final focusedEvents = widget.events.where((e) {
+      final ed = jhb(e.eventDate);
+      return ed.year == _focus.year &&
+          ed.month == _focus.month &&
+          ed.day == _focus.day;
+    }).toList()
       ..sort((a, b) => a.eventDate.compareTo(b.eventDate));
 
     return GestureDetector(
@@ -779,10 +784,12 @@ class _WeekViewState extends State<_WeekView> {
             child: Row(
               children: days.map((d) {
                 final isFocus = d.year == _focus.year && d.month == _focus.month && d.day == _focus.day;
-                final dayCount = widget.events.where((e) =>
-                    e.eventDate.year == d.year &&
-                    e.eventDate.month == d.month &&
-                    e.eventDate.day == d.day).length;
+                final dayCount = widget.events.where((e) {
+                  final ed = jhb(e.eventDate);
+                  return ed.year == d.year &&
+                      ed.month == d.month &&
+                      ed.day == d.day;
+                }).length;
                 return Expanded(
                   child: GestureDetector(
                     onTap: () => setState(() => _focus = d),
@@ -841,10 +848,12 @@ class _DayView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dayEvents = events.where((e) =>
-        e.eventDate.year == day.year &&
-        e.eventDate.month == day.month &&
-        e.eventDate.day == day.day).toList()
+    final dayEvents = events.where((e) {
+      final ed = jhb(e.eventDate);
+      return ed.year == day.year &&
+          ed.month == day.month &&
+          ed.day == day.day;
+    }).toList()
       ..sort((a, b) => a.eventDate.compareTo(b.eventDate));
 
     const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
