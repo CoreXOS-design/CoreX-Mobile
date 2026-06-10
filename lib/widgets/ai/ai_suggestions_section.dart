@@ -29,6 +29,8 @@ class AiSuggestionsController extends ChangeNotifier {
 
   static const Duration _interval = Duration(seconds: 2);
   static const Duration _maxWait = Duration(seconds: 90);
+  static const int _maxConsecutiveFailures = 5;
+  int _consecutiveFailures = 0;
 
   AiSuggestionsController(this.propertyId);
 
@@ -84,9 +86,9 @@ class AiSuggestionsController extends ChangeNotifier {
     _scheduleNext();
   }
 
-  void _scheduleNext() {
+  void _scheduleNext({Duration? delay}) {
     _poll?.cancel();
-    _poll = Timer(_interval, _tick);
+    _poll = Timer(delay ?? _interval, _tick);
   }
 
   Future<void> _tick() async {
@@ -100,6 +102,7 @@ class AiSuggestionsController extends ChangeNotifier {
     try {
       final next = await _api.getAiSuggestions(propertyId);
       _data = next;
+      _consecutiveFailures = 0;
       _applyDefaultSelection();
       if (!next.stillRunning) {
         _polling = false;
@@ -112,7 +115,20 @@ class AiSuggestionsController extends ChangeNotifier {
       notifyListeners();
       return;
     } catch (_) {
-      // transient — keep polling
+      // Transient (timeout / socket / parse). Back off exponentially and give
+      // up after a cap, so a sustained outage can't hammer the endpoint every
+      // _interval for the whole _maxWait window.
+      _consecutiveFailures++;
+      if (_consecutiveFailures >= _maxConsecutiveFailures) {
+        _error = 'Could not reach the server while analysing. Pull to retry.';
+        _polling = false;
+        _timedOut = true;
+        notifyListeners();
+        return;
+      }
+      notifyListeners();
+      _scheduleNext(delay: _interval * (1 << (_consecutiveFailures - 1)));
+      return;
     }
     notifyListeners();
     _scheduleNext();

@@ -320,6 +320,7 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
         });
       },
     );
+    controller.dispose();
   }
 
   Future<void> _openClientPage() async {

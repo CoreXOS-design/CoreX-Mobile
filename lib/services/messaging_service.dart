@@ -33,6 +33,52 @@ class MessagingService {
   static const _testChannelId = 'corex_test';
   static const _testChannelName = 'CoreX test notifications';
 
+  // --- Foreground storm guard ---------------------------------------------
+  // A backend misfire (e.g. a job re-sending the same push in a tight loop)
+  // once flooded a device with foreground messages: every one buzzed and
+  // replaced the banner, saturating the UI thread until the phone appeared
+  // frozen. These two guards make that impossible to reproduce client-side,
+  // independent of whatever the server sends.
+  //
+  // 1. Dedup: a message whose fingerprint was seen within [_dedupWindow] is
+  //    dropped silently (handles the same push arriving repeatedly).
+  // 2. Rate limit: at most [_maxBannersPerWindow] banners per
+  //    [_rateLimitWindow] — a genuine burst of *distinct* notifications still
+  //    can't lock up the screen.
+  static const _dedupWindow = Duration(seconds: 10);
+  static const _rateLimitWindow = Duration(seconds: 60);
+  static const _maxBannersPerWindow = 6;
+
+  final Map<String, DateTime> _recentFingerprints = {};
+  final List<DateTime> _recentBannerTimes = [];
+
+  /// Returns true if this message should be suppressed (duplicate or over the
+  /// rate cap). Has the side effect of recording the message when it passes.
+  bool _shouldSuppressForeground(String fingerprint) {
+    final now = DateTime.now();
+
+    // Dedup. Also prune expired entries so the map can't grow unbounded.
+    _recentFingerprints
+        .removeWhere((_, ts) => now.difference(ts) > _dedupWindow);
+    final lastSeen = _recentFingerprints[fingerprint];
+    if (lastSeen != null && now.difference(lastSeen) < _dedupWindow) {
+      _recentFingerprints[fingerprint] = now;
+      return true;
+    }
+
+    // Rate limit (sliding window).
+    _recentBannerTimes
+        .removeWhere((ts) => now.difference(ts) > _rateLimitWindow);
+    if (_recentBannerTimes.length >= _maxBannersPerWindow) {
+      debugPrint('[messaging] foreground banner rate cap hit — suppressing');
+      return true;
+    }
+
+    _recentFingerprints[fingerprint] = now;
+    _recentBannerTimes.add(now);
+    return false;
+  }
+
   /// Set by `main.dart` before runApp so deep-links from cold-start taps know
   /// where to navigate. Foreground / warm-tap handlers grab the active context
   /// from this navigator key.
@@ -141,6 +187,13 @@ class MessagingService {
     final title = msg.notification?.title ?? msg.data['title']?.toString();
     final body = msg.notification?.body ?? msg.data['body']?.toString();
     if (title == null && body == null) return;
+
+    // Storm guard: drop duplicates and cap the banner rate before doing any
+    // work, so a backend re-send loop can't lock up the UI thread.
+    final fingerprint = (msg.messageId?.isNotEmpty ?? false)
+        ? msg.messageId!
+        : '${msg.data['type']}|$title|$body';
+    if (_shouldSuppressForeground(fingerprint)) return;
 
     final action = (msg.data['action_url'] ?? msg.data['deep_link'])
         ?.toString();

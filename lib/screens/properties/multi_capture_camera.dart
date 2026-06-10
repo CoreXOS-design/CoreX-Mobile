@@ -97,6 +97,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   Future<void> _initCamera() async {
     try {
       _cameras = await availableCameras();
+      if (!mounted) return;
       if (_cameras.isEmpty) {
         setState(() {
           _initializing = false;

@@ -266,6 +266,8 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
         });
       },
     );
+    minCtrl.dispose();
+    maxCtrl.dispose();
   }
 
   Widget _sectionLabel(String text) => Padding(

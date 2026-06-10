@@ -214,9 +214,11 @@ class _AppointmentShell extends StatelessWidget {
   }
 
   String _formatTime(DateTime dt) {
-    // Stored times are UTC; show them in the device's local timezone.
-    final local = dt.toLocal();
-    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    // `dt` is already converted to Africa/Johannesburg via `jhb()` by the
+    // caller. Read its wall-clock fields directly — calling `.toLocal()` here
+    // would re-shift to the device's timezone (e.g. UTC), making a 16:00 SA
+    // event render as 14:00.
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
   /// "Now" / "in 45 min" / "in 2h" / "in 2h 15m" — scoped to today.
