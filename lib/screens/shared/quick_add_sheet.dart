@@ -176,8 +176,8 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
     } else {
       final time = _eventTime ?? const TimeOfDay(hour: 9, minute: 0);
       // Interpret the picked wall-clock time as Africa/Johannesburg, then send
-      // the equivalent UTC instant so the stored time matches what the user
-      // picked regardless of the device's timezone.
+      // it as a naive SA wall-clock string (see [jhbApiString]) so the stored
+      // time matches what the user picked regardless of the device's timezone.
       final dt = jhbWallClock(
         _eventDate!.year, _eventDate!.month, _eventDate!.day,
         time.hour, time.minute,
@@ -188,11 +188,11 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
           _eventDate!.year, _eventDate!.month, _eventDate!.day,
           _eventEndTime!.hour, _eventEndTime!.minute,
         );
-        endIso = end.isAfter(dt) ? end.toUtc().toIso8601String() : null;
+        endIso = end.isAfter(dt) ? jhbApiString(end) : null;
       }
       ok = await dash.createEvent(
         title: _titleController.text.trim(),
-        eventDate: dt.toUtc().toIso8601String(),
+        eventDate: jhbApiString(dt),
         endDate: endIso,
         eventType: _eventType,
         priority: _priority,

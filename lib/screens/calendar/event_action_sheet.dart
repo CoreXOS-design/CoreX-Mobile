@@ -419,8 +419,8 @@ class _EventEditFormState extends State<_EventEditForm> {
     try {
       await ApiService().updateEvent(widget.event.id, {
         'title': _title.text.trim(),
-        'event_date': _start.toUtc().toIso8601String(),
-        if (_end != null) 'end_date': _end!.toUtc().toIso8601String(),
+        'event_date': jhbApiString(_start),
+        if (_end != null) 'end_date': jhbApiString(_end!),
         'priority': _priority,
         if (_description.text.trim().isNotEmpty) 'description': _description.text.trim(),
       });

@@ -51,12 +51,21 @@ void main() {
     expect(shown.day, 11);
   });
 
-  test('jhbWallClock round-trips a picked SA time to the right UTC instant', () {
-    // User picks 11:00 on 11 Jun. We must send 09:00Z so the backend stores the
-    // SA wall-clock the user intended — not 11:00Z (which would be 13:00 SA).
+  test('jhbApiString sends the picked SA wall-clock, not a UTC instant', () {
+    // User picks 11:00 on 11 Jun. The backend (like the web cockpit's
+    // `datetime-local` field) parses what it receives in its own SA timezone
+    // and never shifts UTC→SAST on write, so we must send the naive wall-clock
+    // "11:00" — NOT "09:00Z" (which the server would store as 09:00 SA, two
+    // hours early: the original "save makes 10:00 become 08:00" bug).
     final picked = jhbWallClock(2026, 6, 11, 11, 0);
-    expect(picked.toUtc().toIso8601String(), '2026-06-11T09:00:00.000Z');
+    expect(jhbApiString(picked), '2026-06-11T11:00:00');
     // And reading it back for display yields 11:00 again.
     expect(jhb(picked).hour, 11);
+  });
+
+  test('jhbApiString of a parsed +02:00 instant preserves SA wall-clock', () {
+    // A value coming back from the API (UTC instant under the hood) re-sent
+    // unchanged must round-trip to the same wall-clock, not drift.
+    expect(jhbApiString(DateTime.parse(iso)), '2026-06-11T11:00:00');
   });
 }

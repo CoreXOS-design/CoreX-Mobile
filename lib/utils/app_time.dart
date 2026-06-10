@@ -40,8 +40,24 @@ tz.TZDateTime jhb(DateTime d) => tz.TZDateTime.from(d, _location);
 
 /// Build an Africa/Johannesburg instant from wall-clock components. Use when
 /// reconstructing a time from date/time pickers (whose fields are wall-clock),
-/// then call `.toUtc().toIso8601String()` on the result before sending to the
-/// API so the stored instant matches the SA time the user picked.
+/// then pass the result to [jhbApiString] before sending to the API so the
+/// stored time matches the SA wall-clock the user picked.
 tz.TZDateTime jhbWallClock(int year, int month, int day,
         [int hour = 0, int minute = 0]) =>
     tz.TZDateTime(_location, year, month, day, hour, minute);
+
+/// Format an instant as the Africa/Johannesburg wall-clock string the backend
+/// expects for writes: `yyyy-MM-ddTHH:mm:ss` — naive, with no `Z` or offset,
+/// exactly like the web cockpit's `datetime-local` fields. The server parses
+/// this in its own SA timezone, so the stored time equals the picked time.
+///
+/// Do NOT send `.toUtc().toIso8601String()`: the server treats the literal
+/// clock time it receives as SA-local and never shifts UTC→SAST on write, so a
+/// `…Z` value (e.g. 10:00 picked → `08:00Z` sent) is stored — and read back —
+/// two hours early.
+String jhbApiString(DateTime d) {
+  final t = jhb(d);
+  String p(int n) => n.toString().padLeft(2, '0');
+  return '${t.year}-${p(t.month)}-${p(t.day)}'
+      'T${p(t.hour)}:${p(t.minute)}:${p(t.second)}';
+}
