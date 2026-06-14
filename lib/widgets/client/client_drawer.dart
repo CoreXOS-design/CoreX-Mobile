@@ -3,9 +3,11 @@ import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../providers/client_session_provider.dart';
+import '../../providers/seller_listings_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../screens/auth/client/client_agency_picker_screen.dart';
 import '../../screens/client/client_profile_screen.dart';
+import '../../screens/client/client_seller_listings_screen.dart';
 import '../../screens/client/client_settings_screen.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
@@ -17,6 +19,7 @@ class ClientDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = CorexAccentTheme.of(context);
     final session = context.watch<ClientSessionProvider>();
+    final sellerListings = context.watch<SellerListingsProvider>();
     final themeProvider = context.watch<ThemeProvider>();
     final isDark = themeProvider.isDark;
 
@@ -95,6 +98,15 @@ class ClientDrawer extends StatelessWidget {
               label: 'Profile',
               onTap: () => _push(context, const ClientProfileScreen()),
             ),
+            if (sellerListings.hasListings)
+              _Item(
+                icon: TablerIcons.building_estate,
+                label: 'My Listings',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  openSellerDashboard(context, sellerListings.properties);
+                },
+              ),
             _Item(
               icon: TablerIcons.settings,
               label: 'Settings',
@@ -139,6 +151,7 @@ class ClientDrawer extends StatelessWidget {
               destructive: true,
               onTap: () {
                 Navigator.of(context).pop();
+                context.read<SellerListingsProvider>().reset();
                 session.signOut();
               },
             ),

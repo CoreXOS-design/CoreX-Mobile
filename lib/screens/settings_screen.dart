@@ -3,10 +3,12 @@ import 'package:provider/provider.dart';
 import '../models/branding.dart';
 import '../theme.dart';
 import '../providers/auth_provider.dart';
+import '../providers/notifications_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/security_service.dart';
 import '../widgets/ui/icon_badge.dart';
 import '../widgets/ui/section_header.dart';
+import 'notification_schedule_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -24,6 +26,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     SecurityService.instance.canUseBiometrics().then((v) {
       if (mounted) setState(() => _biometricSupported = v);
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<NotificationsProvider>().loadPreferences();
+    });
   }
 
   @override
@@ -32,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final auth = context.watch<AuthProvider>();
     final brand = BrandColors.of(context);
     final isDark = themeProvider.isDark;
+    final openHours = context.watch<NotificationsProvider>().prefs?.openHours;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -57,6 +63,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   activeThumbColor: Colors.white,
                   onChanged: (_) => themeProvider.toggle(),
                 ),
+              ),
+            ]),
+            const SizedBox(height: 24),
+            const SectionHeader(label: 'Notifications'),
+            const SizedBox(height: 12),
+            _SettingsCard(children: [
+              _SettingsTile(
+                icon: Icons.do_not_disturb_on_outlined,
+                tint: brand.icon,
+                label: 'Quiet hours',
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      openHours?.summary() ?? '—',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textMuted(context),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right_rounded,
+                        size: 20, color: AppTheme.textMuted(context)),
+                  ],
+                ),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const NotificationScheduleScreen(),
+                )),
               ),
             ]),
             const SizedBox(height: 24),
@@ -129,17 +164,19 @@ class _SettingsTile extends StatelessWidget {
   final Color tint;
   final String label;
   final Widget trailing;
+  final VoidCallback? onTap;
 
   const _SettingsTile({
     required this.icon,
     required this.tint,
     required this.label,
     required this.trailing,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    final row = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: [
@@ -158,6 +195,12 @@ class _SettingsTile extends StatelessWidget {
           trailing,
         ],
       ),
+    );
+    if (onTap == null) return row;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppTheme.radius),
+      child: row,
     );
   }
 }

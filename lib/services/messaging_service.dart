@@ -147,6 +147,31 @@ class MessagingService {
     }
   }
 
+  /// Reflects a Push-channel toggle for *this device*. Turning push on
+  /// (re)registers the FCM token so background pushes resume; turning it off
+  /// revokes the token so the server stops targeting this device. The
+  /// foreground gate ([NotificationsProvider.localPushEnabled]) only covers the
+  /// in-app banner — without revoking the token, "Push off" still left the
+  /// device receiving system-tray pushes, which read as "the toggle does
+  /// nothing".
+  Future<void> setPushEnabled(bool enabled) async {
+    if (enabled) {
+      final token = await _obtainToken();
+      if (token != null) await _registerWithServer(token);
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString(_kRegisteredTokenKey) ?? await _obtainToken();
+    if (token != null) {
+      try {
+        await _api.revokeDeviceToken(token);
+      } catch (e) {
+        debugPrint('[messaging] revoke (push off) failed: $e');
+      }
+    }
+    await prefs.remove(_kRegisteredTokenKey);
+  }
+
   Future<void> _registerWithServer(String token) async {
     try {
       await _api.registerDeviceToken(
@@ -178,10 +203,12 @@ class MessagingService {
     // presentation. The server should already be suppressing, but a stale
     // device-token or in-flight delivery can race the preference change.
     try {
-      if (!Provider.of<NotificationsProvider>(ctx, listen: false)
-          .localPushEnabled) {
-        return;
-      }
+      final np = Provider.of<NotificationsProvider>(ctx, listen: false);
+      if (!np.localPushEnabled) return;
+      // Quiet hours: outside the user's open-hours window we swallow the
+      // in-app banner. Background/system-tray pushes can only be stopped by
+      // the server honouring the same schedule (the app isn't running then).
+      if (!np.notificationsAllowedNow) return;
     } catch (_) {}
 
     final title = msg.notification?.title ?? msg.data['title']?.toString();

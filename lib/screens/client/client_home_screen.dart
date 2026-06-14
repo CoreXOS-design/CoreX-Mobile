@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../providers/client_session_provider.dart';
+import '../../providers/seller_listings_provider.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../widgets/client/client_bottom_nav.dart';
@@ -15,6 +16,7 @@ import '../../widgets/corex/corex_kpi_tile.dart';
 import '../../widgets/corex/corex_module_tile.dart';
 import 'client_coming_soon_screen.dart';
 import 'client_profile_screen.dart';
+import 'client_seller_listings_screen.dart';
 
 class ClientHomeScreen extends StatefulWidget {
   const ClientHomeScreen({super.key});
@@ -31,13 +33,18 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
     // email), so pull /v1/client/me on open to resolve the client's name for
     // the current agency. Falls back to the email only while this is in flight.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<ClientSessionProvider>().refreshMe();
+      if (!mounted) return;
+      context.read<ClientSessionProvider>().refreshMe();
+      // Probe seller listings so the "My Listings" entry only appears when the
+      // client actually owns/sells a property in their current agency.
+      context.read<SellerListingsProvider>().load();
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final session = context.watch<ClientSessionProvider>();
+    final sellerListings = context.watch<SellerListingsProvider>();
     final name = session.contact?.fullName.isNotEmpty == true
         ? session.contact!.fullName
         : (session.client?.email.split('@').first ?? 'there');
@@ -115,7 +122,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        _moduleGrid(context),
+                        _moduleGrid(context, sellerListings),
                         const SizedBox(height: 12),
                       ],
                     ),
@@ -148,7 +155,8 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
     );
   }
 
-  Widget _moduleGrid(BuildContext context) {
+  Widget _moduleGrid(
+      BuildContext context, SellerListingsProvider sellerListings) {
     final modules = <_ModuleSpec>[
       _ModuleSpec(icon: TablerIcons.heart_handshake, label: 'Core Matches'),
       _ModuleSpec(icon: TablerIcons.home_search, label: 'Saved Homes'),
@@ -166,6 +174,14 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
       mainAxisSpacing: 10,
       childAspectRatio: 1.0,
       children: [
+        // Live entry — only shown when the client owns/sells a listing.
+        if (sellerListings.hasListings)
+          CorexModuleTile(
+            icon: TablerIcons.building_estate,
+            label: 'My Listings',
+            onTap: () =>
+                openSellerDashboard(context, sellerListings.properties),
+          ),
         for (final m in modules)
           CorexModuleTile(
             icon: m.icon,

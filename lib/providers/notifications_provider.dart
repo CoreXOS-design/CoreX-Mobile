@@ -16,6 +16,12 @@ class NotificationsProvider extends ChangeNotifier {
   /// when push is locally disabled.
   bool get localPushEnabled => _prefs?.master.push ?? true;
 
+  /// Whether the user's open-hours schedule permits surfacing a notification
+  /// right now. Used by [MessagingService] to suppress foreground delivery
+  /// outside the configured window. Returns true when prefs aren't loaded yet
+  /// (fail-open — better to show a notification than silently swallow one).
+  bool get notificationsAllowedNow => _prefs?.openHours.allowsAt(DateTime.now()) ?? true;
+
   final ApiService _api = ApiService();
 
   // Feed

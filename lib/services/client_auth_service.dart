@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/env.dart';
 import '../models/client_models.dart';
+import '../models/seller_models.dart';
 import 'api_service.dart' show ApiException;
 
 // Wraps every client-side endpoint. The session token lives in
@@ -339,6 +340,47 @@ class ClientAuthService {
       );
     }
     throw _toException(res, 'Could not load matches');
+  }
+
+  // -------------------- Seller properties ("My Listings") --------------------
+
+  /// Properties the signed-in client owns/sells in their current agency.
+  Future<({int agencyId, List<SellerProperty> properties})>
+      sellerProperties() async {
+    final res = await http
+        .get(
+          Uri.parse('$_baseUrl/v1/client/seller-properties'),
+          headers: await _authHeaders(),
+        )
+        .timeout(_timeout);
+
+    if (res.statusCode == 200) {
+      final body = Map<String, dynamic>.from(jsonDecode(res.body));
+      return (
+        agencyId: (body['agency_id'] as num?)?.toInt() ?? 0,
+        properties: (body['properties'] as List? ?? const [])
+            .whereType<Map>()
+            .map((e) => SellerProperty.fromJson(Map<String, dynamic>.from(e)))
+            .toList(),
+      );
+    }
+    throw _toException(res, 'Could not load listings');
+  }
+
+  /// Full seller dashboard for one listing. 404 → client isn't seller-linked.
+  Future<SellerPropertyInsights> sellerPropertyInsights(int propertyId) async {
+    final res = await http
+        .get(
+          Uri.parse('$_baseUrl/v1/client/seller-properties/$propertyId/insights'),
+          headers: await _authHeaders(),
+        )
+        .timeout(_timeout);
+
+    if (res.statusCode == 200) {
+      return SellerPropertyInsights.fromJson(
+          Map<String, dynamic>.from(jsonDecode(res.body)));
+    }
+    throw _toException(res, 'Could not load listing insights');
   }
 
   // -------------------- Client matches / properties --------------------

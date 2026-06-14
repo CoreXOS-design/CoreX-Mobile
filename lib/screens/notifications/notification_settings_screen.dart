@@ -1,13 +1,14 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/notification_models.dart';
 import '../../providers/notifications_provider.dart';
 import '../../services/messaging_service.dart';
 import '../../theme.dart';
+import '../notification_schedule_screen.dart';
 
 /// Dynamic notification preferences screen rendered from
 /// `GET /api/v1/notification-preferences`. Nothing on this screen is
-/// hard-coded — sections, pillars, event types, threshold units and bounds
+/// hard-coded â€” sections, pillars, event types, threshold units and bounds
 /// all come from the server payload.
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({super.key});
@@ -78,12 +79,8 @@ class _NotificationSettingsScreenState
                   locked: locked,
                   onChanged: () => setState(() {}),
                 ),
-                const SizedBox(height: 12),
-                _OpenHoursCard(
-                  openHours: data.openHours,
-                  locked: locked,
-                  onChanged: () => setState(() {}),
-                ),
+                const SizedBox(height: 8),
+                _scheduleHint(context),
               ],
             ),
       ),
@@ -91,7 +88,15 @@ class _NotificationSettingsScreenState
   }
 
   Future<void> _save(BuildContext context) async {
-    final ok = await context.read<NotificationsProvider>().savePreferences();
+    final provider = context.read<NotificationsProvider>();
+    final pushOn = provider.prefs?.master.push ?? true;
+    final ok = await provider.savePreferences();
+    if (ok) {
+      // Make the Push toggle real for *this device*: register or revoke the
+      // FCM token so background pushes actually start/stop. The foreground
+      // gate alone doesn't affect system-tray pushes.
+      await MessagingService.instance.setPushEnabled(pushOn);
+    }
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     if (ok) {
@@ -121,7 +126,7 @@ class _NotificationSettingsScreenState
             await MessagingService.instance.sendTestNotification();
             messenger.showSnackBar(const SnackBar(
               content: Text(
-                  'Test notification sent — check your notification bar.'),
+                  'Test notification sent â€” check your notification bar.'),
             ));
           } catch (e) {
             messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
@@ -154,6 +159,35 @@ class _NotificationSettingsScreenState
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _scheduleHint(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppTheme.radius),
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => const NotificationScheduleScreen(),
+      )),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(Icons.do_not_disturb_on_outlined,
+                size: 16, color: AppTheme.textSecondary(context)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Quiet hours moved to Settings â€” set the days and times you '
+                'receive notifications.',
+                style: TextStyle(
+                    fontSize: 11.5, color: AppTheme.textSecondary(context)),
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded,
+                size: 18, color: AppTheme.textSecondary(context)),
+          ],
+        ),
       ),
     );
   }
@@ -205,7 +239,7 @@ class _MasterSwitches extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Push remains editable even when locked — it's a per-device control.
+    // Push remains editable even when locked â€” it's a per-device control.
     return _Card(
       child: Column(
         children: [
@@ -252,126 +286,4 @@ class _MasterSwitches extends StatelessWidget {
 
   Widget _divider(BuildContext context) =>
       Divider(height: 1, color: AppTheme.borderColor(context));
-}
-
-// ---------------------------------------------------------------------------
-
-class _OpenHoursCard extends StatelessWidget {
-  final OpenHours openHours;
-  final bool locked;
-  final VoidCallback onChanged;
-
-  const _OpenHoursCard(
-      {required this.openHours,
-      required this.locked,
-      required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return _Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(child: _SectionLabel('Open hours')),
-              Switch(
-                value: openHours.enabled,
-                onChanged: locked
-                    ? null
-                    : (v) {
-                        openHours.enabled = v;
-                        onChanged();
-                      },
-                activeTrackColor: AppTheme.brand,
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Outside this window, email notifications are suppressed. '
-            'Push and in-app still arrive.',
-            style: TextStyle(
-                fontSize: 11, color: AppTheme.textSecondary(context)),
-          ),
-          if (openHours.enabled) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _timeField(context, 'Start', openHours.start, (t) {
-                    openHours.start = t;
-                    onChanged();
-                  }),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _timeField(context, 'End', openHours.end, (t) {
-                    openHours.end = t;
-                    onChanged();
-                  }),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _timeField(BuildContext context, String label, String value,
-      ValueChanged<String> onPick) {
-    return InkWell(
-      onTap: locked
-          ? null
-          : () async {
-              final parts = value.split(':');
-              final initial = TimeOfDay(
-                hour: int.tryParse(parts.elementAt(0)) ?? 9,
-                minute:
-                    int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0,
-              );
-              final picked = await showTimePicker(
-                context: context,
-                initialTime: initial,
-              );
-              if (picked != null) {
-                final hh = picked.hour.toString().padLeft(2, '0');
-                final mm = picked.minute.toString().padLeft(2, '0');
-                onPick('$hh:$mm');
-              }
-            },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppTheme.surface2(context),
-          borderRadius: BorderRadius.circular(AppTheme.radius),
-          border: Border.all(color: AppTheme.borderColor(context)),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.schedule, size: 16,
-                color: AppTheme.textSecondary(context)),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label,
-                      style: TextStyle(
-                          fontSize: 10,
-                          color: AppTheme.textSecondary(context))),
-                  Text(value,
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary(context))),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

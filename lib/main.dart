@@ -15,6 +15,7 @@ import 'providers/feature_flags_provider.dart';
 import 'providers/notifications_provider.dart';
 import 'providers/portal_leads_provider.dart';
 import 'providers/property_provider.dart';
+import 'providers/seller_listings_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/visibility_provider.dart';
 import 'screens/auth/client/client_agency_picker_screen.dart';
@@ -85,6 +86,7 @@ class CoreXApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => NotificationsProvider()),
         ChangeNotifierProvider(create: (_) => PortalLeadsProvider()),
         ChangeNotifierProvider(create: (_) => PropertyProvider()),
+        ChangeNotifierProvider(create: (_) => SellerListingsProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => VisibilityProvider()),
         ChangeNotifierProvider(create: (_) => FeatureFlagsProvider()),

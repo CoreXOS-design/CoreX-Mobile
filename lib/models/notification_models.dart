@@ -207,15 +207,18 @@ class NotificationPreferencesData {
       };
 }
 
-class OpenHours {
+/// A single weekday's notification window. When [enabled] is false, the day is
+/// fully quiet (no notifications). [start]/[end] are "HH:MM"; a window where
+/// start > end wraps past midnight into the next day.
+class DayWindow {
   bool enabled;
   String start; // "HH:MM"
   String end;   // "HH:MM"
 
-  OpenHours({required this.enabled, required this.start, required this.end});
+  DayWindow({required this.enabled, required this.start, required this.end});
 
-  factory OpenHours.fromJson(Map<String, dynamic> j) => OpenHours(
-        enabled: j['enabled'] == true,
+  factory DayWindow.fromJson(Map<String, dynamic> j) => DayWindow(
+        enabled: j['enabled'] != false,
         start: j['start']?.toString() ?? '09:00',
         end: j['end']?.toString() ?? '17:00',
       );
@@ -223,7 +226,157 @@ class OpenHours {
   Map<String, dynamic> toJson() =>
       {'enabled': enabled, 'start': start, 'end': end};
 
-  OpenHours copy() => OpenHours(enabled: enabled, start: start, end: end);
+  DayWindow copy() => DayWindow(enabled: enabled, start: start, end: end);
+}
+
+class OpenHours {
+  bool enabled;
+
+  /// Per-weekday windows keyed by ISO weekday: 1 = Monday … 7 = Sunday. Every
+  /// key 1–7 is always present. A day whose [DayWindow.enabled] is false is
+  /// fully quiet while [enabled] is true.
+  final Map<int, DayWindow> days;
+
+  OpenHours({required this.enabled, required this.days});
+
+  factory OpenHours.fromJson(Map<String, dynamic> j) {
+    final enabled = j['enabled'] == true;
+
+    // New canonical form: a per-day map.
+    final raw = j['day_windows'];
+    if (raw is Map && raw.isNotEmpty) {
+      final map = <int, DayWindow>{};
+      raw.forEach((k, v) {
+        final day = int.tryParse(k.toString());
+        if (day != null && day >= 1 && day <= 7 && v is Map) {
+          map[day] = DayWindow.fromJson(Map<String, dynamic>.from(v));
+        }
+      });
+      return OpenHours(enabled: enabled, days: _fill(map));
+    }
+
+    // Legacy form: a single window + optional list of active days. Build a
+    // uniform per-day map so older payloads keep working.
+    final start = j['start']?.toString() ?? '09:00';
+    final end = j['end']?.toString() ?? '17:00';
+    final activeDays = _parseDays(j['days']);
+    final map = <int, DayWindow>{
+      for (var d = 1; d <= 7; d++)
+        d: DayWindow(enabled: activeDays.contains(d), start: start, end: end),
+    };
+    return OpenHours(enabled: enabled, days: map);
+  }
+
+  /// Ensures keys 1–7 all exist, defaulting any gaps to a disabled 09:00–17:00.
+  static Map<int, DayWindow> _fill(Map<int, DayWindow> partial) {
+    return {
+      for (var d = 1; d <= 7; d++)
+        d: partial[d] ??
+            DayWindow(enabled: false, start: '09:00', end: '17:00'),
+    };
+  }
+
+  static Set<int> _parseDays(dynamic raw) {
+    if (raw is List) {
+      final out = raw
+          .map((e) => int.tryParse(e.toString()))
+          .whereType<int>()
+          .where((d) => d >= 1 && d <= 7)
+          .toSet();
+      if (out.isNotEmpty) return out;
+    }
+    return const {1, 2, 3, 4, 5, 6, 7};
+  }
+
+  Map<String, dynamic> toJson() {
+    final activeDays = days.entries
+        .where((e) => e.value.enabled)
+        .map((e) => e.key)
+        .toList()
+      ..sort();
+    final ref = activeDays.isNotEmpty ? days[activeDays.first]! : days[1]!;
+    return {
+      'enabled': enabled,
+      'day_windows': {
+        for (final e in days.entries) e.key.toString(): e.value.toJson(),
+      },
+      // Legacy mirror so a backend that hasn't migrated to `day_windows` still
+      // gets a sensible single-window approximation.
+      'days': activeDays,
+      'start': ref.start,
+      'end': ref.end,
+    };
+  }
+
+  OpenHours copy() => OpenHours(
+        enabled: enabled,
+        days: {for (final e in days.entries) e.key: e.value.copy()},
+      );
+
+  /// Whether notifications are permitted at [now]. Disabled → no restriction.
+  /// Otherwise the moment must fall inside that weekday's window (which may
+  /// wrap past midnight, in which case the early-morning tail belongs to the
+  /// previous day's window).
+  bool allowsAt(DateTime now) {
+    if (!enabled) return true;
+    final nowMin = now.hour * 60 + now.minute;
+
+    final today = days[now.weekday];
+    if (today != null && today.enabled) {
+      final s = _toMinutes(today.start);
+      final e = _toMinutes(today.end);
+      if (s != null && e != null) {
+        if (s == e) return true; // full-day window
+        if (s < e) {
+          if (nowMin >= s && nowMin < e) return true;
+        } else if (nowMin >= s) {
+          return true; // evening portion of an overnight window
+        }
+      }
+    }
+
+    // Early-morning tail of the previous day's overnight window.
+    final prevDay = now.weekday == 1 ? 7 : now.weekday - 1;
+    final prev = days[prevDay];
+    if (prev != null && prev.enabled) {
+      final s = _toMinutes(prev.start);
+      final e = _toMinutes(prev.end);
+      if (s != null && e != null && s > e && nowMin < e) return true;
+    }
+
+    return false;
+  }
+
+  static int? _toMinutes(String hhmm) {
+    final parts = hhmm.split(':');
+    if (parts.length < 2) return null;
+    final h = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (h == null || m == null) return null;
+    return h * 60 + m;
+  }
+
+  /// Short human summary for the settings row. Collapses to a shared label when
+  /// every active day uses the same window, otherwise "Custom".
+  String summary() {
+    if (!enabled) return 'Off';
+    final active = days.entries.where((e) => e.value.enabled).toList();
+    if (active.isEmpty) return 'No days selected';
+    final first = active.first.value;
+    final uniform =
+        active.every((e) => e.value.start == first.start && e.value.end == first.end);
+    final label = _daysLabel(active.map((e) => e.key).toSet());
+    return uniform ? '$label · ${first.start}–${first.end}' : '$label · Custom';
+  }
+
+  static String _daysLabel(Set<int> s) {
+    if (s.length == 7) return 'Every day';
+    if (s.length == 5 && s.containsAll(const [1, 2, 3, 4, 5])) return 'Weekdays';
+    if (s.length == 2 && s.containsAll(const [6, 7])) return 'Weekends';
+    const names = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final ordered = s.toList()..sort();
+    return ordered.map((d) => names[d]).join(', ');
+  }
 }
 
 class MasterChannels {
