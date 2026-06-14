@@ -9,6 +9,7 @@ import 'models/branding.dart';
 import 'theme.dart';
 import 'providers/auth_provider.dart';
 import 'providers/branding_provider.dart';
+import 'providers/client_matches_provider.dart';
 import 'providers/client_session_provider.dart';
 import 'providers/dashboard_provider.dart';
 import 'providers/feature_flags_provider.dart';
@@ -87,6 +88,7 @@ class CoreXApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => PortalLeadsProvider()),
         ChangeNotifierProvider(create: (_) => PropertyProvider()),
         ChangeNotifierProvider(create: (_) => SellerListingsProvider()),
+        ChangeNotifierProvider(create: (_) => ClientMatchesProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => VisibilityProvider()),
         ChangeNotifierProvider(create: (_) => FeatureFlagsProvider()),

@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show ChangeNotifier, debugPrint;
 
 import '../models/seller_models.dart';
 import '../services/api_service.dart' show ApiException;
@@ -32,10 +32,14 @@ class SellerListingsProvider extends ChangeNotifier {
     try {
       final result = await _api.sellerProperties();
       _properties = result.properties;
-    } on ApiException {
+      debugPrint('[seller-listings] loaded ${_properties.length} '
+          'property(ies) for agency ${result.agencyId}');
+    } on ApiException catch (e) {
       // 401 (token expired), 409 (no agency), or any server error → no entry.
+      debugPrint('[seller-listings] ApiException ${e.statusCode}: ${e.message}');
       _properties = const [];
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[seller-listings] error: $e');
       _properties = const [];
     }
     _loading = false;

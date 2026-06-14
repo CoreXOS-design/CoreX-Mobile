@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../providers/client_session_provider.dart';
+import '../../providers/client_matches_provider.dart';
+import '../../providers/seller_listings_provider.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../widgets/client/client_bottom_nav.dart';
@@ -103,7 +105,16 @@ class ClientProfileScreen extends StatelessWidget {
             icon: TablerIcons.logout,
             label: 'Sign out',
             tint: _kDanger,
-            onTap: () => session.signOut(),
+            onTap: () {
+              // Profile is a pushed route above AuthGate. Pop back to the root
+              // first so that when signOut() flips isLoggedIn, AuthGate's
+              // LoginScreen is actually visible — otherwise this route stays on
+              // top showing an empty (signed-out) profile. Mirrors the drawer.
+              context.read<SellerListingsProvider>().reset();
+              context.read<ClientMatchesProvider>().reset();
+              Navigator.of(context).popUntil((route) => route.isFirst);
+              session.signOut();
+            },
           ),
         ],
       ),

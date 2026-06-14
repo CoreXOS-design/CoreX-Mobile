@@ -139,6 +139,83 @@ class ClientContact {
   }
 }
 
+/// The client's assigned agent for their current agency, surfaced on
+/// `/v1/client/me` so the home screen can show a contact card. Optional —
+/// older payloads (or clients with no assigned agent) omit it.
+class ClientAgent {
+  final int? id;
+  final String fullName;
+  final String? title;
+  final String? phone;
+  final String? whatsapp;
+  final String? email;
+  final String? photoUrl;
+  final String? agencyName;
+
+  ClientAgent({
+    this.id,
+    required this.fullName,
+    this.title,
+    this.phone,
+    this.whatsapp,
+    this.email,
+    this.photoUrl,
+    this.agencyName,
+  });
+
+  bool get hasContact =>
+      (phone != null && phone!.isNotEmpty) ||
+      (whatsapp != null && whatsapp!.isNotEmpty) ||
+      (email != null && email!.isNotEmpty);
+
+  factory ClientAgent.fromJson(Map<String, dynamic> json) {
+    final first = json['first_name']?.toString().trim() ?? '';
+    final last = json['last_name']?.toString().trim() ?? '';
+    final full = json['full_name']?.toString().trim() ?? '';
+    final resolved = full.isNotEmpty
+        ? full
+        : [first, last].where((s) => s.isNotEmpty).join(' ');
+    // Backends vary on the phone key — accept the common aliases so the Call
+    // button shows up regardless of which one the API uses.
+    final phone = _firstNonEmpty(json, const [
+      'phone',
+      'mobile',
+      'cell',
+      'cell_number',
+      'phone_number',
+      'contact_number',
+      'telephone',
+    ]);
+    // A dedicated WhatsApp number is rare; default to the phone number, which
+    // is what agents almost always use for WhatsApp anyway.
+    final whatsapp = _firstNonEmpty(json, const [
+          'whatsapp',
+          'whatsapp_number',
+          'wa_number',
+        ]) ??
+        phone;
+    return ClientAgent(
+      id: _asInt(json['id']),
+      fullName: resolved,
+      title: json['title']?.toString(),
+      phone: phone,
+      whatsapp: whatsapp,
+      email: _firstNonEmpty(json, const ['email', 'email_address']),
+      photoUrl: _firstNonEmpty(json, const ['photo_url', 'photo', 'avatar_url']),
+      agencyName: json['agency_name']?.toString(),
+    );
+  }
+}
+
+/// Returns the first non-empty string value among [keys], or null if none.
+String? _firstNonEmpty(Map<String, dynamic> json, List<String> keys) {
+  for (final k in keys) {
+    final v = json[k]?.toString().trim();
+    if (v != null && v.isNotEmpty) return v;
+  }
+  return null;
+}
+
 class ClientLoginResponse {
   final String token;
   final List<ClientAgency> agencies;
@@ -574,6 +651,16 @@ class AgentQrAgent {
 
 class AgentQrRegisterResponse {
   final bool existing;
+
+  /// When true, the email already belongs to a client in this agent's agency.
+  /// The server has linked them to the agent but withheld a session token —
+  /// the app must verify ownership via OTP → set-password before sign-in.
+  final bool requiresVerification;
+
+  /// The verification channel the server expects (currently always 'otp').
+  final String? verification;
+
+  /// Session token. Empty when [requiresVerification] is true.
   final String token;
   final String? message;
   final AgentQrAgent agent;
@@ -581,6 +668,8 @@ class AgentQrRegisterResponse {
 
   AgentQrRegisterResponse({
     required this.existing,
+    this.requiresVerification = false,
+    this.verification,
     required this.token,
     this.message,
     required this.agent,
@@ -590,6 +679,8 @@ class AgentQrRegisterResponse {
   factory AgentQrRegisterResponse.fromJson(Map<String, dynamic> json) =>
       AgentQrRegisterResponse(
         existing: json['existing'] == true,
+        requiresVerification: json['requires_verification'] == true,
+        verification: json['verification']?.toString(),
         token: json['token']?.toString() ?? '',
         message: json['message']?.toString(),
         agent: AgentQrAgent.fromJson(

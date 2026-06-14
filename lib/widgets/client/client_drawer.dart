@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../providers/client_session_provider.dart';
+import '../../providers/client_matches_provider.dart';
 import '../../providers/seller_listings_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../screens/auth/client/client_agency_picker_screen.dart';
@@ -152,6 +153,7 @@ class ClientDrawer extends StatelessWidget {
               onTap: () {
                 Navigator.of(context).pop();
                 context.read<SellerListingsProvider>().reset();
+                context.read<ClientMatchesProvider>().reset();
                 session.signOut();
               },
             ),

@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/env.dart';
 import '../models/client_models.dart';
+import '../models/p24_location.dart';
 import '../models/seller_models.dart';
 import 'api_service.dart' show ApiException;
 
@@ -294,8 +295,13 @@ class ClientAuthService {
     throw _toException(res, 'Could not switch agency');
   }
 
-  Future<({ClientProfile client, List<ClientAgency> agencies, ClientContact? contact})>
-      me() async {
+  Future<
+      ({
+        ClientProfile client,
+        List<ClientAgency> agencies,
+        ClientContact? contact,
+        ClientAgent? agent,
+      })> me() async {
     final res = await http
         .get(
           Uri.parse('$_baseUrl/v1/client/me'),
@@ -306,6 +312,7 @@ class ClientAuthService {
     if (res.statusCode == 200) {
       final body = Map<String, dynamic>.from(jsonDecode(res.body));
       final contactRaw = body['contact'];
+      final agentRaw = body['agent'];
       return (
         client: ClientProfile.fromJson(
             Map<String, dynamic>.from(body['client'] as Map)),
@@ -315,6 +322,9 @@ class ClientAuthService {
             .toList(),
         contact: contactRaw is Map
             ? ClientContact.fromJson(Map<String, dynamic>.from(contactRaw))
+            : null,
+        agent: agentRaw is Map
+            ? ClientAgent.fromJson(Map<String, dynamic>.from(agentRaw))
             : null,
       );
     }
@@ -493,6 +503,51 @@ class ClientAuthService {
     }
     throw _toException(res, 'Could not load options');
   }
+
+  // -------------------- Property24 location cascade --------------------
+
+  // Reuses the SAME `/mobile/p24/*` cascade the agent property-create screen
+  // uses, but authenticated with the client session token instead of the agent
+  // token (the agent's ApiService reads `auth_token` from SharedPreferences,
+  // which a signed-in client never has — that was why the client suburb picker
+  // showed "Could not load list"). The suburb `id` returned here is identical
+  // to the one stored as `p24_suburb_id` on a property, so client match
+  // suburbs line up with agent property suburbs.
+  Future<List<P24Location>> _getP24(
+      String path, Map<String, String> qp) async {
+    final uri = Uri.parse('$_baseUrl/mobile/p24/$path').replace(
+      queryParameters: {
+        for (final e in qp.entries)
+          if (e.value.isNotEmpty) e.key: e.value,
+      },
+    );
+    final res = await http
+        .get(uri, headers: await _authHeaders())
+        .timeout(_timeout);
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      final list = (data['data'] as List?) ?? const [];
+      return list
+          .map((e) => P24Location.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    throw _toException(res, 'Could not load $path');
+  }
+
+  Future<List<P24Location>> getP24Provinces({String q = ''}) =>
+      _getP24('provinces', {'q': q});
+
+  Future<List<P24Location>> getP24Cities({
+    required int provinceId,
+    String q = '',
+  }) =>
+      _getP24('cities', {'province_id': '$provinceId', 'q': q});
+
+  Future<List<P24Location>> getP24Suburbs({
+    required int cityId,
+    String q = '',
+  }) =>
+      _getP24('suburbs', {'city_id': '$cityId', 'q': q});
 
   Future<void> logout() async {
     final token = await getToken();

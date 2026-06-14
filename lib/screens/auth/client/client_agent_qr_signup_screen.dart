@@ -9,6 +9,7 @@ import '../../../theme.dart';
 import '../../../widgets/ui/auth_scaffold.dart';
 import '../../../widgets/ui/glow_button.dart';
 import 'client_auth_shared.dart';
+import 'client_otp_screen.dart';
 
 class ClientAgentQrSignupScreen extends StatefulWidget {
   final String slug;
@@ -81,16 +82,38 @@ class _ClientAgentQrSignupScreenState extends State<ClientAgentQrSignupScreen> {
       _error = null;
     });
     try {
+      final email = _email.text.trim();
       final resp = await _api.agentQrRegister(
         slug: widget.slug,
         firstName: _firstName.text.trim(),
         lastName: _lastName.text.trim(),
         phone: _phone.text.trim(),
-        email: _email.text.trim(),
+        email: email,
         password: _password.text,
         passwordConfirmation: _confirm.text,
         deviceName: defaultDeviceName(),
       );
+
+      // Email already belongs to a client in this agency. The server linked
+      // them to the agent but withheld a token — verify ownership via OTP and
+      // set a password before signing in (the normal client activation flow).
+      if (resp.requiresVerification) {
+        if (!mounted) return;
+        showAuthToast(
+          context,
+          resp.message ??
+              'This email is already registered. Verify it to continue.',
+        );
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => ClientOtpScreen(
+              email: email,
+              purpose: OtpPurpose.activation,
+            ),
+          ),
+        );
+        return;
+      }
 
       await _api.saveToken(resp.token);
       if (!mounted) return;

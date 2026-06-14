@@ -400,6 +400,12 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
     return P24SuburbsPicker(
       initialIds: _p24SuburbIds,
       initialNames: _p24SuburbNames,
+      // Authenticate the P24 cascade as the signed-in client (the default
+      // ApiService loaders use the agent token, which a client doesn't have).
+      provincesLoader: (q) => _api.getP24Provinces(q: q),
+      citiesLoader: (provinceId, q) =>
+          _api.getP24Cities(provinceId: provinceId, q: q),
+      suburbsLoader: (cityId, q) => _api.getP24Suburbs(cityId: cityId, q: q),
       onChanged: (ids, names) {
         setState(() {
           _p24SuburbIds = ids;

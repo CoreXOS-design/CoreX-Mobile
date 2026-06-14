@@ -10,8 +10,8 @@ import '../corex/corex_bottom_nav.dart' show corexTabRoute;
 enum ClientNavTab { home, profile }
 
 /// Switches between the client's top-level tabs. Mirrors the staff
-/// `corexNavigateTo` behaviour: Home is always the stack root, Profile replaces
-/// the current tab so the bottom nav stays pinned.
+/// `corexNavigateTo` behaviour: Home is always the stack root, Profile is
+/// pushed on top so the route AuthGate reacts to stays alive underneath.
 void clientNavigateTo(BuildContext context, ClientNavTab tab, ClientNavTab from) {
   if (tab == from) return;
   switch (tab) {
@@ -22,7 +22,12 @@ void clientNavigateTo(BuildContext context, ClientNavTab tab, ClientNavTab from)
       );
       return;
     case ClientNavTab.profile:
-      Navigator.of(context).pushReplacement(
+      // Profile is pushed on top of Home (the AuthGate-rooted route) rather
+      // than replacing it — same as the staff "Me" tab. Replacing would tear
+      // down the route AuthGate reacts to, so signing out from Profile would
+      // strand the user on an empty, signed-out screen instead of returning
+      // them to the login screen.
+      Navigator.of(context).push(
         corexTabRoute(const ClientProfileScreen()),
       );
       return;

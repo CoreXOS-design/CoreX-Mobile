@@ -80,7 +80,8 @@ class _ClientSellerInsightsScreenState
         _loading = false;
         _error = e.message;
       });
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[seller-insights] load/parse error: $e\n$st');
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -193,6 +194,9 @@ class _ClientSellerInsightsScreenState
                 child: Image.network(
                   p.thumbnail!,
                   fit: BoxFit.cover,
+                  // Decode at a bounded resolution — full-res property photos
+                  // can OOM-crash the decoder on low-heap devices.
+                  cacheWidth: 1080,
                   errorBuilder: (_, __, ___) => Container(
                     color: CorexTokens.surfaceTop(context),
                     child: Icon(TablerIcons.photo_off,
@@ -242,6 +246,7 @@ class _ClientSellerInsightsScreenState
                     width: 44,
                     height: 44,
                     fit: BoxFit.contain,
+                    cacheWidth: 144,
                     errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                   ),
                 ),
@@ -312,8 +317,11 @@ class _ClientSellerInsightsScreenState
     final rows = <Widget>[];
     for (var i = 0; i < tiles.length; i += 2) {
       if (i > 0) rows.add(const SizedBox(height: 10));
+      // No `stretch` here: a stretch Row inside a scrolling ListView gets an
+      // unbounded height and crashes. The tiles share an identical structure
+      // (one label + one value line) so they're already equal height.
       rows.add(Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(child: tiles[i]),
           const SizedBox(width: 10),

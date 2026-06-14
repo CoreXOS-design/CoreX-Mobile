@@ -17,6 +17,7 @@ class ClientSessionProvider extends ChangeNotifier {
   bool _isLoggedIn = false;
   ClientProfile? _client;
   ClientContact? _contact;
+  ClientAgent? _agent;
   List<ClientAgency> _agencies = const [];
   bool _passwordMustChange = false;
 
@@ -30,6 +31,7 @@ class ClientSessionProvider extends ChangeNotifier {
   bool get passwordMustChange => _passwordMustChange;
   ClientProfile? get client => _client;
   ClientContact? get contact => _contact;
+  ClientAgent? get agent => _agent;
   List<ClientAgency> get agencies => _agencies;
 
   ClientAgency? get currentAgency {
@@ -73,6 +75,7 @@ class ClientSessionProvider extends ChangeNotifier {
       final me = await _api.me().timeout(const Duration(seconds: 8));
       _client = me.client;
       _contact = me.contact;
+      _agent = me.agent;
       _agencies = me.agencies;
       _passwordMustChange = me.client.passwordMustChange;
       _isLoggedIn = true;
@@ -111,6 +114,7 @@ class ClientSessionProvider extends ChangeNotifier {
       final me = await _api.me();
       _client = me.client;
       _contact = me.contact;
+      _agent = me.agent;
       _agencies = me.agencies;
       _passwordMustChange = me.client.passwordMustChange;
       _isLoggedIn = true;
@@ -163,6 +167,7 @@ class ClientSessionProvider extends ChangeNotifier {
     _isLoggedIn = false;
     _client = null;
     _contact = null;
+    _agent = null;
     _agencies = const [];
     _passwordMustChange = false;
     _agencyChosenThisSession = false;

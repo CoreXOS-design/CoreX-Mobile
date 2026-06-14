@@ -76,12 +76,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      openHours?.summary() ?? '—',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textMuted(context),
+                    Flexible(
+                      child: Text(
+                        openHours?.summary() ?? '—',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textMuted(context),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 4),
@@ -192,7 +197,8 @@ class _SettingsTile extends StatelessWidget {
               ),
             ),
           ),
-          trailing,
+          const SizedBox(width: 8),
+          Flexible(child: trailing),
         ],
       ),
     );

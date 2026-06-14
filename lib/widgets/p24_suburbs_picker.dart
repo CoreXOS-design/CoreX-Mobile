@@ -4,6 +4,15 @@ import '../models/p24_location.dart';
 import '../services/api_service.dart';
 import '../theme.dart';
 
+/// Loader signatures for the cascade so the picker can be backed by either the
+/// agent [ApiService] (default) or the client session — both expose the same
+/// `/mobile/p24/*` cascade, just with a different auth token.
+typedef P24ProvincesLoader = Future<List<P24Location>> Function(String q);
+typedef P24CitiesLoader = Future<List<P24Location>> Function(
+    int provinceId, String q);
+typedef P24SuburbsLoader = Future<List<P24Location>> Function(
+    int cityId, String q);
+
 /// Cascading Property24 picker for a wishlist's location filter.
 ///
 /// Province and City are single-select cascading parents (changing one clears
@@ -28,12 +37,22 @@ class P24SuburbsPicker extends StatefulWidget {
 
   final String? errorText;
 
+  /// Optional cascade loaders. When omitted the picker falls back to the agent
+  /// [ApiService]. The client match screen passes client-session-backed loaders
+  /// so the cascade authenticates as the signed-in client.
+  final P24ProvincesLoader? provincesLoader;
+  final P24CitiesLoader? citiesLoader;
+  final P24SuburbsLoader? suburbsLoader;
+
   const P24SuburbsPicker({
     super.key,
     this.initialIds = const [],
     this.initialNames = const [],
     this.errorText,
     required this.onChanged,
+    this.provincesLoader,
+    this.citiesLoader,
+    this.suburbsLoader,
   });
 
   @override
@@ -42,6 +61,17 @@ class P24SuburbsPicker extends StatefulWidget {
 
 class _P24SuburbsPickerState extends State<P24SuburbsPicker> {
   final _api = ApiService();
+
+  // Resolve to the injected loaders when provided, otherwise the agent
+  // ApiService cascade.
+  Future<List<P24Location>> _loadProvinces(String q) =>
+      widget.provincesLoader?.call(q) ?? _api.getP24Provinces(q: q);
+  Future<List<P24Location>> _loadCities(int provinceId, String q) =>
+      widget.citiesLoader?.call(provinceId, q) ??
+      _api.getP24Cities(provinceId: provinceId, q: q);
+  Future<List<P24Location>> _loadSuburbs(int cityId, String q) =>
+      widget.suburbsLoader?.call(cityId, q) ??
+      _api.getP24Suburbs(cityId: cityId, q: q);
 
   // id -> name. Insertion-ordered (LinkedHashMap) so chip order is stable.
   final Map<int, String> _selected = {};
@@ -71,7 +101,7 @@ class _P24SuburbsPickerState extends State<P24SuburbsPicker> {
   Future<void> _pickProvince() async {
     final picked = await _openSheet(
       title: 'Select Province',
-      loader: (q) => _api.getP24Provinces(q: q),
+      loader: (q) => _loadProvinces(q),
     );
     if (picked == null || picked.id == _province?.id) return;
     setState(() {
@@ -85,7 +115,7 @@ class _P24SuburbsPickerState extends State<P24SuburbsPicker> {
     if (prov == null) return;
     final picked = await _openSheet(
       title: 'Select City',
-      loader: (q) => _api.getP24Cities(provinceId: prov.id, q: q),
+      loader: (q) => _loadCities(prov.id, q),
     );
     if (picked == null || picked.id == _city?.id) return;
     setState(() => _city = picked);
@@ -103,7 +133,7 @@ class _P24SuburbsPickerState extends State<P24SuburbsPicker> {
       ),
       builder: (_) => _P24SuburbsMultiSheet(
         cityName: city.name,
-        loader: (q) => _api.getP24Suburbs(cityId: city.id, q: q),
+        loader: (q) => _loadSuburbs(city.id, q),
         preselectedIds: _selected.keys.toSet(),
       ),
     );
