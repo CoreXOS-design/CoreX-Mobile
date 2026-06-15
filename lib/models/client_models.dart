@@ -610,6 +610,60 @@ class ClientMatchInput {
       };
 }
 
+/// A testimonial the signed-in client has written about their connected agent.
+/// Created unpublished — the agency curates what goes public, so [published]
+/// stays false until they flip it live on the website. The app must never
+/// imply it's instantly public.
+class ClientTestimonial {
+  final int id;
+  final String body;
+  final int? rating; // 1–5, optional
+  final String? displayName;
+  final bool published;
+  final String? createdAt;
+
+  ClientTestimonial({
+    required this.id,
+    required this.body,
+    this.rating,
+    this.displayName,
+    this.published = false,
+    this.createdAt,
+  });
+
+  factory ClientTestimonial.fromJson(Map<String, dynamic> json) =>
+      ClientTestimonial(
+        id: (json['id'] as num).toInt(),
+        body: json['body']?.toString() ?? '',
+        rating: _asInt(json['rating']),
+        displayName: json['display_name']?.toString(),
+        published: json['published'] == true,
+        createdAt: json['created_at']?.toString(),
+      );
+}
+
+/// Write payload for `POST /v1/client/testimonials`. The client never sets the
+/// agent — the server attributes it to the connected agent automatically, so
+/// this only carries the review text, an optional rating and display name.
+class ClientTestimonialInput {
+  final String body;
+  final int? rating;
+  final String? displayName;
+
+  const ClientTestimonialInput({
+    required this.body,
+    this.rating,
+    this.displayName,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'body': body,
+        if (rating != null) 'rating': rating,
+        if (displayName != null && displayName!.isNotEmpty)
+          'display_name': displayName,
+      };
+}
+
 class AgentQrAgency {
   final int id;
   final String name;

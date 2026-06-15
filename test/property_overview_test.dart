@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:corex_mobile/models/gallery_tags.dart';
+import 'package:corex_mobile/models/property_compliance.dart';
 import 'package:corex_mobile/models/property_overview.dart';
 import 'package:corex_mobile/screens/properties/property_overview_screen.dart';
 import 'package:corex_mobile/services/api_service.dart';
@@ -8,6 +9,9 @@ import 'package:corex_mobile/services/api_service.dart';
 class _FakeApi extends ApiService {
   PropertyOverview? overview;
   ApiException? overviewError;
+
+  PropertyCompliance? compliance;
+  List<PropertyContact> contacts = const [];
 
   GalleryTagsData? addResult;
   ApiException? addError;
@@ -18,6 +22,15 @@ class _FakeApi extends ApiService {
     if (overviewError != null) throw overviewError!;
     return overview!;
   }
+
+  @override
+  Future<PropertyCompliance> getPropertyCompliance(int id) async {
+    if (compliance == null) throw ApiException(404, 'no compliance');
+    return compliance!;
+  }
+
+  @override
+  Future<List<PropertyContact>> getPropertyContacts(int id) async => contacts;
 
   @override
   Future<GalleryTagsData> addGalleryTag(int propertyId, String tag) async {
@@ -79,6 +92,68 @@ void main() {
           "isn't published anywhere yet"),
       findsOneWidget,
     );
+  });
+
+  testWidgets('compliance card renders status badge, gates and blocked_by',
+      (tester) async {
+    final api = _FakeApi()
+      ..overview = _baseOverview(placements: const [])
+      ..compliance = PropertyCompliance.fromJson({
+        'property_id': 7,
+        'status': 'BLOCKED',
+        'marketable': false,
+        'ready': false,
+        'blocked_by': ['No signed authority document'],
+        'next_actions': const [],
+        'checklist': {
+          'authority_to_market': {'passed': false, 'detail': 'No signed authority'},
+          'photos': {'passed': false, 'detail': 'Only 2 photos'},
+        },
+        'photos': {'count': 2, 'required': 4, 'passed': false},
+        'sellers': [
+          {'contact_id': 9, 'name': 'John Owner', 'role': 'owner', 'fica_passed': true}
+        ],
+      });
+
+    await tester.pumpWidget(_wrap(
+      PropertyOverviewScreen(propertyId: 7, api: api),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('BLOCKED'), findsOneWidget);
+    expect(find.text('Authority to market'), findsOneWidget);
+    expect(find.text('Blocking go-live'), findsOneWidget);
+    expect(find.text('No signed authority document'), findsOneWidget);
+    expect(find.text('2/4 photos'), findsOneWidget);
+    expect(find.text('John Owner'), findsOneWidget);
+    // Not ready → the go-live button is present but disabled.
+    expect(find.text('Send Authority to Market'), findsOneWidget);
+  });
+
+  testWidgets('LIVE compliance shows attribution and no go-live button',
+      (tester) async {
+    final api = _FakeApi()
+      ..overview = _baseOverview(placements: const [])
+      ..compliance = PropertyCompliance.fromJson({
+        'property_id': 7,
+        'status': 'LIVE',
+        'marketable': true,
+        'ready': true,
+        'snapshot_at': '2026-06-15T10:00:00+02:00',
+        'snapshotted_by': 'Jane Agent',
+        'checklist': const {},
+        'sellers': const [],
+      });
+
+    await tester.pumpWidget(_wrap(
+      PropertyOverviewScreen(propertyId: 7, api: api),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('LIVE'), findsOneWidget);
+    expect(find.textContaining('Sent to market on'), findsOneWidget);
+    expect(find.text('by Jane Agent'), findsOneWidget);
+    expect(find.text('Send Authority to Market'), findsNothing);
   });
 
   test('addGalleryTag happy path returns new tag list', () async {

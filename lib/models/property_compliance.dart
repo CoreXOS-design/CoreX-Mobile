@@ -98,11 +98,30 @@ const Map<String, String> kComplianceGateLabels = {
   'details_complete': 'Listing details',
 };
 
+/// Display label for a checklist gate. Uses the curated label when known,
+/// otherwise humanises the raw key (replace `_` with spaces, capitalise) so
+/// dynamic gates the backend adds later (e.g. `dev_override`) still read well.
+String complianceGateLabel(String key) {
+  final known = kComplianceGateLabels[key];
+  if (known != null) return known;
+  final words = key.split('_').where((w) => w.isNotEmpty).map((w) {
+    return w[0].toUpperCase() + w.substring(1);
+  });
+  final joined = words.join(' ');
+  return joined.isEmpty ? key : joined;
+}
+
 class PropertyCompliance {
   final int propertyId;
+
+  /// Server-computed status label: `LIVE` | `READY` | `BLOCKED`.
+  final String? status;
   final bool marketable;
   final bool ready;
   final String? snapshotAt;
+
+  /// Name of the agent who snapshotted the property to market (LIVE only).
+  final String? snapshottedBy;
   final String? firstMarketedAt;
   final List<String> blockedBy;
   final List<ComplianceNextAction> nextActions;
@@ -114,9 +133,11 @@ class PropertyCompliance {
 
   const PropertyCompliance({
     required this.propertyId,
+    this.status,
     this.marketable = false,
     this.ready = false,
     this.snapshotAt,
+    this.snapshottedBy,
     this.firstMarketedAt,
     this.blockedBy = const [],
     this.nextActions = const [],
@@ -125,8 +146,11 @@ class PropertyCompliance {
     this.sellers = const [],
   });
 
-  /// True when the property has gone live (snapshotted to market).
-  bool get isLive => marketable && (snapshotAt ?? '').isNotEmpty;
+  /// True when the property has gone live (snapshotted to market). Prefers the
+  /// server `status` label, falling back to the marketable + snapshot heuristic
+  /// for older payloads that don't carry `status`.
+  bool get isLive =>
+      status == 'LIVE' || (marketable && (snapshotAt ?? '').isNotEmpty);
 
   factory PropertyCompliance.fromJson(Map<String, dynamic> j) {
     int toInt(dynamic v) =>
@@ -180,9 +204,11 @@ class PropertyCompliance {
 
     return PropertyCompliance(
       propertyId: toInt(j['property_id']),
+      status: j['status']?.toString(),
       marketable: j['marketable'] == true,
       ready: j['ready'] == true,
       snapshotAt: j['snapshot_at']?.toString(),
+      snapshottedBy: j['snapshotted_by']?.toString(),
       firstMarketedAt: j['first_marketed_at']?.toString(),
       blockedBy: blocked,
       nextActions: actions,

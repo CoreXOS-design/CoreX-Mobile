@@ -21,6 +21,7 @@ import 'client_matches_list_screen.dart';
 import 'client_profile_screen.dart';
 import 'client_property_screen.dart';
 import 'client_seller_listings_screen.dart';
+import 'client_testimonials_screen.dart';
 
 class ClientHomeScreen extends StatefulWidget {
   const ClientHomeScreen({super.key});
@@ -164,10 +165,6 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
   }
 
   Widget _moduleGrid(BuildContext context) {
-    final modules = <_ModuleSpec>[
-      _ModuleSpec(icon: TablerIcons.calendar_event, label: 'Viewings'),
-    ];
-
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -182,12 +179,12 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
           label: 'Core Matches',
           onTap: () => _push(context, const ClientMatchesListScreen()),
         ),
-        for (final m in modules)
-          CorexModuleTile(
-            icon: m.icon,
-            label: m.label,
-            onTap: () => _comingSoon(context, m.label),
-          ),
+        // Review your agent — write a testimonial and see ones you've sent.
+        CorexModuleTile(
+          icon: TablerIcons.star,
+          label: 'Review Agent',
+          onTap: () => _push(context, const ClientTestimonialsScreen()),
+        ),
       ],
     );
   }
@@ -239,12 +236,6 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
     if (h < 17) return 'afternoon';
     return 'evening';
   }
-}
-
-class _ModuleSpec {
-  final IconData icon;
-  final String label;
-  _ModuleSpec({required this.icon, required this.label});
 }
 
 /// Horizontal "Matched for you" strip of the client's top matched listings,

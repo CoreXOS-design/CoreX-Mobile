@@ -868,7 +868,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
   ComplianceNextAction? _actionFor(PropertyCompliance c, String gateKey) {
     // Map a gate to its matching next_action. The backend keys the action by
     // label text, so fall back to a fuzzy contains-match on the gate label.
-    final label = kComplianceGateLabels[gateKey] ?? gateKey;
+    final label = complianceGateLabel(gateKey);
     for (final a in c.nextActions) {
       final l = a.label.toLowerCase();
       if (gateKey == 'photos' && l.contains('photo')) return a;
@@ -928,6 +928,8 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _statusBadge(c),
+            const SizedBox(height: 12),
             if (c.isLive)
               _liveBanner(c)
             else ...[
@@ -935,6 +937,10 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
               if (c.photos != null) ...[
                 const SizedBox(height: 10),
                 _photosChip(c.photos!),
+              ],
+              if (c.blockedBy.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                _blockedByList(c.blockedBy),
               ],
             ],
             if (c.sellers.isNotEmpty) ...[
@@ -948,6 +954,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
               for (final s in c.sellers) _sellerRow(s),
             ],
             if (!c.isLive) ...[
+              ..._extraActions(c),
               const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
@@ -983,6 +990,8 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
 
   Widget _liveBanner(PropertyCompliance c) {
     final date = _fmtDate(c.snapshotAt);
+    final by = (c.snapshottedBy ?? '').trim();
+    final headline = date.isEmpty ? 'Live' : 'Live · Sent to market on $date';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -991,21 +1000,163 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
         borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Icon(Icons.check_circle, color: Colors.green, size: 20),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              date.isEmpty ? 'Live' : 'Live · Sent to market on $date',
-              style: const TextStyle(
-                  color: Colors.green,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  headline,
+                  style: const TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13),
+                ),
+                if (by.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      'by $by',
+                      style: TextStyle(
+                          color: AppTheme.textSecondary(context),
+                          fontSize: 12),
+                    ),
+                  ),
+              ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// Overall status pill — LIVE (green) / READY (blue) / BLOCKED (orange).
+  /// Falls back to the derived state when the server omits `status`.
+  Widget _statusBadge(PropertyCompliance c) {
+    final status =
+        (c.status ?? (c.isLive ? 'LIVE' : (c.ready ? 'READY' : 'BLOCKED')))
+            .toUpperCase();
+    late final Color color;
+    late final IconData icon;
+    switch (status) {
+      case 'LIVE':
+        color = Colors.green;
+        icon = Icons.check_circle;
+        break;
+      case 'READY':
+        color = Colors.blue;
+        icon = Icons.task_alt;
+        break;
+      default:
+        color = Colors.orange;
+        icon = Icons.error_outline;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 6),
+          Text(status,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5)),
+        ],
+      ),
+    );
+  }
+
+  /// The "what's blocking go-live" summary list.
+  Widget _blockedByList(List<String> reasons) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.block, size: 16, color: Colors.orange),
+              const SizedBox(width: 6),
+              Text('Blocking go-live',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary(context))),
+            ],
+          ),
+          const SizedBox(height: 6),
+          for (final r in reasons)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('•  ',
+                      style: TextStyle(color: AppTheme.textSecondary(context))),
+                  Expanded(
+                    child: Text(r,
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            color: AppTheme.textSecondary(context))),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Next-action buttons the server returned that aren't already surfaced
+  /// inline on a specific failing gate (e.g. "Send Marketing Pack"). Each
+  /// deep-links via its `action_url`.
+  List<Widget> _extraActions(PropertyCompliance c) {
+    if (c.nextActions.isEmpty) return const [];
+    final consumed = <ComplianceNextAction>{};
+    for (final gate in c.checklist) {
+      if (gate.passed) continue;
+      final a = _actionFor(c, gate.key);
+      if (a != null) consumed.add(a);
+    }
+    final extras = c.nextActions
+        .where((a) => !consumed.contains(a) && a.actionUrl.isNotEmpty)
+        .toList();
+    if (extras.isEmpty) return const [];
+    return [
+      const SizedBox(height: 14),
+      Text('Next actions',
+          style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textSecondary(context))),
+      for (final a in extras)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.open_in_new, size: 15),
+              label: Text(a.label.isEmpty ? 'Open' : a.label),
+              onPressed: () => _openWeb(a.actionUrl),
+            ),
+          ),
+        ),
+    ];
   }
 
   Widget _gateRow(PropertyCompliance c, ComplianceGate gate) {
@@ -1041,7 +1192,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      kComplianceGateLabels[gate.key] ?? gate.key,
+                      complianceGateLabel(gate.key),
                       style: TextStyle(
                           fontWeight: FontWeight.w600,
                           color: AppTheme.textPrimary(context)),

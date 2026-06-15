@@ -11,6 +11,7 @@ import '../../widgets/client/client_bottom_nav.dart';
 import '../../widgets/corex/corex_card.dart';
 import '../../widgets/corex/corex_scaffold.dart';
 import 'client_settings_screen.dart';
+import 'client_testimonials_screen.dart';
 
 const Color _kDanger = Color(0xFFEF4444);
 
@@ -91,6 +92,16 @@ class ClientProfileScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
+          _ActionRow(
+            icon: TablerIcons.star,
+            label: 'Review your agent',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const ClientTestimonialsScreen(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
           _ActionRow(
             icon: TablerIcons.settings,
             label: 'Account settings',

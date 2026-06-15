@@ -8,7 +8,7 @@ import '../config/env.dart';
 import '../models/client_models.dart';
 import '../models/p24_location.dart';
 import '../models/seller_models.dart';
-import 'api_service.dart' show ApiException;
+import 'api_service.dart' show ApiException, ValidationException;
 
 // Wraps every client-side endpoint. The session token lives in
 // flutter_secure_storage (Keychain / KeyStore). The activation token is held
@@ -504,6 +504,58 @@ class ClientAuthService {
     throw _toException(res, 'Could not load options');
   }
 
+  // -------------------- Testimonials --------------------
+
+  /// `POST /v1/client/testimonials`. Submits a review about the client's
+  /// connected agent (the server attributes the agent automatically) and
+  /// returns the freshly created, unpublished testimonial.
+  ///
+  /// 422 → [ValidationException] with per-field messages so the form can map
+  /// them back onto the inputs. 409 (no agency selected) / 404 (no contact
+  /// record) surface as plain [ApiException]s for the caller to handle.
+  Future<ClientTestimonial> submitTestimonial(
+      ClientTestimonialInput input) async {
+    final res = await http
+        .post(
+          Uri.parse('$_baseUrl/v1/client/testimonials'),
+          headers: await _authHeaders(),
+          body: jsonEncode(input.toJson()),
+        )
+        .timeout(_timeout);
+
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      final body = Map<String, dynamic>.from(jsonDecode(res.body));
+      final raw = body['testimonial'] is Map ? body['testimonial'] : body;
+      return ClientTestimonial.fromJson(Map<String, dynamic>.from(raw as Map));
+    }
+    if (res.statusCode == 422) throw _parseValidationError(res.body);
+    throw _toException(res, 'Could not submit testimonial');
+  }
+
+  /// `GET /v1/client/testimonials` — the testimonials this client has
+  /// submitted for their current agency, newest first (server-ordered).
+  Future<({int agencyId, List<ClientTestimonial> testimonials})>
+      testimonials() async {
+    final res = await http
+        .get(
+          Uri.parse('$_baseUrl/v1/client/testimonials'),
+          headers: await _authHeaders(),
+        )
+        .timeout(_timeout);
+
+    if (res.statusCode == 200) {
+      final body = Map<String, dynamic>.from(jsonDecode(res.body));
+      return (
+        agencyId: (body['agency_id'] as num?)?.toInt() ?? 0,
+        testimonials: (body['testimonials'] as List? ?? const [])
+            .whereType<Map>()
+            .map((e) => ClientTestimonial.fromJson(Map<String, dynamic>.from(e)))
+            .toList(),
+      );
+    }
+    throw _toException(res, 'Could not load testimonials');
+  }
+
   // -------------------- Property24 location cascade --------------------
 
   // Reuses the SAME `/mobile/p24/*` cascade the agent property-create screen
@@ -567,6 +619,31 @@ class ClientAuthService {
   }
 
   // -------------------- Errors --------------------
+
+  /// Parses a Laravel-style 422 body into a [ValidationException] carrying one
+  /// message per field (the first message in each `errors[field]` list), so a
+  /// form can surface errors inline against the matching input.
+  ValidationException _parseValidationError(String body) {
+    String topMessage = 'Validation failed';
+    final fieldErrors = <String, String>{};
+    try {
+      final json = jsonDecode(body);
+      if (json is Map) {
+        if (json['message'] is String) topMessage = json['message'] as String;
+        final errors = json['errors'];
+        if (errors is Map) {
+          errors.forEach((k, v) {
+            if (v is List && v.isNotEmpty) {
+              fieldErrors[k.toString()] = v.first.toString();
+            } else if (v is String) {
+              fieldErrors[k.toString()] = v;
+            }
+          });
+        }
+      }
+    } catch (_) {}
+    return ValidationException(topMessage, fieldErrors);
+  }
 
   ApiException _toException(http.Response res, String fallback) {
     String message = fallback;
