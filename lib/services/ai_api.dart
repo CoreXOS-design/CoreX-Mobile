@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' show MediaType;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/env.dart';
 import 'api_service.dart';
@@ -56,7 +57,14 @@ class AiApi {
       Uri.parse('$_baseUrl/v1/mobile/ellie/voice'),
     );
     req.headers.addAll(await _headers());
-    req.files.add(await http.MultipartFile.fromPath('audio', audio.path));
+    // Tag the clip with an audio MIME the backend accepts (AAC in an m4a
+    // container → audio/mp4). Without this the default is
+    // application/octet-stream, which the voice endpoint won't decode.
+    req.files.add(await http.MultipartFile.fromPath(
+      'audio',
+      audio.path,
+      contentType: MediaType('audio', 'mp4'),
+    ));
 
     debugPrint('[ai_api] POST $_baseUrl/v1/mobile/ellie/voice '
         '(audio=${await audio.length()} bytes)');

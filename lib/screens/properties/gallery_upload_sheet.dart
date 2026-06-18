@@ -35,7 +35,7 @@ class GalleryUploadSheet extends StatefulWidget {
     return showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.darkBackground,
+      backgroundColor: AppTheme.background(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
       ),
@@ -92,7 +92,7 @@ class _GalleryInfoDialogState extends State<_GalleryInfoDialog> {
     return PopScope(
       canPop: canClose,
       child: AlertDialog(
-        backgroundColor: AppTheme.darkSurface,
+        backgroundColor: AppTheme.surface(context),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radius),
         ),
@@ -565,7 +565,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? AppTheme.brand : AppTheme.darkSurface2,
+          color: selected ? AppTheme.brand : AppTheme.surface2(context),
           borderRadius: BorderRadius.circular(AppTheme.radius),
         ),
         child: Row(
@@ -606,7 +606,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
             label: const Text('Burst'),
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.brand,
-              side: const BorderSide(color: AppTheme.darkSurface2),
+              side: BorderSide(color: AppTheme.surface2(context)),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppTheme.radius)),
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -621,7 +621,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
             label: const Text('Native'),
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.brand,
-              side: const BorderSide(color: AppTheme.darkSurface2),
+              side: BorderSide(color: AppTheme.surface2(context)),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppTheme.radius)),
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -636,7 +636,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
             label: const Text('Gallery'),
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.brand,
-              side: const BorderSide(color: AppTheme.darkSurface2),
+              side: BorderSide(color: AppTheme.surface2(context)),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppTheme.radius)),
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -723,7 +723,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
             margin: const EdgeInsets.only(bottom: 6),
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: AppTheme.darkSurface,
+              color: AppTheme.surface(context),
               borderRadius: BorderRadius.circular(AppTheme.radius),
               border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
             ),

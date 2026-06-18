@@ -186,7 +186,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.darkBackground,
+      backgroundColor: AppTheme.background(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
       ),
@@ -281,7 +281,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                                 selected: selected,
                                 onSelected: (_) =>
                                     setSheet(() => unitIndex = i),
-                                backgroundColor: AppTheme.darkSurface2,
+                                backgroundColor: AppTheme.surface2(context),
                                 selectedColor: AppTheme.brand,
                                 labelStyle: TextStyle(
                                   color: selected
@@ -325,7 +325,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                                         label: Text(f),
                                         selected: selected,
                                         onSelected: (_) => toggle(f),
-                                        backgroundColor: AppTheme.darkSurface2,
+                                        backgroundColor: AppTheme.surface2(context),
                                         selectedColor: AppTheme.brand,
                                         checkmarkColor: Colors.white,
                                         labelStyle: TextStyle(
@@ -376,7 +376,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: active ? AppTheme.brand : AppTheme.darkSurface2,
+          color: active ? AppTheme.brand : AppTheme.surface2(context),
           borderRadius: BorderRadius.circular(AppTheme.radius),
         ),
         child: Text(
@@ -525,9 +525,9 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: AppTheme.darkSurface,
+        color: AppTheme.surface(context),
         borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppTheme.darkSurface2),
+        border: Border.all(color: AppTheme.surface2(context)),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
@@ -536,7 +536,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
             'Add a space',
             style: TextStyle(color: AppTheme.textSecondary(context)),
           ),
-          dropdownColor: AppTheme.darkSurface,
+          dropdownColor: AppTheme.surface(context),
           value: null,
           items: availableTypes
               .map((t) => DropdownMenuItem(
@@ -571,9 +571,9 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: AppTheme.darkSurface,
+        color: AppTheme.surface(context),
         borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppTheme.darkSurface2),
+        border: Border.all(color: AppTheme.surface2(context)),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppTheme.radius),
@@ -654,9 +654,9 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: AppTheme.darkSurface,
+        color: AppTheme.surface(context),
         borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppTheme.darkSurface2),
+        border: Border.all(color: AppTheme.surface2(context)),
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -702,7 +702,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                       _dirty = true;
                     });
                   },
-                  backgroundColor: AppTheme.darkSurface2,
+                  backgroundColor: AppTheme.surface2(context),
                   selectedColor: AppTheme.brand,
                   checkmarkColor: Colors.white,
                   labelStyle: TextStyle(

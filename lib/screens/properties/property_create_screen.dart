@@ -167,7 +167,7 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.darkSurface,
+        backgroundColor: AppTheme.surface(context),
         title: Text(
           'Missing Required Fields',
           style: TextStyle(color: AppTheme.textPrimary(context)),
@@ -578,8 +578,9 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
                         height: 4,
                         margin: EdgeInsets.only(right: i < 3 ? 8 : 0),
                         decoration: BoxDecoration(
-                          color:
-                              active ? AppTheme.brand : AppTheme.darkSurface2,
+                          color: active
+                              ? AppTheme.brand
+                              : AppTheme.surface2(context),
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
@@ -839,7 +840,7 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
             });
             _clearFieldError('listing_type');
           },
-          backgroundColor: AppTheme.darkSurface2,
+          backgroundColor: AppTheme.surface2(context),
           selectedColor: AppTheme.brand,
           labelStyle: TextStyle(
             color:
@@ -1095,9 +1096,9 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
                     errorBuilder: (_, __, ___) => Container(
                       width: 120,
                       height: 90,
-                      color: AppTheme.darkSurface2,
-                      child: const Icon(Icons.broken_image,
-                          color: AppTheme.darkTextMuted),
+                      color: AppTheme.surface2(context),
+                      child: Icon(Icons.broken_image,
+                          color: AppTheme.textMuted(context)),
                     ),
                   ),
                 ),

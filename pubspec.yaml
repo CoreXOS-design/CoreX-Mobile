@@ -12,6 +12,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   provider: ^6.1.2
   http: ^1.2.2
+  http_parser: ^4.1.2
   shared_preferences: ^2.3.3
   google_fonts: ^6.2.1
   flutter_dotenv: ^6.0.0

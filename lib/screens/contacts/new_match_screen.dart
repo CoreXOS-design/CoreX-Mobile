@@ -218,7 +218,7 @@ class _NewMatchScreenState extends State<NewMatchScreen> {
       label: Text(label),
       selected: selected,
       onSelected: (_) => setState(() => _listingType = value),
-      backgroundColor: AppTheme.darkSurface2,
+      backgroundColor: AppTheme.surface2(context),
       selectedColor: AppTheme.brand,
       labelStyle: TextStyle(
         color: selected ? Colors.white : AppTheme.textPrimary(context),

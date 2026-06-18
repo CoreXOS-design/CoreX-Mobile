@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
-import '../../screens/client/client_home_screen.dart';
 import '../../screens/client/client_profile_screen.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
@@ -16,10 +15,12 @@ void clientNavigateTo(BuildContext context, ClientNavTab tab, ClientNavTab from)
   if (tab == from) return;
   switch (tab) {
     case ClientNavTab.home:
-      Navigator.of(context).pushAndRemoveUntil(
-        corexTabRoute(const ClientHomeScreen()),
-        (route) => false,
-      );
+      // Home is the AuthGate-rooted route (the first route). Pop back down to
+      // it rather than pushing a fresh ClientHomeScreen with pushAndRemoveUntil:
+      // removing every route (including the AuthGate root) tears down the only
+      // widget watching the session, so a later sign-out flips isLoggedIn with
+      // nothing left to swap in the login screen — stranding the user on Home.
+      Navigator.of(context).popUntil((route) => route.isFirst);
       return;
     case ClientNavTab.profile:
       // Profile is pushed on top of Home (the AuthGate-rooted route) rather

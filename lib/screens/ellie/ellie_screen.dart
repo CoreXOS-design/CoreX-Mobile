@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
@@ -96,22 +95,59 @@ class _EllieScreenState extends State<EllieScreen>
     await _finishRecording();
   }
 
+  bool _finishing = false;
+
   Future<void> _finishRecording() async {
-    setState(() => _phase = _Phase.thinking);
-    File? file;
+    // Guard against the release gesture and the auto-stop timer both firing.
+    if (_finishing) return;
+    _finishing = true;
     try {
-      file = await _recorder.stop();
+      await _runFinish();
+    } finally {
+      _finishing = false;
+    }
+  }
+
+  Future<void> _runFinish() async {
+    EllieClip clip;
+    try {
+      clip = await _recorder.stop();
     } catch (e) {
       _resetWithError('Recording failed: $e');
       return;
     }
-    if (file == null) {
-      _resetWithError('No audio captured');
-      return;
+    if (!mounted) return;
+    switch (clip.status) {
+      case EllieClipStatus.tooShort:
+        setState(() => _phase = _Phase.idle);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Hold to talk — press and hold the mic')),
+        );
+        return;
+      case EllieClipStatus.empty:
+        _resetWithError(
+            "Didn't catch that — hold the mic and speak after the tone");
+        return;
+      case EllieClipStatus.ok:
+        break;
     }
+    final file = clip.file!;
+    setState(() => _phase = _Phase.thinking);
     try {
       final result = await _api.sendVoice(file);
       if (!mounted) return;
+      // Empty/short transcript with no recognised intent: the clip didn't
+      // carry usable speech. Nudge gently rather than popping a result sheet.
+      if (result.unknown && result.transcript.trim().length < 2) {
+        setState(() => _phase = _Phase.idle);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text("Didn't catch that — hold the mic and speak after the tone"),
+          ),
+        );
+        return;
+      }
       setState(() {
         _phase = _Phase.idle;
         _lastTranscript = result.transcript;

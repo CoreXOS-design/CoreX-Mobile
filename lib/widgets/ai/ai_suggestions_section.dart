@@ -32,7 +32,19 @@ class AiSuggestionsController extends ChangeNotifier {
   static const int _maxConsecutiveFailures = 5;
   int _consecutiveFailures = 0;
 
+  /// Set in [dispose]. Guards every post-await `notifyListeners()` and timer
+  /// scheduling so an in-flight load/poll can't touch a disposed controller
+  /// (the section is torn down when the agent leaves the Spaces step while
+  /// the AI features request is still outstanding).
+  bool _disposed = false;
+
   AiSuggestionsController(this.propertyId);
+
+  /// Notifies listeners only while still alive — a no-op once disposed.
+  void _safeNotify() {
+    if (_disposed) return;
+    _safeNotify();
+  }
 
   AiSuggestions get data => _data;
   bool get loading => _loading;
@@ -54,7 +66,7 @@ class AiSuggestionsController extends ChangeNotifier {
       _rejected.remove(token);
       _confirmed.add(token);
     }
-    notifyListeners();
+    _safeNotify();
   }
 
   /// Initial load (e.g. when opening the property edit screen with existing
@@ -62,7 +74,7 @@ class AiSuggestionsController extends ChangeNotifier {
   Future<void> load() async {
     _loading = true;
     _error = null;
-    notifyListeners();
+    _safeNotify();
     try {
       _data = await _api.getAiSuggestions(propertyId);
       _applyDefaultSelection();
@@ -71,48 +83,53 @@ class AiSuggestionsController extends ChangeNotifier {
     } catch (e) {
       _error = e.toString();
     }
+    // The section may have been torn down while the request was in flight.
+    if (_disposed) return;
     _loading = false;
-    notifyListeners();
+    _safeNotify();
     if (_data.stillRunning) startPolling();
   }
 
   /// Kick off (or extend) polling after an upload batch finishes.
   void startPolling() {
-    if (_polling) return;
+    if (_disposed || _polling) return;
     _polling = true;
     _timedOut = false;
     _pollStarted = DateTime.now();
-    notifyListeners();
+    _safeNotify();
     _scheduleNext();
   }
 
   void _scheduleNext({Duration? delay}) {
+    if (_disposed) return;
     _poll?.cancel();
     _poll = Timer(delay ?? _interval, _tick);
   }
 
   Future<void> _tick() async {
+    if (_disposed) return;
     if (_pollStarted != null &&
         DateTime.now().difference(_pollStarted!) > _maxWait) {
       _polling = false;
       _timedOut = true;
-      notifyListeners();
+      _safeNotify();
       return;
     }
     try {
       final next = await _api.getAiSuggestions(propertyId);
+      if (_disposed) return;
       _data = next;
       _consecutiveFailures = 0;
       _applyDefaultSelection();
       if (!next.stillRunning) {
         _polling = false;
-        notifyListeners();
+        _safeNotify();
         return;
       }
     } on ApiException catch (e) {
       _error = e.message;
       _polling = false;
-      notifyListeners();
+      _safeNotify();
       return;
     } catch (_) {
       // Transient (timeout / socket / parse). Back off exponentially and give
@@ -123,14 +140,14 @@ class AiSuggestionsController extends ChangeNotifier {
         _error = 'Could not reach the server while analysing. Pull to retry.';
         _polling = false;
         _timedOut = true;
-        notifyListeners();
+        _safeNotify();
         return;
       }
-      notifyListeners();
+      _safeNotify();
       _scheduleNext(delay: _interval * (1 << (_consecutiveFailures - 1)));
       return;
     }
-    notifyListeners();
+    _safeNotify();
     _scheduleNext();
   }
 
@@ -161,6 +178,7 @@ class AiSuggestionsController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _poll?.cancel();
     super.dispose();
   }
