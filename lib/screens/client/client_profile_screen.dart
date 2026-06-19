@@ -10,6 +10,7 @@ import '../../theme/corex_tokens.dart';
 import '../../widgets/client/client_bottom_nav.dart';
 import '../../widgets/corex/corex_card.dart';
 import '../../widgets/corex/corex_scaffold.dart';
+import 'client_consent_screen.dart';
 import 'client_settings_screen.dart';
 import 'client_testimonials_screen.dart';
 
@@ -98,6 +99,16 @@ class ClientProfileScreen extends StatelessWidget {
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => const ClientTestimonialsScreen(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _ActionRow(
+            icon: TablerIcons.shield_lock,
+            label: 'Privacy & consent',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const ClientConsentScreen(),
               ),
             ),
           ),

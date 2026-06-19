@@ -556,6 +556,47 @@ class ClientAuthService {
     throw _toException(res, 'Could not load testimonials');
   }
 
+  // -------------------- Consent (POPIA/CPA ledger) --------------------
+
+  /// `GET /v1/client/consent` — all 7 consent types with the client's current
+  /// decision in their selected agency. Same ledger the agent edits on the web.
+  Future<ClientConsentResult> consent() async {
+    final res = await http
+        .get(
+          Uri.parse('$_baseUrl/v1/client/consent'),
+          headers: await _authHeaders(),
+        )
+        .timeout(_timeout);
+    if (res.statusCode == 200) {
+      return ClientConsentResult.fromJson(
+          Map<String, dynamic>.from(jsonDecode(res.body)));
+    }
+    throw _toException(res, 'Could not load your consent settings');
+  }
+
+  /// `POST /v1/client/consent` — record one decision. [decision] is `'given'`,
+  /// `'declined'`, or `'clear'` (back to not-recorded). Returns the SAME shape
+  /// as [consent] (the full refreshed list) so the caller re-renders from it.
+  /// 422 → [ValidationException] (bad `type`/`decision`).
+  Future<ClientConsentResult> setConsent({
+    required String type,
+    required String decision,
+  }) async {
+    final res = await http
+        .post(
+          Uri.parse('$_baseUrl/v1/client/consent'),
+          headers: await _authHeaders(),
+          body: jsonEncode({'type': type, 'decision': decision}),
+        )
+        .timeout(_timeout);
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      return ClientConsentResult.fromJson(
+          Map<String, dynamic>.from(jsonDecode(res.body)));
+    }
+    if (res.statusCode == 422) throw _parseValidationError(res.body);
+    throw _toException(res, 'Could not save your choice');
+  }
+
   // -------------------- Property24 location cascade --------------------
 
   // Reuses the SAME `/mobile/p24/*` cascade the agent property-create screen

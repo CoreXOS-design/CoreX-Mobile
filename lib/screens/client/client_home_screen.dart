@@ -17,6 +17,7 @@ import '../../widgets/corex/corex_app_bar.dart';
 import '../../widgets/corex/corex_card.dart';
 import '../../widgets/corex/corex_module_tile.dart';
 import 'client_coming_soon_screen.dart';
+import 'client_consent_screen.dart';
 import 'client_matches_list_screen.dart';
 import 'client_profile_screen.dart';
 import 'client_property_screen.dart';
@@ -184,6 +185,12 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
           icon: TablerIcons.star,
           label: 'Review Agent',
           onTap: () => _push(context, const ClientTestimonialsScreen()),
+        ),
+        // Privacy & consent — view/set the client's own POPIA/CPA consent.
+        CorexModuleTile(
+          icon: TablerIcons.shield_lock,
+          label: 'Privacy & Consent',
+          onTap: () => _push(context, const ClientConsentScreen()),
         ),
       ],
     );

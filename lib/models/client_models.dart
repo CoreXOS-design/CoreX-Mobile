@@ -664,6 +664,71 @@ class ClientTestimonialInput {
       };
 }
 
+/// One row in the client-facing POPIA/CPA consent ledger — the SAME ledger the
+/// agent sees on the web, so a change here is instantly visible to them and
+/// vice versa. [group] sections the UI ("channel" | "marketing" |
+/// "compliance"); [decision] is "given" | "declined" | null (not yet recorded).
+class ClientConsent {
+  final String type;
+  final String label;
+  final String group;
+  final String? decision;
+  final String? recordedAt;
+
+  const ClientConsent({
+    required this.type,
+    required this.label,
+    required this.group,
+    this.decision,
+    this.recordedAt,
+  });
+
+  bool get isGiven => decision == 'given';
+  bool get isDeclined => decision == 'declined';
+  bool get isSet => isGiven || isDeclined;
+
+  factory ClientConsent.fromJson(Map<String, dynamic> json) {
+    final raw = json['decision']?.toString();
+    return ClientConsent(
+      type: json['type']?.toString() ?? '',
+      label: json['label']?.toString() ?? '',
+      group: json['group']?.toString() ?? '',
+      // Anything other than the two known states is treated as "not recorded".
+      decision: (raw == 'given' || raw == 'declined') ? raw : null,
+      recordedAt: json['recorded_at']?.toString(),
+    );
+  }
+
+  /// Local optimistic copy. [decision] of `'clear'`/null and [clearMeta] both
+  /// reset to not-recorded; the server response replaces this either way.
+  ClientConsent copyWith({String? decision, String? recordedAt}) {
+    final next = decision == 'clear' ? null : (decision ?? this.decision);
+    return ClientConsent(
+      type: type,
+      label: label,
+      group: group,
+      decision: next,
+      recordedAt: next == null ? null : (recordedAt ?? this.recordedAt),
+    );
+  }
+}
+
+class ClientConsentResult {
+  final int agencyId;
+  final List<ClientConsent> consents;
+
+  const ClientConsentResult({required this.agencyId, required this.consents});
+
+  factory ClientConsentResult.fromJson(Map<String, dynamic> json) =>
+      ClientConsentResult(
+        agencyId: _asInt(json['agency_id']) ?? 0,
+        consents: (json['consents'] as List? ?? const [])
+            .whereType<Map>()
+            .map((e) => ClientConsent.fromJson(Map<String, dynamic>.from(e)))
+            .toList(),
+      );
+}
+
 class AgentQrAgency {
   final int id;
   final String name;
