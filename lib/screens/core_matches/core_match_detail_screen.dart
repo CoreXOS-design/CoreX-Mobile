@@ -31,6 +31,7 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -250,8 +251,8 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
                   ),
                 ),
                 if (!hasPhone)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
                     child: Text(
                       'Add a phone number to this contact first.',
                       style: TextStyle(
@@ -289,7 +290,7 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
                             try {
                               final res = await _api.sendMatchWhatsApp(
                                   widget.matchId, controller.text);
-                              if (!mounted) return;
+                              if (!ctx.mounted) return;
                               Navigator.of(ctx).pop();
                               final link = res.waLink;
                               if (link != null && link.isNotEmpty) {
@@ -305,7 +306,7 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
                               );
                               await _load();
                             } catch (e) {
-                              if (!mounted) return;
+                              if (!ctx.mounted) return;
                               setSheetState(() => sending = false);
                               ScaffoldMessenger.of(ctx).showSnackBar(
                                 SnackBar(content: Text('Failed: $e')),

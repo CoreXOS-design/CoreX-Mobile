@@ -5,6 +5,7 @@ import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../providers/feature_flags_provider.dart';
+import '../../providers/notifications_provider.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../widgets/corex/corex_app_bar.dart';
@@ -34,6 +35,7 @@ class HomeScreen extends StatelessWidget {
     final firstName = _firstName(auth.userName);
     final initials = _initials(auth.userName);
     final agencyName = _agencyName(auth.user);
+    final unread = context.watch<NotificationsProvider>().unread;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
@@ -49,7 +51,7 @@ class HomeScreen extends StatelessWidget {
                 Builder(
                   builder: (ctx) => CorexAppBar(
                     userInitials: initials,
-                    unreadBadge: 1,
+                    unreadBadge: unread,
                     onMenuTap: () => Scaffold.of(ctx).openDrawer(),
                     onBellTap: () => _push(ctx, const NotificationsScreen()),
                     onAvatarTap: () => _push(ctx, const ProfileScreen()),
@@ -180,11 +182,6 @@ class HomeScreen extends StatelessWidget {
         label: 'Portal Leads',
         dot: context.watch<PortalLeadsProvider>().totalUnread > 0,
         builder: () => const PortalLeadsScreen(),
-      ),
-      _ModuleSpec(
-        icon: TablerIcons.hourglass_high,
-        label: 'Coming Soon',
-        builder: () => const ComingSoonScreen(feature: 'Coming Soon'),
       ),
       _ModuleSpec(
         icon: TablerIcons.hourglass_high,

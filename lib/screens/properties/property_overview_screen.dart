@@ -8,6 +8,7 @@ import '../../services/api_service.dart';
 import '../../theme.dart';
 import 'add_contact_sheet.dart';
 import 'property_edit_screen.dart';
+import 'rental_inspections_screen.dart';
 
 class PropertyOverviewScreen extends StatefulWidget {
   final int propertyId;
@@ -252,6 +253,14 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
           _complianceCard(_compliance!),
           const SizedBox(height: 16),
         ],
+        // Rental inspection galleries — live rentals only. Gate strictly on
+        // the server flag; never derive eligibility here.
+        if (p.rentalInspectionsAvailable) ...[
+          _sectionTitle('Inspections'),
+          const SizedBox(height: 8),
+          _inspectionsCard(p),
+          const SizedBox(height: 16),
+        ],
         _sectionTitle('Contacts'),
         const SizedBox(height: 8),
         _contactsCard(),
@@ -277,10 +286,16 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
         const SizedBox(height: 8),
         _portalLinksBlock(p.portalLinks),
         const SizedBox(height: 16),
-        if (p.agent != null) ...[
-          _sectionTitle('Listing Agent'),
+        if (p.agent != null || p.secondAgent != null) ...[
+          _sectionTitle(p.secondAgent != null ? 'Listing Agents' : 'Listing Agent'),
           const SizedBox(height: 8),
-          _contactCard(p.agent!),
+          if (p.agent != null)
+            _contactCard(p.agent!,
+                roleLabel: p.secondAgent != null ? 'Lead agent' : null),
+          if (p.secondAgent != null) ...[
+            if (p.agent != null) const SizedBox(height: 8),
+            _contactCard(p.secondAgent!, roleLabel: 'Co-agent'),
+          ],
           const SizedBox(height: 16),
         ],
         if (p.owner != null) ...[
@@ -647,7 +662,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
     );
   }
 
-  Widget _contactCard(ContactRef c, {VoidCallback? onTap}) {
+  Widget _contactCard(ContactRef c, {VoidCallback? onTap, String? roleLabel}) {
     return Card(
       child: InkWell(
         onTap: onTap,
@@ -662,6 +677,16 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (roleLabel != null)
+                      Text(
+                        roleLabel,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                          color: AppTheme.textSecondary(context),
+                        ),
+                      ),
                     Text(
                       c.name,
                       style: TextStyle(
@@ -752,6 +777,63 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
           style: TextStyle(
               color: AppTheme.textPrimary(context),
               fontWeight: FontWeight.w700)),
+    );
+  }
+
+  /// Entry point into the rental inspection galleries. Only ever rendered
+  /// when the server's `rental_inspections_available` flag is true.
+  Widget _inspectionsCard(PropertyOverview p) {
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => RentalInspectionsScreen(
+                propertyId: widget.propertyId,
+                propertyTitle: p.title,
+                api: _api,
+              ),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.surface2(context),
+                  borderRadius: BorderRadius.circular(AppTheme.radius),
+                ),
+                child: Icon(Icons.fact_check_outlined,
+                    color: AppTheme.brand, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Rental Inspections',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textPrimary(context))),
+                    const SizedBox(height: 2),
+                    Text('In, out & custom inspection galleries',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textSecondary(context))),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right,
+                  size: 20, color: AppTheme.textMuted(context)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

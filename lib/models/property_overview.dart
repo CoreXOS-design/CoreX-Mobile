@@ -139,6 +139,11 @@ class PropertyOverview {
   final String? livePreviewUrl;
   final String? virtualTourUrl;
 
+  /// Whether the rental inspection galleries are available for this property.
+  /// True only for rental listings that are live on the market. Trust the
+  /// flag verbatim — never derive eligibility client-side.
+  final bool rentalInspectionsAvailable;
+
   /// Canonical, ordered, portal-agnostic placement list. Render by iterating.
   final List<PortalLink> portalLinks;
 
@@ -146,6 +151,10 @@ class PropertyOverview {
   /// [portalLinks].
   final List<Placement> placements;
   final ContactRef? agent;
+
+  /// The co-listing (second) agent, when one is assigned. Rendered alongside
+  /// the lead [agent] on the detail screen. Null on single-agent listings.
+  final ContactRef? secondAgent;
   final ContactRef? owner;
   final KeyDates keyDates;
 
@@ -168,9 +177,11 @@ class PropertyOverview {
     this.description,
     this.livePreviewUrl,
     this.virtualTourUrl,
+    this.rentalInspectionsAvailable = false,
     this.portalLinks = const [],
     this.placements = const [],
     this.agent,
+    this.secondAgent,
     this.owner,
     this.keyDates = const KeyDates(),
   });
@@ -212,6 +223,21 @@ class PropertyOverview {
     final ownerRaw = j['owner'];
     final kdRaw = j['key_dates'];
 
+    // Co-listing agent. Accept either a nested `second_agent` object (mirrors
+    // `agent`) or the flat `pp_second_agent_id` / `pp_second_agent_name` pair
+    // the property record exposes. Only build a ref when we have a name.
+    final secondAgentRaw = j['second_agent'];
+    ContactRef? secondAgent;
+    if (secondAgentRaw is Map) {
+      secondAgent =
+          ContactRef.fromJson(Map<String, dynamic>.from(secondAgentRaw));
+    } else {
+      final name = j['pp_second_agent_name']?.toString().trim();
+      if (name != null && name.isNotEmpty) {
+        secondAgent = ContactRef(id: toInt(j['pp_second_agent_id']), name: name);
+      }
+    }
+
     return PropertyOverview(
       id: toInt(j['id']) ?? 0,
       title: j['title']?.toString(),
@@ -231,11 +257,13 @@ class PropertyOverview {
       description: j['description']?.toString(),
       livePreviewUrl: j['live_preview_url']?.toString(),
       virtualTourUrl: j['virtual_tour_url']?.toString(),
+      rentalInspectionsAvailable: j['rental_inspections_available'] == true,
       portalLinks: portalLinks,
       placements: placements,
       agent: agentRaw is Map
           ? ContactRef.fromJson(Map<String, dynamic>.from(agentRaw))
           : null,
+      secondAgent: secondAgent,
       owner: ownerRaw is Map
           ? ContactRef.fromJson(Map<String, dynamic>.from(ownerRaw))
           : null,

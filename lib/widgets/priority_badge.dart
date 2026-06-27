@@ -23,7 +23,9 @@ class PriorityBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StatusChip(
-      label: priority[0].toUpperCase() + priority.substring(1),
+      label: priority.isEmpty
+          ? priority
+          : priority[0].toUpperCase() + priority.substring(1),
       color: _color,
       dense: dense,
     );

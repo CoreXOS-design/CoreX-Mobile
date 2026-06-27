@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../../../models/branding.dart';
 import '../../../models/client_models.dart';
+import '../../../providers/client_matches_provider.dart';
 import '../../../providers/client_session_provider.dart';
+import '../../../providers/seller_listings_provider.dart';
 import '../../../services/api_service.dart' show ApiException;
 import '../../../services/client_auth_service.dart';
 import '../../../theme.dart';
@@ -117,6 +119,10 @@ class _ClientAgencyPickerScreenState extends State<ClientAgencyPickerScreen> {
             client: result.client,
             agencies: result.agencies,
           );
+      // Switching agency changes the visible inventory: drop the previous
+      // agency's listings & matches so they don't carry over.
+      context.read<SellerListingsProvider>().reset();
+      context.read<ClientMatchesProvider>().reset();
       Navigator.of(context).popUntil((r) => r.isFirst);
     } on ApiException catch (e) {
       if (!mounted) return;

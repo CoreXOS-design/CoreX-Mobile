@@ -59,8 +59,15 @@ class _CalendarScreenState extends State<CalendarScreen>
             break;
           }
         }
+        // No-auto-popup rule: don't open the action sheet on load. Instead
+        // bring the deep-linked event into view by selecting its day so the
+        // user sees it highlighted and can tap it deliberately.
         if (match != null && mounted) {
-          await showEventActionsSheet(context, match);
+          final d = jhb(match.eventDate);
+          setState(() {
+            _selectedDate = DateTime(d.year, d.month, d.day);
+            _currentMonth = DateTime(d.year, d.month);
+          });
         }
       }
     });

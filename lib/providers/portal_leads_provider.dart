@@ -5,6 +5,12 @@ import '../services/api_service.dart';
 class PortalLeadsProvider extends ChangeNotifier {
   final ApiService _api = ApiService();
 
+  bool _disposed = false;
+
+  // Stale-response guards (one sequence per logical load).
+  int _leadsSeq = 0;
+  int _datesSeq = 0;
+
   List<PortalLeadDate> _dates = [];
   List<PortalLead> _leads = [];
   String? _selectedDate;
@@ -30,32 +36,45 @@ class PortalLeadsProvider extends ChangeNotifier {
   }
 
   Future<void> loadDates() async {
+    final reqId = ++_datesSeq;
     _loadingDates = true;
-    notifyListeners();
+    _safeNotify();
     try {
-      _dates = await _api.getPortalLeadDates();
+      final dates = await _api.getPortalLeadDates();
+      if (reqId != _datesSeq) return;
+      _dates = dates;
     } catch (e) {
+      if (reqId != _datesSeq) return;
       debugPrint('[portal-leads] loadDates failed: $e');
+    } finally {
+      if (reqId == _datesSeq) {
+        _loadingDates = false;
+        _safeNotify();
+      }
     }
-    _loadingDates = false;
-    notifyListeners();
   }
 
   Future<void> loadLeads({String? date}) async {
     final d = date ?? _selectedDate ?? today();
     _selectedDate = d;
+    final reqId = ++_leadsSeq;
     _loadingLeads = true;
     _error = null;
-    notifyListeners();
+    _safeNotify();
     try {
       final res = await _api.getPortalLeads(date: d);
+      if (reqId != _leadsSeq) return;
       _leads = res.leads;
     } catch (e) {
+      if (reqId != _leadsSeq) return;
       _error = e.toString();
       _leads = [];
+    } finally {
+      if (reqId == _leadsSeq) {
+        _loadingLeads = false;
+        _safeNotify();
+      }
     }
-    _loadingLeads = false;
-    notifyListeners();
   }
 
   Future<void> refresh() async {
@@ -74,7 +93,7 @@ class PortalLeadsProvider extends ChangeNotifier {
           unread: _dates[dateIdx].unread - 1,
         );
       }
-      notifyListeners();
+      _safeNotify();
     }
     try {
       await _api.markPortalLeadRead(id);
@@ -95,7 +114,18 @@ class PortalLeadsProvider extends ChangeNotifier {
     } else {
       _dates = [PortalLeadDate(date: t, total: 1, unread: 1), ..._dates];
     }
+    _safeNotify();
+  }
+
+  void _safeNotify() {
+    if (_disposed) return;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 
   void reset() {
@@ -103,6 +133,11 @@ class PortalLeadsProvider extends ChangeNotifier {
     _leads = [];
     _selectedDate = null;
     _error = null;
-    notifyListeners();
+    _loadingLeads = false;
+    _loadingDates = false;
+    // Invalidate any in-flight loads.
+    _leadsSeq++;
+    _datesSeq++;
+    _safeNotify();
   }
 }

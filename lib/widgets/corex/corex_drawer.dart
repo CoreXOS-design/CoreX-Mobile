@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
+import '../../main.dart';
 import '../../providers/auth_provider.dart';
-import '../../providers/branding_provider.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../screens/profile_screen.dart';
@@ -103,11 +103,7 @@ class CorexDrawer extends StatelessWidget {
               icon: TablerIcons.logout,
               label: 'Sign out',
               destructive: true,
-              onTap: () async {
-                Navigator.of(context).pop();
-                context.read<BrandingProvider>().reset();
-                await context.read<AuthProvider>().logout();
-              },
+              onTap: () => logoutAndReset(context),
             ),
             const SizedBox(height: 8),
           ],

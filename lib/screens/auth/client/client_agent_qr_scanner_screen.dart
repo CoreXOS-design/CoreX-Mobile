@@ -43,6 +43,7 @@ class _ClientAgentQrScannerScreenState
   }
 
   void _onDetect(BarcodeCapture capture) {
+    if (!mounted) return;
     if (_handled) return;
     for (final b in capture.barcodes) {
       final raw = b.rawValue;

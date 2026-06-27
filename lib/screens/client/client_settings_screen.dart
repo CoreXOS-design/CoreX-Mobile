@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
+import '../../providers/client_matches_provider.dart';
 import '../../providers/client_session_provider.dart';
+import '../../providers/seller_listings_provider.dart';
 import '../../services/api_service.dart' show ApiException;
 import '../../services/client_auth_service.dart';
 import '../../theme/corex_accent_theme.dart';
@@ -103,6 +105,11 @@ class ClientSettingsScreen extends StatelessWidget {
               label: 'Sign out',
               tint: _kDanger,
               onTap: () async {
+                // Mirror the client drawer / profile sign-out: drop the
+                // previous account's listings & matches before tearing down
+                // the session so nothing carries into the next sign-in.
+                context.read<SellerListingsProvider>().reset();
+                context.read<ClientMatchesProvider>().reset();
                 await context.read<ClientSessionProvider>().signOut();
                 if (context.mounted) {
                   Navigator.of(context).popUntil((r) => r.isFirst);

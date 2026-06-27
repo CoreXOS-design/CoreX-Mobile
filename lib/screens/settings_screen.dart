@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/branding.dart';
+import '../models/notification_models.dart';
 import '../theme.dart';
 import '../providers/auth_provider.dart';
 import '../providers/notifications_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/security_service.dart';
+import '../widgets/event_reminder_picker.dart';
 import '../widgets/ui/icon_badge.dart';
 import '../widgets/ui/section_header.dart';
 import 'notification_schedule_screen.dart';
@@ -37,7 +39,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final auth = context.watch<AuthProvider>();
     final brand = BrandColors.of(context);
     final isDark = themeProvider.isDark;
-    final openHours = context.watch<NotificationsProvider>().prefs?.openHours;
+    final prefsData = context.watch<NotificationsProvider>().prefs;
+    final openHours = prefsData?.openHours;
+    final notifLocked = prefsData?.locked ?? false;
+    final reminderPref =
+        prefsData != null ? ensureEventReminder(prefsData) : null;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -98,6 +104,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   builder: (_) => const NotificationScheduleScreen(),
                 )),
               ),
+              if (reminderPref != null) ...[
+                Divider(
+                    height: 1,
+                    indent: 14,
+                    endIndent: 14,
+                    color: AppTheme.borderColor(context)),
+                _SettingsTile(
+                  icon: Icons.alarm_outlined,
+                  tint: brand.icon,
+                  label: 'Event reminder',
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          formatLeadTime(reminderPref.threshold ??
+                              reminderPref.thresholdMin ??
+                              60),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.end,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textMuted(context),
+                          ),
+                        ),
+                      ),
+                      if (!notifLocked) ...[
+                        const SizedBox(width: 4),
+                        Icon(Icons.chevron_right_rounded,
+                            size: 20, color: AppTheme.textMuted(context)),
+                      ],
+                    ],
+                  ),
+                  onTap: notifLocked
+                      ? null
+                      : () => _editReminder(reminderPref),
+                ),
+              ],
             ]),
             const SizedBox(height: 24),
             const SectionHeader(label: 'Security'),
@@ -144,6 +190,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     );
+  }
+
+  /// Opens the hours+minutes lead-time picker and persists the choice. The
+  /// preference is part of the shared notification-preferences snapshot, so we
+  /// save the whole thing (master, quiet hours, all items) via the provider.
+  /// On failure we reconcile back to the server's state so the row never shows
+  /// a value that wasn't saved.
+  Future<void> _editReminder(NotificationPreference pref) async {
+    final min = pref.thresholdMin ?? 5;
+    final max = pref.thresholdMax ?? 10080;
+    final current = (pref.threshold ?? min).clamp(min, max);
+
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: AppTheme.surface(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) =>
+          LeadTimePickerSheet(initialMinutes: current, min: min, max: max),
+    );
+    if (!mounted || picked == null || picked == pref.threshold) return;
+
+    final provider = context.read<NotificationsProvider>();
+    pref.threshold = picked;
+    setState(() {}); // reflect the new value on the tile immediately
+
+    final ok = await provider.savePreferences();
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    if (ok) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Event reminder updated')),
+      );
+    } else {
+      await provider.loadPreferences(force: true);
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(
+        content: Text(provider.prefsError ?? 'Failed to save'),
+        backgroundColor: const Color(0xFFef4444),
+      ));
+    }
   }
 }
 

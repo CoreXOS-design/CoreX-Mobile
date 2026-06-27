@@ -138,6 +138,16 @@ class EllieVoiceRecorder {
 
   Future<void> dispose() async {
     _maxClipTimer?.cancel();
+    // Drop any temp clip that was never consumed by stop() (which clears _path
+    // and hands the file to the caller) so recordings don't accumulate on disk.
+    final p = _path;
+    _path = null;
+    if (p != null) {
+      try {
+        final f = File(p);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
     await _recorder.dispose();
   }
 }

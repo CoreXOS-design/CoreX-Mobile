@@ -4,6 +4,7 @@ import '../../models/branding.dart';
 import '../../theme.dart';
 import '../../models/property.dart';
 import '../../models/visibility.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/property_provider.dart';
 import '../../providers/visibility_provider.dart';
 import '../../widgets/agent_filter_bar.dart';
@@ -312,6 +313,9 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
     final provider = context.watch<PropertyProvider>();
     final all = provider.properties;
     final filtered = _applyFilters(all);
+    // Used to flag co-listings (cards where the lead agent isn't the logged-in
+    // user). The API already scopes the list — this is display-only.
+    final currentUserId = context.watch<AuthProvider>().currentUserId;
 
     return Scaffold(
       appBar: AppBar(
@@ -353,10 +357,14 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
         ],
       ),
       floatingActionButton: _PropertiesFab(onPressed: () async {
+        // Capture the provider before the async gap so we don't read it off a
+        // BuildContext after the await.
+        final provider = context.read<PropertyProvider>();
         await Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const PropertyCreateScreen()),
         );
-        if (mounted) context.read<PropertyProvider>().fetchProperties();
+        if (!mounted) return;
+        provider.fetchProperties();
       }),
       body: SafeArea(
         top: false,
@@ -435,8 +443,10 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                             child: ListView.builder(
                               padding: const EdgeInsets.all(16),
                               itemCount: filtered.length,
-                              itemBuilder: (context, index) =>
-                                  _PropertyCard(property: filtered[index]),
+                              itemBuilder: (context, index) => _PropertyCard(
+                                property: filtered[index],
+                                currentUserId: currentUserId,
+                              ),
                             ),
                           ),
           ),
@@ -496,7 +506,16 @@ class _PropertiesFab extends StatelessWidget {
 
 class _PropertyCard extends StatelessWidget {
   final Property property;
-  const _PropertyCard({required this.property});
+  final int? currentUserId;
+  const _PropertyCard({required this.property, this.currentUserId});
+
+  /// True when the listing's lead agent isn't the logged-in user — i.e. the
+  /// user co-lists it. The API already returned it; we only label it. Defensive
+  /// when either id is unknown (don't mislabel as co-listing).
+  bool get _isCoListing =>
+      property.agentId != null &&
+      currentUserId != null &&
+      property.agentId != currentUserId;
 
   Color _statusColor(String? status) {
     switch (status?.toLowerCase()) {
@@ -560,6 +579,10 @@ class _PropertyCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (_isCoListing) ...[
+                          const _CoListingBadge(),
+                          const SizedBox(height: 6),
+                        ],
                         Text(
                           property.address,
                           maxLines: 2,
@@ -613,6 +636,39 @@ class _PropertyCard extends StatelessWidget {
       ),
       child: Icon(Icons.home_rounded,
           color: AppTheme.textMuted(context), size: 28),
+    );
+  }
+}
+
+/// Small pill flagging that the logged-in user co-lists this property (they're
+/// the secondary agent, not the lead). Lets agents tell their own listings
+/// apart from ones they share.
+class _CoListingBadge extends StatelessWidget {
+  const _CoListingBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.brand.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.people_alt_outlined, size: 12, color: AppTheme.brand),
+          const SizedBox(width: 4),
+          Text(
+            'Co-listing',
+            style: TextStyle(
+              color: AppTheme.brand,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

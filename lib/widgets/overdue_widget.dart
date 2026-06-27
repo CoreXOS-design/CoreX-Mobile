@@ -22,6 +22,7 @@ class _OverdueWidgetState extends State<OverdueWidget> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       context.read<NotificationsProvider>().loadOverdue();
     });
   }

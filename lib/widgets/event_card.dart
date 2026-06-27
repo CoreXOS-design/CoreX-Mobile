@@ -113,8 +113,10 @@ class EventCard extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
-                                event.eventType[0].toUpperCase() +
-                                    event.eventType.substring(1),
+                                event.eventType.isEmpty
+                                    ? event.eventType
+                                    : event.eventType[0].toUpperCase() +
+                                        event.eventType.substring(1),
                                 style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w600,

@@ -457,11 +457,15 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
                     child: PageView(
                       controller: _pageController,
                       physics: const NeverScrollableScrollPhysics(),
+                      // Keep every page alive once built. Otherwise the
+                      // PageView disposes off-screen pages and
+                      // `_spacesKey.currentState` becomes null — which made
+                      // `_save` silently skip unsaved space edits.
                       children: [
-                        _stepAddress(),
-                        _stepDetails(),
-                        _stepSpaces(),
-                        _stepGallery(),
+                        _KeepAlive(child: _stepAddress()),
+                        _KeepAlive(child: _stepDetails()),
+                        _KeepAlive(child: _stepSpaces()),
+                        _KeepAlive(child: _stepGallery()),
                       ],
                     ),
                   ),
@@ -1139,5 +1143,27 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
       width: double.infinity, height: 48,
       child: ElevatedButton(onPressed: onPressed, child: Text(label)),
     );
+  }
+}
+
+/// Keeps a wizard page alive after it leaves the viewport, so its [State]
+/// (and thus `_spacesKey.currentState`) survives navigation between steps.
+class _KeepAlive extends StatefulWidget {
+  final Widget child;
+  const _KeepAlive({required this.child});
+
+  @override
+  State<_KeepAlive> createState() => _KeepAliveState();
+}
+
+class _KeepAliveState extends State<_KeepAlive>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }

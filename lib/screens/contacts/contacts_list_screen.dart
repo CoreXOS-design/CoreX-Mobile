@@ -80,6 +80,9 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
   }
 
   void _onSearchChanged(String v) {
+    // Rebuild so the clear (suffix) icon shows/hides reactively as the user
+    // types; the actual search is still debounced below.
+    setState(() {});
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), () {
       _search = v.trim();

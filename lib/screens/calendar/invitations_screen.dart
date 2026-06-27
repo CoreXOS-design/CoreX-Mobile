@@ -22,6 +22,7 @@ class _InvitationsScreenState extends State<InvitationsScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       context.read<DashboardProvider>().loadInvitations();
     });
   }

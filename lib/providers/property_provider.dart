@@ -8,6 +8,11 @@ import '../services/api_service.dart';
 class PropertyProvider extends ChangeNotifier {
   final ApiService _api = ApiService();
 
+  bool _disposed = false;
+
+  // Stale-response guard for fetchProperties.
+  int _fetchSeq = 0;
+
   List<Property> properties = [];
   Property? selectedProperty;
   bool isLoading = false;
@@ -21,45 +26,77 @@ class PropertyProvider extends ChangeNotifier {
   /// screen) keep the agent the user is viewing.
   AgentFilter _agentFilter = AgentFilter.mine;
 
+  /// Clear all per-user state on logout so the next account never sees the
+  /// previous user's properties or selection.
+  void reset() {
+    properties = [];
+    selectedProperty = null;
+    isLoading = false;
+    error = null;
+    fieldErrors = const {};
+    _agentFilter = AgentFilter.mine;
+    // Invalidate any in-flight fetch.
+    _fetchSeq++;
+    _safeNotify();
+  }
+
+  void _safeNotify() {
+    if (_disposed) return;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
   Future<void> fetchProperties({AgentFilter? agentFilter}) async {
     if (agentFilter != null) _agentFilter = agentFilter;
+    final reqId = ++_fetchSeq;
     isLoading = true;
     error = null;
-    notifyListeners();
+    _safeNotify();
     try {
-      properties = await _api.getProperties(agentFilter: _agentFilter);
+      final result = await _api.getProperties(agentFilter: _agentFilter);
+      if (reqId != _fetchSeq) return;
+      properties = result;
     } catch (e) {
+      if (reqId != _fetchSeq) return;
       error = e.toString();
+    } finally {
+      if (reqId == _fetchSeq) {
+        isLoading = false;
+        _safeNotify();
+      }
     }
-    isLoading = false;
-    notifyListeners();
   }
 
   Future<void> fetchProperty(int id) async {
     isLoading = true;
     error = null;
-    notifyListeners();
+    _safeNotify();
     try {
       selectedProperty = await _api.getProperty(id);
     } on ApiException catch (e) {
       selectedProperty = null;
       error = e.message;
       isLoading = false;
-      notifyListeners();
+      _safeNotify();
       // Let the screen decide how to surface 403 / not-found (toast + pop).
       rethrow;
     } catch (e) {
       error = e.toString();
     }
     isLoading = false;
-    notifyListeners();
+    _safeNotify();
   }
 
   Future<Property?> createProperty(Map<String, dynamic> data) async {
     isLoading = true;
     error = null;
     fieldErrors = const {};
-    notifyListeners();
+    _safeNotify();
     try {
       final property = await _api.createProperty(data);
       await fetchProperties();
@@ -68,12 +105,12 @@ class PropertyProvider extends ChangeNotifier {
       error = e.message;
       fieldErrors = e.fieldErrors;
       isLoading = false;
-      notifyListeners();
+      _safeNotify();
       return null;
     } catch (e) {
       error = e.toString();
       isLoading = false;
-      notifyListeners();
+      _safeNotify();
       return null;
     }
   }
@@ -82,7 +119,7 @@ class PropertyProvider extends ChangeNotifier {
     isLoading = true;
     error = null;
     fieldErrors = const {};
-    notifyListeners();
+    _safeNotify();
     try {
       await _api.updateProperty(id, data);
       await fetchProperties();
@@ -91,12 +128,12 @@ class PropertyProvider extends ChangeNotifier {
       error = e.message;
       fieldErrors = e.fieldErrors;
       isLoading = false;
-      notifyListeners();
+      _safeNotify();
       return false;
     } catch (e) {
       error = e.toString();
       isLoading = false;
-      notifyListeners();
+      _safeNotify();
       return false;
     }
   }
@@ -110,11 +147,14 @@ class PropertyProvider extends ChangeNotifier {
   /// pick up the AI [UploadedImage.analysisId] when image-AI is enabled.
   Future<UploadedImage?> uploadImageWithResult(
       int propertyId, File image, String? roomTag) async {
+    // Clear any stale error so a prior failure doesn't persist into a later
+    // successful upload.
+    error = null;
     try {
       return await _api.uploadPropertyImage(propertyId, image, roomTag);
     } catch (e) {
       error = e.toString();
-      notifyListeners();
+      _safeNotify();
       return null;
     }
   }

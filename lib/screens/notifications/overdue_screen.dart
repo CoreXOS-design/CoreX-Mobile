@@ -16,9 +16,11 @@ class OverdueScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final snap = context.watch<NotificationsProvider>().overdue;
-    final items = pillarFilter == null
-        ? snap.items
-        : snap.items.where((i) => _matches(i, pillarFilter!)).toList()
+    // Always sort a *copy* — the unfiltered branch would otherwise alias the
+    // provider's backing list and mutate shared state during build.
+    final items = (pillarFilter == null
+        ? snap.items.toList()
+        : snap.items.where((i) => _matches(i, pillarFilter!)).toList())
       ..sort((a, b) => b.ageHours.compareTo(a.ageHours));
 
     return Scaffold(

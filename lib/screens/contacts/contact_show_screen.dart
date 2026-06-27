@@ -78,6 +78,7 @@ class _ContactShowScreenState extends State<ContactShowScreen> {
       if (link != null && link.isNotEmpty) {
         await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
       }
+      if (!mounted) return;
       await _load();
     } catch (e) {
       if (!mounted) return;

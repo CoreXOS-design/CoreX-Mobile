@@ -75,7 +75,10 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
       setState(() {
         _catalog = catalog;
         _spaces = data.spaces;
-        _features = Map<String, List<String>>.from(data.features);
+        // Deep-copy: the inner lists belong to the parsed model. Editing a
+        // chip mutates these lists in place, so we must not alias the model's.
+        _features =
+            data.features.map((k, v) => MapEntry(k, List<String>.from(v)));
         // Ensure every catalog category exists as a key so the UI has a stable shape
         for (final key in catalog.featureCategories.keys) {
           _features.putIfAbsent(key, () => <String>[]);
@@ -393,6 +396,8 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
   // ---- Save ----
 
   Future<void> _save() async {
+    // A retry SnackBarAction can fire after the widget is gone.
+    if (!mounted) return;
     if (_saving || !_dirty) return;
     setState(() => _saving = true);
 
@@ -407,7 +412,8 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
       if (!mounted) return;
       setState(() {
         _spaces = result.spaces;
-        _features = Map<String, List<String>>.from(result.features);
+        _features =
+            result.features.map((k, v) => MapEntry(k, List<String>.from(v)));
         for (final key
             in _catalog?.featureCategories.keys ?? const <String>[]) {
           _features.putIfAbsent(key, () => <String>[]);

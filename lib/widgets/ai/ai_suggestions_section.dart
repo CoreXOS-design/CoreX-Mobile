@@ -43,7 +43,7 @@ class AiSuggestionsController extends ChangeNotifier {
   /// Notifies listeners only while still alive — a no-op once disposed.
   void _safeNotify() {
     if (_disposed) return;
-    _safeNotify();
+    notifyListeners();
   }
 
   AiSuggestions get data => _data;
@@ -380,10 +380,12 @@ class _AiSuggestionsSectionState extends State<AiSuggestionsSection> {
       widget.onApplied?.call();
     } on ApiException catch (e) {
       if (!mounted) return;
+      // Capture before any await so we don't touch `context` across the gap.
+      final messenger = ScaffoldMessenger.of(context);
       if (e.statusCode == 403) {
         await context.read<FeatureFlagsProvider>().refresh();
       }
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(content: Text(e.message)),
       );
     } finally {

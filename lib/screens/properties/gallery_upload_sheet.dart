@@ -1,11 +1,10 @@
-import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/gallery_tags.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
+import 'camera_info.dart';
 import 'multi_capture_camera.dart';
 
 /// Modal bottom sheet for uploading one or more photos to a property.
@@ -50,154 +49,6 @@ class GalleryUploadSheet extends StatefulWidget {
   State<GalleryUploadSheet> createState() => _GalleryUploadSheetState();
 }
 
-class _GalleryInfoDialog extends StatefulWidget {
-  const _GalleryInfoDialog();
-
-  static Future<void> show(BuildContext context) {
-    return showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const _GalleryInfoDialog(),
-    );
-  }
-
-  @override
-  State<_GalleryInfoDialog> createState() => _GalleryInfoDialogState();
-}
-
-class _GalleryInfoDialogState extends State<_GalleryInfoDialog> {
-  static const int _lockSeconds = 5;
-  int _remaining = _lockSeconds;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) return;
-      setState(() => _remaining--);
-      if (_remaining <= 0) t.cancel();
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final canClose = _remaining <= 0;
-    return PopScope(
-      canPop: canClose,
-      child: AlertDialog(
-        backgroundColor: AppTheme.surface(context),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppTheme.radius),
-        ),
-        title: Row(
-          children: [
-            Icon(Icons.info_outline, color: AppTheme.brand),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'How photo upload works',
-                style: TextStyle(
-                  color: AppTheme.textPrimary(context),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 17,
-                ),
-              ),
-            ),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _section(
-                context,
-                icon: Icons.burst_mode,
-                title: 'Burst',
-                body:
-                    'In-app rapid camera. Take many photos in a row, then review and confirm them all at once. On some devices the ultrawide (0.6x) lens is hidden from third-party apps and won\'t appear here — use Native if you need it.',
-              ),
-              const SizedBox(height: 12),
-              _section(
-                context,
-                icon: Icons.photo_camera,
-                title: 'Native',
-                body:
-                    'Opens your phone\'s built-in camera app. Full access to every lens (including 0.6x) but only one photo per launch — we re-open it automatically after each shot until you back out.',
-              ),
-              const SizedBox(height: 12),
-              _section(
-                context,
-                icon: Icons.photo_library,
-                title: 'Gallery',
-                body:
-                    'Pick existing photos from your phone. You can select multiple at once.',
-              ),
-              const SizedBox(height: 12),
-              _section(
-                context,
-                icon: Icons.label_outline,
-                title: 'Tags',
-                body:
-                    'Pick a tag (room/space) before uploading so the photo is filed correctly. "No tag" sends them to Unsorted — you can re-tag later.',
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: canClose ? () => Navigator.of(context).pop() : null,
-            child: Text(canClose ? 'Got it' : 'Got it (${_remaining}s)'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _section(BuildContext context,
-      {required IconData icon,
-      required String title,
-      required String body}) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: AppTheme.brand),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary(context),
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                body,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: AppTheme.textSecondary(context),
-                  height: 1.35,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _FailedUpload {
   final File file;
   final String error;
@@ -223,24 +74,14 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   int _targetCount = 0;
   bool _anySuccess = false;
 
-  static const String _kSeenInfoPrefKey = 'gallery_upload_info_seen_v1';
-
   @override
   void initState() {
     super.initState();
     _selectedTag = widget.initialTag;
     _loadTags();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowFirstRunInfo());
-  }
-
-  Future<void> _maybeShowFirstRunInfo() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (prefs.getBool(_kSeenInfoPrefKey) == true) return;
-      if (!mounted) return;
-      await _GalleryInfoDialog.show(context);
-      await prefs.setBool(_kSeenInfoPrefKey, true);
-    } catch (_) {/* ignore */}
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowCameraInfo(context);
+    });
   }
 
   Future<void> _loadTags() async {
@@ -603,13 +444,14 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           child: OutlinedButton.icon(
             onPressed: _uploading ? null : _pickFromBurst,
             icon: const Icon(Icons.burst_mode, size: 18),
-            label: const Text('Burst'),
+            label: const FittedBox(
+                fit: BoxFit.scaleDown, child: Text('Multi Capture')),
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.brand,
               side: BorderSide(color: AppTheme.surface2(context)),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppTheme.radius)),
-              padding: const EdgeInsets.symmetric(vertical: 12),
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
             ),
           ),
         ),
@@ -618,13 +460,14 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           child: OutlinedButton.icon(
             onPressed: _uploading ? null : _pickFromOsCamera,
             icon: const Icon(Icons.photo_camera, size: 18),
-            label: const Text('Native'),
+            label: const FittedBox(
+                fit: BoxFit.scaleDown, child: Text('Native')),
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.brand,
               side: BorderSide(color: AppTheme.surface2(context)),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppTheme.radius)),
-              padding: const EdgeInsets.symmetric(vertical: 12),
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
             ),
           ),
         ),
@@ -633,13 +476,14 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           child: OutlinedButton.icon(
             onPressed: _uploading ? null : _pickFromGallery,
             icon: const Icon(Icons.photo_library, size: 18),
-            label: const Text('Gallery'),
+            label: const FittedBox(
+                fit: BoxFit.scaleDown, child: Text('Gallery')),
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.brand,
               side: BorderSide(color: AppTheme.surface2(context)),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppTheme.radius)),
-              padding: const EdgeInsets.symmetric(vertical: 12),
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
             ),
           ),
         ),
@@ -655,7 +499,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           padding: const EdgeInsets.only(top: 8, bottom: 6),
           child: Text(
             _uploading
-                ? 'Uploading ${_uploadedCount + 1} of $_targetCount…'
+                ? 'Uploading ${(_uploadedCount + 1).clamp(1, _targetCount)} of $_targetCount…'
                 : '${_queue.length} selected',
             style: TextStyle(
                 fontSize: 13,

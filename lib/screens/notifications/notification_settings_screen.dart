@@ -8,7 +8,7 @@ import '../notification_schedule_screen.dart';
 
 /// Dynamic notification preferences screen rendered from
 /// `GET /api/v1/notification-preferences`. Nothing on this screen is
-/// hard-coded â€” sections, pillars, event types, threshold units and bounds
+/// hard-coded — sections, pillars, event types, threshold units and bounds
 /// all come from the server payload.
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({super.key});
@@ -79,6 +79,8 @@ class _NotificationSettingsScreenState
                   locked: locked,
                   onChanged: () => setState(() {}),
                 ),
+                const SizedBox(height: 6),
+                _pushRelationshipNote(context),
                 const SizedBox(height: 8),
                 _scheduleHint(context),
               ],
@@ -96,6 +98,11 @@ class _NotificationSettingsScreenState
       // FCM token so background pushes actually start/stop. The foreground
       // gate alone doesn't affect system-tray pushes.
       await MessagingService.instance.setPushEnabled(pushOn);
+    } else {
+      // Save failed — reconcile every optimistic edit (lead-time, master
+      // toggles) back to the server's last-known state so the form never shows
+      // changes that weren't persisted.
+      await provider.loadPreferences(force: true);
     }
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context);
@@ -114,6 +121,18 @@ class _NotificationSettingsScreenState
     }
   }
 
+  Widget _pushRelationshipNote(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Text(
+        'Turning off Push silences all notifications on this device, including '
+        'event reminders.',
+        style: TextStyle(
+            fontSize: 11.5, color: AppTheme.textSecondary(context)),
+      ),
+    );
+  }
+
   Widget _testButton(BuildContext context) {
     return SizedBox(
       width: double.infinity,
@@ -126,7 +145,7 @@ class _NotificationSettingsScreenState
             await MessagingService.instance.sendTestNotification();
             messenger.showSnackBar(const SnackBar(
               content: Text(
-                  'Test notification sent â€” check your notification bar.'),
+                  'Test notification sent — check your notification bar.'),
             ));
           } catch (e) {
             messenger.showSnackBar(SnackBar(content: Text('Failed: $e')));
@@ -178,7 +197,7 @@ class _NotificationSettingsScreenState
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Quiet hours moved to Settings â€” set the days and times you '
+                'Quiet hours moved to Settings — set the days and times you '
                 'receive notifications.',
                 style: TextStyle(
                     fontSize: 11.5, color: AppTheme.textSecondary(context)),
@@ -239,7 +258,7 @@ class _MasterSwitches extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Push remains editable even when locked â€” it's a per-device control.
+    // Push remains editable even when locked — it's a per-device control.
     return _Card(
       child: Column(
         children: [

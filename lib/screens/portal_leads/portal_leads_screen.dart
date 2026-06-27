@@ -25,6 +25,7 @@ class _PortalLeadsScreenState extends State<PortalLeadsScreen> {
     super.initState();
     _weekStart = _sundayOf(DateTime.now());
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final p = context.read<PortalLeadsProvider>();
       p.refresh();
     });

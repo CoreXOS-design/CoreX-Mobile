@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/env.dart';
 import '../models/contact.dart';
@@ -17,6 +18,7 @@ import '../models/property.dart';
 import '../models/property_compliance.dart';
 import '../models/property_options.dart';
 import '../models/property_overview.dart';
+import '../models/rental_inspections.dart';
 import '../models/branding.dart';
 import '../models/space.dart';
 import '../models/task_extras.dart';
@@ -33,19 +35,84 @@ class ApiService {
   static const String _spacesCatalogTsKey = 'spaces_catalog_v1_ts';
   static const Duration _spacesCatalogTtl = Duration(hours: 24);
 
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
+
+  /// In-memory copy of the auth token for the lifetime of the app process.
+  /// This is the source of truth during a session: secure storage on some
+  /// devices/emulators silently fails to round-trip a value (keystore quirks),
+  /// which would otherwise leave a freshly-logged-in user with no token on the
+  /// very next request → a 401 storm → an immediate bounce back to login.
+  /// Persistence to secure storage is best-effort, for cold-start restore.
+  static String? _inMemoryToken;
+
+  /// Reads the auth token. Prefers the in-memory copy, then secure storage,
+  /// then the legacy plaintext SharedPreferences key (migrated forward once).
+  /// All storage access is fault-tolerant so a failing keystore can't throw
+  /// the request path off the rails.
   Future<String?> getToken() async {
+    if (_inMemoryToken != null) return _inMemoryToken;
+
+    try {
+      final secure = await _secureStorage.read(key: _tokenKey);
+      if (secure != null) {
+        _inMemoryToken = secure;
+        return secure;
+      }
+    } catch (e) {
+      debugPrint('[auth] secure storage read failed: $e');
+    }
+
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_tokenKey);
+    final legacy = prefs.getString(_tokenKey);
+    if (legacy != null) {
+      _inMemoryToken = legacy;
+      try {
+        await _secureStorage.write(key: _tokenKey, value: legacy);
+        await prefs.remove(_tokenKey);
+      } catch (e) {
+        debugPrint('[auth] legacy token migration failed: $e');
+      }
+      return legacy;
+    }
+    return null;
   }
 
   Future<void> saveToken(String token) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tokenKey, token);
+    _inMemoryToken = token;
+    try {
+      await _secureStorage.write(key: _tokenKey, value: token);
+    } catch (e) {
+      debugPrint('[auth] secure storage write failed: $e');
+    }
   }
 
   Future<void> clearToken() async {
+    _inMemoryToken = null;
+    try {
+      await _secureStorage.delete(key: _tokenKey);
+    } catch (e) {
+      debugPrint('[auth] secure storage delete failed: $e');
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
+  }
+
+  /// Bumped whenever an authenticated request returns 401. The auth layer
+  /// ([AuthProvider]) listens and drops the session live, so a token that goes
+  /// invalid mid-session routes the user back to login instead of stranding
+  /// them on a screen whose data silently fails to load. An int counter (not a
+  /// bool) means repeated 401s each notify, while listeners stay free to
+  /// debounce by ignoring the signal when already logged out.
+  static final ValueNotifier<int> sessionExpired = ValueNotifier<int>(0);
+
+  /// On a 401, drop the (now invalid) token and signal the auth layer to route
+  /// the user back to login. Safe to call on unauthenticated endpoints (e.g. a
+  /// failed login) — listeners guard on being logged in, so a login 401 is a
+  /// no-op for them.
+  Future<void> _handleUnauthorized(int status) async {
+    if (status != 401) return;
+    await clearToken();
+    sessionExpired.value++;
   }
 
   Future<Map<String, String>> _headers() async {
@@ -81,9 +148,17 @@ class ApiService {
     ).timeout(_timeout);
 
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      final body = jsonDecode(response.body);
+      if (body is Map<String, dynamic>) return body;
+      throw ApiException(response.statusCode, 'Login failed');
     }
-    throw ApiException(response.statusCode, 'Login failed');
+    await _handleUnauthorized(response.statusCode);
+    String message = 'Login failed';
+    try {
+      final body = jsonDecode(response.body);
+      if (body is Map && body['message'] is String) message = body['message'];
+    } catch (_) {}
+    throw ApiException(response.statusCode, message);
   }
 
   // --- Demo Mode ---
@@ -97,7 +172,10 @@ class ApiService {
     ).timeout(_timeout);
 
     if (response.statusCode == 200) {
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final body = jsonDecode(response.body);
+      if (body is! Map) {
+        throw ApiException(response.statusCode, 'Demo status failed');
+      }
       return (
         enabled: body['enabled'] == true,
         roles: (body['roles'] as List?)?.map((e) => e.toString()).toList() ?? const [],
@@ -168,8 +246,17 @@ class ApiService {
     ).timeout(_timeout);
 
     if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      final body = jsonDecode(response.body);
+      if (body is Map<String, dynamic>) return body;
+      throw ApiException(response.statusCode, 'Failed to load logged-user');
     }
+    // Deliberately NOT routed through [_handleUnauthorized]: this endpoint can
+    // return 401 even when the session is perfectly valid (it sits behind a
+    // different guard than the `/v1/mobile/*` data endpoints, which keep
+    // returning 200 with the same token). Treating its 401 as session-expiry
+    // would clear a good token and bounce a freshly-logged-in user back to
+    // login. The caller already falls back to slug-based branding, so a failure
+    // here is non-fatal.
     throw ApiException(response.statusCode, 'Failed to load logged-user');
   }
 
@@ -239,8 +326,11 @@ class ApiService {
     ).timeout(_timeout);
 
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      final body = jsonDecode(response.body);
+      if (body is Map<String, dynamic>) return body;
+      throw ApiException(response.statusCode, 'Failed to load profile');
     }
+    await _handleUnauthorized(response.statusCode);
     throw ApiException(response.statusCode, 'Failed to load profile');
   }
 
@@ -718,6 +808,7 @@ class ApiService {
           .map((e) => CalendarEvent.fromJson(Map<String, dynamic>.from(e)))
           .toList();
     }
+    await _handleUnauthorized(response.statusCode);
     throw ApiException(response.statusCode, 'Failed to load calendar range');
   }
 
@@ -736,7 +827,10 @@ class ApiService {
     });
     final response = await http.get(uri, headers: await _headers()).timeout(_timeout);
     if (response.statusCode == 200) {
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final body = jsonDecode(response.body);
+      if (body is! Map) {
+        throw ApiException(response.statusCode, 'Failed to load calendar');
+      }
       final events = (body['events'] as List? ?? [])
           .whereType<Map>()
           .map((e) => CalendarEvent.fromJson(Map<String, dynamic>.from(e)))
@@ -751,6 +845,7 @@ class ApiService {
       }
       return (events: events, byDate: byDate);
     }
+    await _handleUnauthorized(response.statusCode);
     throw ApiException(response.statusCode, 'Failed to load calendar');
   }
 
@@ -994,9 +1089,13 @@ class ApiService {
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
+      if (data is! Map) {
+        throw ApiException(response.statusCode, 'Failed to load properties');
+      }
       final list = data['properties'] as List? ?? [];
       return list.map((e) => Property.fromJson(e)).toList();
     }
+    await _handleUnauthorized(response.statusCode);
     throw ApiException(response.statusCode, 'Failed to load properties');
   }
 
@@ -1008,11 +1107,15 @@ class ApiService {
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
+      if (data is! Map || data['property'] is! Map) {
+        throw ApiException(response.statusCode, 'Failed to load property');
+      }
       return Property.fromJson(data['property']);
     }
     if (response.statusCode == 403) {
       throw ApiException(403, _scopeForbiddenMessage(response.body));
     }
+    await _handleUnauthorized(response.statusCode);
     throw ApiException(response.statusCode, 'Failed to load property');
   }
 
@@ -1526,7 +1629,7 @@ class ApiService {
     if (roomTag != null) request.fields['room_tag'] = roomTag;
 
     final streamed = await request.send().timeout(_timeout);
-    final body = await streamed.stream.bytesToString();
+    final body = await streamed.stream.bytesToString().timeout(_timeout);
     final status = streamed.statusCode;
 
     if (status == 200 || status == 201) {
@@ -1577,6 +1680,158 @@ class ApiService {
     }
 
     throw ApiException(status, 'Failed to upload image');
+  }
+
+  // --- Rental inspections ---
+  //
+  // All endpoints live under `/v1/mobile/properties/{id}/rental-images`. The
+  // backend is the source of truth: every mutating call returns the full
+  // `rental_images` structure, so callers re-render from the response rather
+  // than mutating local state. Gate the feature on the property's
+  // `rental_inspections_available` flag; the 422 `not_a_rental` / `not_live`
+  // codes are a defensive backstop and surface as [RentalNotEligibleException].
+
+  String _rentalBase(int propertyId) =>
+      '$baseUrl/v1/mobile/properties/$propertyId/rental-images';
+
+  /// Decodes a rental-images success body into [RentalInspections] and maps
+  /// the eligibility / access / stale-section failure modes onto typed
+  /// exceptions the UI handles.
+  RentalInspections _parseRentalBody(int status, String body) {
+    if (status == 200 || status == 201) {
+      final json = jsonDecode(body);
+      return RentalInspections.fromJson(Map<String, dynamic>.from(json as Map));
+    }
+    if (status == 403) {
+      throw ApiException(403, _scopeForbiddenMessage(body));
+    }
+    if (status == 404) {
+      throw ApiException(404, 'That section no longer exists.');
+    }
+    if (status == 422) {
+      String? code;
+      String message = 'This property is not eligible for rental inspections.';
+      try {
+        final json = jsonDecode(body);
+        if (json is Map) {
+          code = json['code']?.toString();
+          if (json['message'] is String &&
+              (json['message'] as String).isNotEmpty) {
+            message = json['message'] as String;
+          }
+        }
+      } catch (_) {}
+      if (code == 'not_a_rental' || code == 'not_live') {
+        throw RentalNotEligibleException(code!, message);
+      }
+      throw _parseValidationError(body);
+    }
+    throw ApiException(status, 'Failed to load rental inspections');
+  }
+
+  /// GET — fetch the full rental-images structure for a property.
+  Future<RentalInspections> getRentalInspections(int propertyId) async {
+    final response = await http
+        .get(Uri.parse(_rentalBase(propertyId)), headers: await _headers())
+        .timeout(_timeout);
+    return _parseRentalBody(response.statusCode, response.body);
+  }
+
+  /// POST (multipart) — upload one or more images to a section. Pass
+  /// [customId] only when [section] is [RentalSectionType.custom].
+  ///
+  /// Uploads can be large (up to 50 MB each); we widen the timeout to match.
+  Future<RentalInspections> uploadRentalImages(
+    int propertyId,
+    RentalSectionType section,
+    List<File> images, {
+    String? customId,
+  }) async {
+    final token = await getToken();
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('${_rentalBase(propertyId)}/upload'),
+    );
+    request.headers['Accept'] = 'application/json';
+    if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    request.fields['section'] = section.apiValue;
+    if (section == RentalSectionType.custom && customId != null) {
+      request.fields['custom_id'] = customId;
+    }
+    for (final image in images) {
+      request.files
+          .add(await http.MultipartFile.fromPath('images[]', image.path));
+    }
+
+    final streamed = await request.send().timeout(const Duration(minutes: 5));
+    final body =
+        await streamed.stream.bytesToString().timeout(const Duration(minutes: 5));
+    return _parseRentalBody(streamed.statusCode, body);
+  }
+
+  Future<RentalInspections> _rentalSave(
+      int propertyId, Map<String, dynamic> payload) async {
+    final response = await http
+        .post(Uri.parse('${_rentalBase(propertyId)}/save'),
+            headers: await _headers(), body: jsonEncode(payload))
+        .timeout(_timeout);
+    return _parseRentalBody(response.statusCode, response.body);
+  }
+
+  /// POST /save — set (or clear, when [date] is null) a section's date. Pass
+  /// [customId] only for a custom section.
+  Future<RentalInspections> setRentalDate(
+    int propertyId,
+    RentalSectionType section,
+    String? date, {
+    String? customId,
+  }) {
+    return _rentalSave(propertyId, {
+      'action': 'set_date',
+      'section': section.apiValue,
+      'date': date,
+      if (section == RentalSectionType.custom && customId != null)
+        'custom_id': customId,
+    });
+  }
+
+  /// POST /save — add a custom section. The server mints the id.
+  Future<RentalInspections> addRentalSection(int propertyId, String name) {
+    return _rentalSave(propertyId, {'action': 'add_section', 'name': name});
+  }
+
+  /// POST /save — rename a custom section.
+  Future<RentalInspections> renameRentalSection(
+    int propertyId,
+    String customId,
+    String name,
+  ) {
+    return _rentalSave(propertyId, {
+      'action': 'rename_section',
+      'custom_id': customId,
+      'name': name,
+    });
+  }
+
+  /// POST /delete — remove one image at [index] within a section. Pass
+  /// [customId] only for a custom section.
+  Future<RentalInspections> deleteRentalImage(
+    int propertyId,
+    RentalSectionType section,
+    int index, {
+    String? customId,
+  }) async {
+    final response = await http
+        .post(Uri.parse('${_rentalBase(propertyId)}/delete'),
+            headers: await _headers(),
+            body: jsonEncode({
+              'section': section.apiValue,
+              'custom_id':
+                  section == RentalSectionType.custom ? customId : null,
+              'index': index,
+            }))
+        .timeout(_timeout);
+    return _parseRentalBody(response.statusCode, response.body);
   }
 
   // --- Contacts ---
@@ -1744,7 +1999,7 @@ class ApiService {
     if (propertyId != null) request.fields['property_id'] = '$propertyId';
 
     final streamed = await request.send().timeout(_timeout);
-    final body = await streamed.stream.bytesToString();
+    final body = await streamed.stream.bytesToString().timeout(_timeout);
     final status = streamed.statusCode;
 
     if (status == 200 || status == 201) {
@@ -2152,7 +2407,10 @@ class ApiService {
     final response = await http.get(uri, headers: await _headers()).timeout(_timeout);
 
     if (response.statusCode == 200) {
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final body = jsonDecode(response.body);
+      if (body is! Map) {
+        throw ApiException(response.statusCode, 'Failed to load notifications');
+      }
       final list = (body['items'] as List? ?? [])
           .whereType<Map>()
           .map((e) => NotificationItem.fromJson(Map<String, dynamic>.from(e)))
@@ -2160,6 +2418,7 @@ class ApiService {
       final unread = body['unread'] is num ? (body['unread'] as num).toInt() : 0;
       return (items: list, unread: unread);
     }
+    await _handleUnauthorized(response.statusCode);
     throw ApiException(response.statusCode, 'Failed to load notifications');
   }
 
@@ -2322,7 +2581,10 @@ class ApiService {
     final response =
         await http.get(uri, headers: await _headers()).timeout(_timeout);
     if (response.statusCode == 200) {
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final body = jsonDecode(response.body);
+      if (body is! Map) {
+        throw ApiException(response.statusCode, 'Failed to load portal leads');
+      }
       final leads = (body['leads'] as List? ?? [])
           .whereType<Map>()
           .map((e) => PortalLead.fromJson(Map<String, dynamic>.from(e)))
@@ -2335,6 +2597,7 @@ class ApiService {
         leads: leads,
       );
     }
+    await _handleUnauthorized(response.statusCode);
     throw ApiException(response.statusCode, 'Failed to load portal leads');
   }
 
@@ -2344,12 +2607,16 @@ class ApiService {
             headers: await _headers())
         .timeout(_timeout);
     if (response.statusCode == 200) {
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final body = jsonDecode(response.body);
+      if (body is! Map) {
+        throw ApiException(response.statusCode, 'Failed to load portal lead dates');
+      }
       return (body['dates'] as List? ?? [])
           .whereType<Map>()
           .map((e) => PortalLeadDate.fromJson(Map<String, dynamic>.from(e)))
           .toList();
     }
+    await _handleUnauthorized(response.statusCode);
     throw ApiException(response.statusCode, 'Failed to load portal lead dates');
   }
 
@@ -2359,12 +2626,16 @@ class ApiService {
             headers: await _headers())
         .timeout(_timeout);
     if (response.statusCode == 200) {
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final body = jsonDecode(response.body);
+      if (body is! Map) {
+        throw ApiException(response.statusCode, 'Failed to load portal lead');
+      }
       final lead = (body['lead'] is Map)
           ? Map<String, dynamic>.from(body['lead'] as Map)
-          : body;
+          : Map<String, dynamic>.from(body);
       return PortalLead.fromJson(lead);
     }
+    await _handleUnauthorized(response.statusCode);
     throw ApiException(response.statusCode, 'Failed to load portal lead');
   }
 
@@ -2450,4 +2721,14 @@ class MarketingBlockedException extends ApiException {
 class DuplicateContactException extends ApiException {
   final int duplicateId;
   DuplicateContactException(this.duplicateId, String message) : super(422, message);
+}
+
+/// Thrown by the rental-inspection endpoints on a 422 whose `code` is
+/// `not_a_rental` or `not_live` — the property isn't eligible, so the caller
+/// should hide the feature. This shouldn't happen when gating on
+/// `rental_inspections_available`; it's a defensive backstop.
+class RentalNotEligibleException extends ApiException {
+  /// Either `not_a_rental` or `not_live`.
+  final String code;
+  RentalNotEligibleException(this.code, String message) : super(422, message);
 }

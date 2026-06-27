@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 
+import 'package:corex_mobile/providers/feature_flags_provider.dart';
 import 'package:corex_mobile/theme/corex_accent_theme.dart';
 import 'package:corex_mobile/widgets/corex/corex_primary_button.dart';
 import 'package:corex_mobile/widgets/corex/corex_ellie_teaser.dart';
@@ -14,13 +16,18 @@ void main() {
   const purple = Color(0xFF7C3AED);
 
   Widget pump(Widget child) {
-    return MaterialApp(
-      theme: ThemeData(
-        extensions: const [
-          CorexAccentTheme(accent: purple, accentMoney: Color(0xFFE8B86D)),
-        ],
+    // CorexBottomNav reads FeatureFlagsProvider (to gate the Ellie tab), so the
+    // provider must sit above the MaterialApp in the test tree.
+    return ChangeNotifierProvider(
+      create: (_) => FeatureFlagsProvider(),
+      child: MaterialApp(
+        theme: ThemeData(
+          extensions: const [
+            CorexAccentTheme(accent: purple, accentMoney: Color(0xFFE8B86D)),
+          ],
+        ),
+        home: Scaffold(body: child),
       ),
-      home: Scaffold(body: child),
     );
   }
 

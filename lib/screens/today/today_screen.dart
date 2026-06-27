@@ -63,6 +63,7 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _refresh() async {
+    if (!mounted) return;
     await Future.wait([
       context.read<DashboardProvider>().loadToday(),
       context.read<NotificationsProvider>().loadFeed(),
@@ -70,6 +71,7 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _pullRefresh() async {
+    if (!mounted) return;
     await Future.wait([
       context.read<DashboardProvider>().refreshToday(),
       context.read<NotificationsProvider>().loadFeed(),

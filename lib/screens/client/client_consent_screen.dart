@@ -139,6 +139,7 @@ class _ClientConsentScreenState extends State<ClientConsentScreen> {
   /// Handles 401 (sign out) and 409 (no agency selected) centrally. Returns
   /// false if it consumed the error (caller should stop), true otherwise.
   Future<bool> _handleAuthError(ApiException e) async {
+    if (!mounted) return false;
     if (e.statusCode == 401) {
       await context.read<ClientSessionProvider>().signOutLocal();
       return false;

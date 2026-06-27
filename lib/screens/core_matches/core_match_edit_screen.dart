@@ -247,12 +247,15 @@ class _CoreMatchEditScreenState extends State<CoreMatchEditScreen> {
         child: Wrap(
           spacing: 6,
           runSpacing: 6,
-          children: items
-              .map((s) => Chip(
-                    label: Text(s),
-                    onDeleted: () => setState(() => items.remove(s)),
-                  ))
-              .toList(),
+          children: [
+            for (var i = 0; i < items.length; i++)
+              Chip(
+                label: Text(items[i]),
+                // Remove by index so duplicate feature labels delete the
+                // chip the user actually tapped, not the first match.
+                onDeleted: () => setState(() => items.removeAt(i)),
+              ),
+          ],
         ),
       );
 

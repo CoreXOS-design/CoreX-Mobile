@@ -16,9 +16,21 @@ class BrandingProvider extends ChangeNotifier {
 
   Branding _branding = Branding.fallback;
   bool _loaded = false;
+  bool _disposed = false;
 
   Branding get branding => _branding;
   bool get loaded => _loaded;
+
+  void _safeNotify() {
+    if (_disposed) return;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 
   /// Restore the last-used branding from disk so the first frame uses the
   /// agency's colours, not the fallback.
@@ -30,7 +42,7 @@ class BrandingProvider extends ChangeNotifier {
         _branding = Branding.fromJson(jsonDecode(raw) as Map<String, dynamic>);
         _loaded = true;
         AppTheme.updateActiveBranding(_branding);
-        notifyListeners();
+        _safeNotify();
       } catch (_) {
         // Ignore corrupt cache.
       }
@@ -112,7 +124,7 @@ class BrandingProvider extends ChangeNotifier {
     await prefs.remove(_cacheKey);
     _branding = Branding.fallback;
     AppTheme.updateActiveBranding(_branding);
-    notifyListeners();
+    _safeNotify();
   }
 
   Future<void> _set(Branding b) async {
@@ -135,7 +147,7 @@ class BrandingProvider extends ChangeNotifier {
         },
       }),
     );
-    notifyListeners();
+    _safeNotify();
   }
 
   static String _hex(Color c) =>

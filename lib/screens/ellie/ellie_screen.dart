@@ -174,15 +174,16 @@ class _EllieScreenState extends State<EllieScreen>
           );
         },
         onUndo: (eventId) async {
+          // Capture the messenger before the await so we don't reach across an
+          // async gap with the closure's context.
+          final messenger = ScaffoldMessenger.of(context);
           try {
             await _api.undoEllieEvent(eventId);
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
+            messenger.showSnackBar(
               const SnackBar(content: Text('Undone.')),
             );
           } on ApiException catch (e) {
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
+            messenger.showSnackBar(
               SnackBar(content: Text(e.message)),
             );
           }

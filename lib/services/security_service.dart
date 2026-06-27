@@ -17,6 +17,12 @@ class SecurityService {
   /// inactivity gate consults this to avoid re-locking the session in
   /// response to the lifecycle transitions the prompt itself triggers.
   static bool isAuthenticating = false;
+
+  /// Monotonic id for each [authenticate] call. The delayed reset of
+  /// [isAuthenticating] only fires for the *latest* call, so a second prompt
+  /// starting before the first's tail delay elapses can't clear the flag out
+  /// from under it.
+  static int _authGeneration = 0;
   final FlutterSecureStorage _vault = const FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
@@ -41,6 +47,7 @@ class SecurityService {
 
   Future<bool> authenticate({String reason = 'Sign in to CoreX'}) async {
     isAuthenticating = true;
+    final generation = ++_authGeneration;
     try {
       return await _auth.authenticate(
         localizedReason: reason,
@@ -63,7 +70,12 @@ class SecurityService {
       // tail of lifecycle events (resumed/inactive flicker on some OEMs)
       // doesn't trip the inactivity lock.
       Future.delayed(const Duration(milliseconds: 800), () {
-        isAuthenticating = false;
+        // Only the most recent authenticate() may clear the flag; a newer
+        // prompt that started in the meantime keeps the suppression alive
+        // until its own delayed reset runs.
+        if (generation == _authGeneration) {
+          isAuthenticating = false;
+        }
       });
     }
   }

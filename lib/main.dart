@@ -31,6 +31,26 @@ import 'utils/app_time.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
+/// Signs the current agent out and hard-resets navigation to a fresh app root.
+///
+/// We can't rely on [AuthGate] reactively swapping to the login screen: the
+/// bottom-nav tabs use `pushReplacement` / `pushAndRemoveUntil`, which remove
+/// the original [AuthGate] route from the stack. Once that's gone, flipping
+/// `isLoggedIn` to false has nothing to react to and the user is stranded on a
+/// now-empty home screen. Rebuilding from a fresh [AppBootstrap] restores the
+/// cold-start flow (splash → auth check → login) and re-mounts the bootstrap so
+/// the next login's branding pull works again.
+Future<void> logoutAndReset(BuildContext context) async {
+  final branding = context.read<BrandingProvider>();
+  final auth = context.read<AuthProvider>();
+  branding.reset();
+  await auth.logout();
+  rootNavigatorKey.currentState?.pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => const AppBootstrap()),
+    (route) => false,
+  );
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setEnabledSystemUIMode(
@@ -105,7 +125,7 @@ class CoreXApp extends StatelessWidget {
             theme: AppTheme.light(b),
             darkTheme: AppTheme.dark(b),
             themeMode: themeProvider.themeMode,
-            home: const _AppBootstrap(),
+            home: const AppBootstrap(),
           );
         },
       ),
@@ -113,14 +133,14 @@ class CoreXApp extends StatelessWidget {
   }
 }
 
-class _AppBootstrap extends StatefulWidget {
-  const _AppBootstrap();
+class AppBootstrap extends StatefulWidget {
+  const AppBootstrap({super.key});
 
   @override
-  State<_AppBootstrap> createState() => _AppBootstrapState();
+  State<AppBootstrap> createState() => _AppBootstrapState();
 }
 
-class _AppBootstrapState extends State<_AppBootstrap> {
+class _AppBootstrapState extends State<AppBootstrap> {
   bool _splashDone = false;
   bool _brandingPulled = false;
 
@@ -160,8 +180,16 @@ class _AppBootstrapState extends State<_AppBootstrap> {
       _brandingPulled = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+        // Tear down every per-user provider so the next account that signs in
+        // on this device can never see the previous user's cached state.
         context.read<VisibilityProvider>().reset();
         context.read<FeatureFlagsProvider>().reset();
+        context.read<DashboardProvider>().reset();
+        context.read<NotificationsProvider>().reset();
+        context.read<PortalLeadsProvider>().reset();
+        context.read<PropertyProvider>().reset();
+        context.read<SellerListingsProvider>().reset();
+        context.read<ClientMatchesProvider>().reset();
       });
     }
     return const AuthGate();

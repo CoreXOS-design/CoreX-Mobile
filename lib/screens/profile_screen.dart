@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:tabler_icons/tabler_icons.dart';
+import '../main.dart';
 import '../models/branding.dart';
 import '../theme.dart';
 import '../providers/auth_provider.dart';
@@ -80,6 +82,8 @@ class ProfileScreen extends StatelessWidget {
               _InfoRow(label: 'Email', value: user?['email'] ?? '-'),
               _InfoRow(label: 'Role', value: user?['role'] ?? '-'),
             ]),
+            const SizedBox(height: 32),
+            _SignOutButton(onPressed: () => logoutAndReset(context)),
           ],
           ),
         ),
@@ -100,6 +104,39 @@ class _InfoRow {
   final String label;
   final String value;
   const _InfoRow({required this.label, required this.value});
+}
+
+class _SignOutButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  const _SignOutButton({required this.onPressed});
+
+  static const _danger = Color(0xFFEF4444);
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: const Icon(TablerIcons.logout, size: 20, color: _danger),
+        label: const Text(
+          'Sign out',
+          style: TextStyle(
+            color: _danger,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          side: BorderSide(color: _danger.withValues(alpha: 0.4)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTheme.radius),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _InfoCard extends StatelessWidget {

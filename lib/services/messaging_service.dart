@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +11,20 @@ import '../providers/notifications_provider.dart';
 import '../providers/portal_leads_provider.dart';
 import 'api_service.dart';
 import 'deep_link_router.dart';
+
+/// Top-level (entry-point) background message handler. FCM spins up a fresh
+/// isolate to run this when a data message arrives while the app is
+/// backgrounded or terminated, so it must be a top-level/static function and
+/// initialise Firebase before touching any Firebase API.
+///
+/// It is intentionally minimal: notification-type messages are surfaced by the
+/// OS tray automatically. Any persistent, cross-isolate dedup (e.g. recording
+/// message ids so the foreground guard can skip ones already shown in the
+/// background) belongs here.
+@pragma('vm:entry-point')
+Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+}
 
 /// Wraps FCM push registration + delivery.
 ///
@@ -91,6 +106,10 @@ class MessagingService {
     _initialised = true;
     this.navigatorKey = navigatorKey;
 
+    // Register the background/terminated message handler. Must be wired before
+    // any messages arrive; the handler runs in its own isolate.
+    FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
+
     // iOS / web foreground presentation — show the system banner instead of
     // suppressing it.
     await _fcm.setForegroundNotificationPresentationOptions(
@@ -135,10 +154,13 @@ class MessagingService {
     if (token != null) {
       try {
         await _api.revokeDeviceToken(token);
+        // Only forget the local record after a confirmed revoke — otherwise a
+        // later retry has nothing to revoke and the server keeps targeting
+        // this device.
+        await prefs.remove(_kRegisteredTokenKey);
       } catch (e) {
         debugPrint('[messaging] revoke failed: $e');
       }
-      await prefs.remove(_kRegisteredTokenKey);
     }
     try {
       await _fcm.deleteToken();
@@ -165,11 +187,14 @@ class MessagingService {
     if (token != null) {
       try {
         await _api.revokeDeviceToken(token);
+        // Only drop the local record on a confirmed revoke so a failed call
+        // can still be retried instead of silently leaving the device
+        // registered server-side.
+        await prefs.remove(_kRegisteredTokenKey);
       } catch (e) {
         debugPrint('[messaging] revoke (push off) failed: $e');
       }
     }
-    await prefs.remove(_kRegisteredTokenKey);
   }
 
   Future<void> _registerWithServer(String token) async {
@@ -209,7 +234,12 @@ class MessagingService {
       // in-app banner. Background/system-tray pushes can only be stopped by
       // the server honouring the same schedule (the app isn't running then).
       if (!np.notificationsAllowedNow) return;
-    } catch (_) {}
+    } catch (_) {
+      // Fail closed: if we can't determine the user's push/quiet-hours
+      // preference, suppress the banner rather than risk showing one the user
+      // disabled.
+      return;
+    }
 
     final title = msg.notification?.title ?? msg.data['title']?.toString();
     final body = msg.notification?.body ?? msg.data['body']?.toString();
@@ -222,8 +252,7 @@ class MessagingService {
         : '${msg.data['type']}|$title|$body';
     if (_shouldSuppressForeground(fingerprint)) return;
 
-    final action = (msg.data['action_url'] ?? msg.data['deep_link'])
-        ?.toString();
+    final action = _resolveAction(msg.data);
 
     if (msg.data['type']?.toString() == 'portal_lead') {
       try {
@@ -280,11 +309,27 @@ class MessagingService {
   void _onMessageTap(RemoteMessage msg) {
     final ctx = navigatorKey?.currentContext;
     if (ctx == null) return;
-    final action = (msg.data['action_url'] ?? msg.data['deep_link'])
-        ?.toString();
+    final action = _resolveAction(msg.data);
     if (action != null && action.isNotEmpty) {
       DeepLinkRouter.open(ctx, action);
     }
+  }
+
+  /// Resolves the best in-app route for a push payload.
+  ///
+  /// Event-reminder pushes carry a *generic* calendar `action_url`
+  /// (`/corex/command-center/calendar`) plus the specific `event_id`. Prefer
+  /// focusing the actual appointment so the tap lands on the right event rather
+  /// than the bare calendar. Everything else falls back to the server-issued
+  /// `action_url`, then `deep_link`.
+  String? _resolveAction(Map<String, dynamic> data) {
+    if (data['type']?.toString() == 'event_due_reminder') {
+      final eventId = data['event_id']?.toString();
+      if (eventId != null && eventId.isNotEmpty) {
+        return '/corex/command-center/calendar?event=$eventId';
+      }
+    }
+    return (data['action_url'] ?? data['deep_link'])?.toString();
   }
 
   Future<void> _initLocalNotifications() async {

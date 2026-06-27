@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 /// System "AI" marker. Purple regardless of agency branding — it's a
-/// system signal, matching the web <x-ai-badge /> aesthetic.
+/// system signal, matching the web `<x-ai-badge />` aesthetic.
 class AiBadge extends StatelessWidget {
   final double scale;
   final String label;

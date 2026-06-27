@@ -90,7 +90,7 @@ class _ClientOtpScreenState extends State<ClientOtpScreen> {
 
   Future<void> _verify() async {
     final code = _codeController.text.trim();
-    if (code.length < 4) {
+    if (code.length != 6) {
       setState(() => _error = 'Enter the 6-digit code');
       return;
     }

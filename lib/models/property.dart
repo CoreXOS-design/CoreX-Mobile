@@ -13,6 +13,10 @@ class Property {
   final String? priceDisplay;
   final String? thumbnail;
   final String? updatedAt;
+  /// Primary / lead agent id for this listing. When this differs from the
+  /// logged-in user's id, the user is a co-listing (secondary) agent — the
+  /// API already scoped the list, so we only render this, never filter on it.
+  final int? agentId;
   // Detail-only fields
   final String? streetNumber;
   final String? streetName;
@@ -71,6 +75,7 @@ class Property {
     this.priceDisplay,
     this.thumbnail,
     this.updatedAt,
+    this.agentId,
     this.streetNumber,
     this.streetName,
     this.suburb,
@@ -117,7 +122,7 @@ class Property {
     }
 
     return Property(
-      id: json['id'] as int,
+      id: toInt(json['id']) ?? 0,
       address: json['address'] as String? ?? '',
       title: json['title'] as String?,
       beds: toInt(json['beds']),
@@ -131,6 +136,7 @@ class Property {
       priceDisplay: json['price_display'] as String?,
       thumbnail: json['thumbnail'] as String?,
       updatedAt: json['updated_at'] as String?,
+      agentId: toInt(json['agent_id']),
       streetNumber: json['street_number'] as String?,
       streetName: json['street_name'] as String?,
       suburb: json['suburb'] as String?,

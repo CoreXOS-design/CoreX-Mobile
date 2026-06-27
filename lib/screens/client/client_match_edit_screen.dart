@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../models/client_models.dart';
-import '../../services/api_service.dart' show ApiException;
+import '../../services/api_service.dart' show ApiException, ValidationException;
 import '../../services/client_auth_service.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
@@ -133,15 +133,24 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
       });
       return;
     }
+    final input = _buildInput();
+    if (input.priceMin != null &&
+        input.priceMax != null &&
+        input.priceMin! > input.priceMax!) {
+      setState(() {
+        _fieldErrors = {'price_min': 'Min price must be less than max price'};
+      });
+      return;
+    }
     setState(() {
       _saving = true;
       _fieldErrors = {};
     });
     try {
       if (widget.isEdit) {
-        await _api.updateMatch(widget.existing!.id, _buildInput());
+        await _api.updateMatch(widget.existing!.id, input);
       } else {
-        await _api.createMatch(_buildInput());
+        await _api.createMatch(input);
       }
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -166,8 +175,12 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
   }
 
   Map<String, String> _parseErrors(ApiException e) {
-    // ApiException only carries the message; for full Laravel field errors we'd
-    // need the body. For now surface the generic message via snackbar.
+    // Laravel-shaped 422s come through as a ValidationException carrying one
+    // message per field (see ApiService._parseValidationError). Surface those
+    // inline; anything else falls back to the snackbar in _save.
+    if (e is ValidationException) {
+      return Map<String, String>.from(e.fieldErrors);
+    }
     return {};
   }
 
@@ -236,6 +249,15 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
                       Expanded(child: _moneyField(_priceMax, 'Max')),
                     ],
                   ),
+                  if (_fieldErrors['price_min'] != null ||
+                      _fieldErrors['price_max'] != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _fieldErrors['price_min'] ?? _fieldErrors['price_max']!,
+                        style: const TextStyle(color: Colors.red, fontSize: 12),
+                      ),
+                    ),
                   _section('Beds'),
                   _stepper(_bedsMin, (v) => setState(() => _bedsMin = v)),
                   _section('Baths'),

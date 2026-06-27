@@ -9,6 +9,27 @@ class AuthProvider extends ChangeNotifier {
   final MessagingService _messaging = MessagingService.instance;
   final SecurityService _security = SecurityService.instance;
 
+  AuthProvider() {
+    // React to any authenticated request 401'ing mid-session: the token is
+    // already cleared by [ApiService]; here we drop the in-memory session so
+    // the auth gate routes back to login instead of stranding the user on a
+    // screen whose data silently fails to load.
+    ApiService.sessionExpired.addListener(_onSessionExpired);
+  }
+
+  /// Fired when [ApiService] observes a 401. Ignored unless we currently
+  /// believe we're authenticated — this skips 401s from the login call itself
+  /// and avoids redundant work once already logged out. Credentials and
+  /// biometric setup are intentionally left intact so the login screen can
+  /// prefill / biometric-unlock straight back in.
+  void _onSessionExpired() {
+    if (!_isLoggedIn && !_isLocked) return;
+    _isLoggedIn = false;
+    _isLocked = false;
+    _user = null;
+    notifyListeners();
+  }
+
   bool _isLoading = false;
   bool _isLoggedIn = false;
   bool _isLocked = false;
@@ -34,6 +55,17 @@ class AuthProvider extends ChangeNotifier {
   String? get error => _error;
   Map<String, dynamic>? get user => _user;
   String get userName => _user?['name'] ?? 'Agent';
+
+  /// The logged-in user's id, used to tell their own listings from ones they
+  /// only co-list. Walks the flat (`id`) and nested (`user.id`) shapes the
+  /// profile / logged-user payloads use. Null when unavailable.
+  int? get currentUserId {
+    final flat = (_user?['id'] as num?)?.toInt();
+    if (flat != null) return flat;
+    final nested = _user?['user'];
+    if (nested is Map) return (nested['id'] as num?)?.toInt();
+    return null;
+  }
 
   Future<void> checkAuth() async {
     _biometricEnabled = await _security.isBiometricEnabled();
@@ -182,10 +214,19 @@ class AuthProvider extends ChangeNotifier {
     await _messaging.onLogout();
     await _api.clearToken();
     await _security.setBiometricEnabled(false);
+    // Wipe the saved email/password so the next user's login screen doesn't
+    // prefill (and biometric unlock can't reuse) the previous user's creds.
+    await _security.clearCredentials();
     _biometricEnabled = false;
     _isLoggedIn = false;
     _isLocked = false;
     _user = null;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    ApiService.sessionExpired.removeListener(_onSessionExpired);
+    super.dispose();
   }
 }

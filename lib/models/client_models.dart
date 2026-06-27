@@ -48,7 +48,7 @@ class ClientAgency {
   });
 
   factory ClientAgency.fromJson(Map<String, dynamic> json) => ClientAgency(
-        id: (json['id'] as num).toInt(),
+        id: _asInt(json['id']) ?? 0,
         name: json['name']?.toString() ?? '',
         slug: json['slug']?.toString() ?? '',
         isPreferred: json['is_preferred'] == true,
@@ -78,7 +78,7 @@ class ClientProfile {
   });
 
   factory ClientProfile.fromJson(Map<String, dynamic> json) => ClientProfile(
-        id: (json['id'] as num).toInt(),
+        id: _asInt(json['id']) ?? 0,
         email: json['email']?.toString() ?? '',
         hasPassword: json['has_password'] == true,
         passwordMustChange: json['password_must_change'] == true,
@@ -128,7 +128,7 @@ class ClientContact {
     final resolved =
         full.isNotEmpty ? full : [first, last].where((s) => s.isNotEmpty).join(' ');
     return ClientContact(
-      id: (json['id'] as num).toInt(),
+      id: _asInt(json['id']) ?? 0,
       firstName: first.isEmpty ? null : first,
       lastName: last.isEmpty ? null : last,
       fullName: resolved,
@@ -310,7 +310,7 @@ class ClientMatch {
   });
 
   factory ClientMatch.fromJson(Map<String, dynamic> json) => ClientMatch(
-        id: (json['id'] as num).toInt(),
+        id: _asInt(json['id']) ?? 0,
         name: json['name']?.toString(),
         status: json['status']?.toString() ?? '',
         listingType: json['listing_type']?.toString(),
@@ -400,7 +400,7 @@ class ClientMatchResult {
 
   factory ClientMatchResult.fromJson(Map<String, dynamic> json) =>
       ClientMatchResult(
-        id: (json['id'] as num).toInt(),
+        id: _asInt(json['id']) ?? 0,
         address: json['address']?.toString() ?? '',
         suburb: json['suburb']?.toString(),
         beds: _asInt(json['beds']),
@@ -500,7 +500,7 @@ class ClientPropertyDetail {
 
   factory ClientPropertyDetail.fromJson(Map<String, dynamic> json) =>
       ClientPropertyDetail(
-        id: (json['id'] as num).toInt(),
+        id: _asInt(json['id']) ?? 0,
         title: json['title']?.toString(),
         address: json['address']?.toString(),
         suburb: json['suburb']?.toString(),
@@ -633,7 +633,7 @@ class ClientTestimonial {
 
   factory ClientTestimonial.fromJson(Map<String, dynamic> json) =>
       ClientTestimonial(
-        id: (json['id'] as num).toInt(),
+        id: _asInt(json['id']) ?? 0,
         body: json['body']?.toString() ?? '',
         rating: _asInt(json['rating']),
         displayName: json['display_name']?.toString(),
@@ -735,7 +735,7 @@ class AgentQrAgency {
   final String slug;
   AgentQrAgency({required this.id, required this.name, required this.slug});
   factory AgentQrAgency.fromJson(Map<String, dynamic> json) => AgentQrAgency(
-        id: (json['id'] as num).toInt(),
+        id: _asInt(json['id']) ?? 0,
         name: json['name']?.toString() ?? '',
         slug: json['slug']?.toString() ?? '',
       );

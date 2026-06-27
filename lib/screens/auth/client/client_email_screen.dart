@@ -60,6 +60,13 @@ class _ClientEmailScreenState extends State<ClientEmailScreen> {
             builder: (_) => ClientPasswordScreen(email: email),
           ),
         );
+      } else {
+        setState(() {
+          _busy = false;
+          _error = result.message ??
+              'Your account needs attention. Please contact your agent to continue.';
+        });
+        return;
       }
       if (mounted) setState(() => _busy = false);
     } on ApiException catch (e) {

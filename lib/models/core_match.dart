@@ -74,7 +74,7 @@ class CoreMatchContact {
   });
 
   factory CoreMatchContact.fromJson(Map<String, dynamic> j) => CoreMatchContact(
-        id: (j['id'] as num).toInt(),
+        id: _asInt(j['id']) ?? 0,
         fullName: j['full_name']?.toString() ?? '',
         phone: j['phone']?.toString(),
         email: j['email']?.toString(),
@@ -136,8 +136,8 @@ class CoreMatchSummary {
         .toList();
     final fs = j['feedback_summary'];
     return CoreMatchSummary(
-      id: (j['id'] as num).toInt(),
-      contactId: (j['contact_id'] as num).toInt(),
+      id: _asInt(j['id']) ?? 0,
+      contactId: _asInt(j['contact_id']) ?? 0,
       name: j['name']?.toString(),
       status: j['status']?.toString(),
       listingType: j['listing_type']?.toString(),
@@ -337,7 +337,7 @@ class CoreMatchResult {
   factory CoreMatchResult.fromJson(Map<String, dynamic> j) {
     int? n(dynamic v) => v == null ? null : (v is num ? v.toInt() : int.tryParse(v.toString()));
     return CoreMatchResult(
-      id: (j['id'] as num).toInt(),
+      id: _asInt(j['id']) ?? 0,
       address: j['address']?.toString(),
       suburb: j['suburb']?.toString(),
       beds: n(j['beds']),
@@ -399,4 +399,11 @@ class CoreMatchDetail {
           : const CoreMatchScope(),
     );
   }
+}
+
+int? _asInt(dynamic v) {
+  if (v == null) return null;
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  return int.tryParse(v.toString());
 }

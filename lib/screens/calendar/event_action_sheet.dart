@@ -364,6 +364,7 @@ class _EventEditFormState extends State<_EventEditForm> {
       lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
     );
     if (date == null) return;
+    if (!mounted) return;
     setState(() {
       _start = jhbWallClock(
           date.year, date.month, date.day, _start.hour, _start.minute);
@@ -377,6 +378,7 @@ class _EventEditFormState extends State<_EventEditForm> {
       initialTime: TimeOfDay.fromDateTime(_start),
     );
     if (time == null) return;
+    if (!mounted) return;
     setState(() {
       _start = jhbWallClock(
           _start.year, _start.month, _start.day, time.hour, time.minute);
@@ -393,6 +395,7 @@ class _EventEditFormState extends State<_EventEditForm> {
       lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
     );
     if (date == null) return;
+    if (!mounted) return;
     setState(() {
       _end = jhbWallClock(
           date.year, date.month, date.day, initial.hour, initial.minute);
@@ -407,6 +410,7 @@ class _EventEditFormState extends State<_EventEditForm> {
       initialTime: TimeOfDay.fromDateTime(initial),
     );
     if (time == null) return;
+    if (!mounted) return;
     setState(() {
       _end = jhbWallClock(
           initial.year, initial.month, initial.day, time.hour, time.minute);

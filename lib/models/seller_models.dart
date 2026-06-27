@@ -30,7 +30,7 @@ class SellerProperty {
   });
 
   factory SellerProperty.fromJson(Map<String, dynamic> json) => SellerProperty(
-        id: (json['id'] as num).toInt(),
+        id: _asInt(json['id']) ?? 0,
         title: json['title']?.toString(),
         address: json['address']?.toString(),
         suburb: json['suburb']?.toString(),
@@ -178,7 +178,7 @@ class SellerInsightProperty {
 
   factory SellerInsightProperty.fromJson(Map<String, dynamic> json) =>
       SellerInsightProperty(
-        id: (json['id'] as num).toInt(),
+        id: _asInt(json['id']) ?? 0,
         title: json['title']?.toString(),
         address: json['address']?.toString(),
         suburb: json['suburb']?.toString(),

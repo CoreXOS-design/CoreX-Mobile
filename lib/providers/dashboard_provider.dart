@@ -12,6 +12,18 @@ import '../services/api_service.dart';
 class DashboardProvider extends ChangeNotifier {
   final ApiService _api = ApiService();
 
+  bool _disposed = false;
+
+  // Stale-response guards (one sequence per logical load).
+  int _todaySeq = 0;
+  int _eventsSeq = 0;
+
+  // Poller backoff + failure cap for loadToday (project convention).
+  static const int _maxConsecutiveFailures = 3;
+  static const Duration _backoffWindow = Duration(seconds: 30);
+  int _todayFailures = 0;
+  DateTime? _todayLastFailureAt;
+
   String? _error;
   TodayPayload _today = const TodayPayload();
   bool _todayLoading = false;
@@ -29,49 +41,112 @@ class DashboardProvider extends ChangeNotifier {
   int get pendingInvitationCount =>
       _invitations.where((i) => i.status == 'pending').length;
 
+  /// Clear all per-user cockpit state on logout so the next account never
+  /// sees the previous user's cards/tasks/events/invitations.
+  void reset() {
+    _error = null;
+    _today = const TodayPayload();
+    _todayLoading = false;
+    _tasks = [];
+    _events = [];
+    _invitations = [];
+    // Invalidate any in-flight loads and clear poller backoff state.
+    _todaySeq++;
+    _eventsSeq++;
+    _todayFailures = 0;
+    _todayLastFailureAt = null;
+    _safeNotify();
+  }
+
+  void _safeNotify() {
+    if (_disposed) return;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
   /// Load the role-aware Today payload (`GET /command-center/today`).
   /// Server-side cache TTL is 5 min; use [refreshToday] to bust it.
-  Future<void> loadToday() async {
-    _todayLoading = true;
-    notifyListeners();
-    try {
-      _today = await _api.getToday();
-      _error = null;
-    } catch (_) {
-      _error = 'Failed to load today';
+  Future<void> loadToday({bool manual = false}) async {
+    // Poller backoff + failure cap: auto refetches back off after repeated
+    // failures; a manual/explicit refresh always proceeds and resets the gate.
+    if (!manual && _todayFailures >= _maxConsecutiveFailures) {
+      final last = _todayLastFailureAt;
+      if (last != null && DateTime.now().difference(last) < _backoffWindow) {
+        return;
+      }
     }
-    _todayLoading = false;
-    notifyListeners();
+    if (manual) {
+      _todayFailures = 0;
+      _todayLastFailureAt = null;
+    }
+    final reqId = ++_todaySeq;
+    _todayLoading = true;
+    _safeNotify();
+    try {
+      final payload = await _api.getToday();
+      if (reqId != _todaySeq) return;
+      _today = payload;
+      _error = null;
+      _todayFailures = 0;
+      _todayLastFailureAt = null;
+    } catch (_) {
+      if (reqId != _todaySeq) return;
+      _error = 'Failed to load today';
+      _todayFailures++;
+      _todayLastFailureAt = DateTime.now();
+    } finally {
+      if (reqId == _todaySeq) {
+        _todayLoading = false;
+        _safeNotify();
+      }
+    }
   }
 
   /// `POST /command-center/today/refresh` — pull-to-refresh handler.
   Future<void> refreshToday() async {
+    // Manual pull-to-refresh — clear the poller gate so a backed-off auto
+    // load doesn't keep us stale after the user explicitly asked.
+    _todayFailures = 0;
+    _todayLastFailureAt = null;
+    final reqId = ++_todaySeq;
     try {
-      _today = await _api.refreshToday();
+      final payload = await _api.refreshToday();
+      if (reqId != _todaySeq) return;
+      _today = payload;
       _error = null;
     } catch (_) {
+      if (reqId != _todaySeq) return;
       _error = 'Failed to refresh today';
     }
-    notifyListeners();
+    if (reqId == _todaySeq) _safeNotify();
   }
 
   Future<void> loadTasks() async {
     try {
       _tasks = await _api.getTasks();
-      notifyListeners();
+      _safeNotify();
     } catch (_) {
       _error = 'Failed to load tasks';
-      notifyListeners();
+      _safeNotify();
     }
   }
 
   Future<void> loadEvents({String? month}) async {
+    final reqId = ++_eventsSeq;
     try {
-      _events = await _api.getCalendarEvents(month: month);
-      notifyListeners();
+      final events = await _api.getCalendarEvents(month: month);
+      if (reqId != _eventsSeq) return;
+      _events = events;
+      _safeNotify();
     } catch (_) {
+      if (reqId != _eventsSeq) return;
       _error = 'Failed to load events';
-      notifyListeners();
+      _safeNotify();
     }
   }
 
@@ -82,12 +157,17 @@ class DashboardProvider extends ChangeNotifier {
     String fmt(DateTime d) =>
         '${d.year}-${d.month.toString().padLeft(2, '0')}-'
         '${d.day.toString().padLeft(2, '0')}';
+    final reqId = ++_eventsSeq;
     try {
-      _events = await _api.getCalendarRange(start: fmt(start), end: fmt(end));
-      notifyListeners();
+      final events =
+          await _api.getCalendarRange(start: fmt(start), end: fmt(end));
+      if (reqId != _eventsSeq) return;
+      _events = events;
+      _safeNotify();
     } catch (_) {
+      if (reqId != _eventsSeq) return;
       _error = 'Failed to load events';
-      notifyListeners();
+      _safeNotify();
     }
   }
 
@@ -107,6 +187,7 @@ class DashboardProvider extends ChangeNotifier {
     int? propertyId,
     int? contactId,
   }) async {
+    _error = null;
     try {
       await _api.createTask(
         title: title,
@@ -138,6 +219,7 @@ class DashboardProvider extends ChangeNotifier {
     int? contactId,
     String? category,
   }) async {
+    _error = null;
     try {
       await _api.createEvent(
         title: title,
@@ -160,6 +242,7 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   Future<void> completeTask(int taskId) async {
+    _error = null;
     try {
       await _api.completeTask(taskId);
       await _refreshAfterMutation();
@@ -167,6 +250,7 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   Future<void> completeEvent(int eventId) async {
+    _error = null;
     try {
       await _api.completeEvent(eventId);
       await loadToday();
@@ -174,6 +258,7 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   Future<void> resolveTask(int taskId, {required String resolution, int? extendDays}) async {
+    _error = null;
     try {
       await _api.resolveTask(taskId, resolution: resolution, extendDays: extendDays);
       await _refreshAfterMutation();
@@ -181,6 +266,7 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   Future<void> resolveEvent(int eventId, {required String resolution, int? extendDays}) async {
+    _error = null;
     try {
       await _api.resolveEvent(eventId, resolution: resolution, extendDays: extendDays);
       await loadToday();
@@ -191,6 +277,7 @@ class DashboardProvider extends ChangeNotifier {
   /// the kanban column re-renders without waiting for the network round-trip.
   /// Rolls back on failure. Spec: `PATCH /command-center/tasks/{id}/status`.
   Future<bool> updateTaskStatus(int taskId, String status) async {
+    _error = null;
     final idx = _tasks.indexWhere((t) => t.id == taskId);
     CommandTask? original;
     if (idx >= 0) {
@@ -218,7 +305,7 @@ class DashboardProvider extends ChangeNotifier {
         sendReminder: original.sendReminder,
         serverIsOverdue: original.serverIsOverdue,
       );
-      notifyListeners();
+      _safeNotify();
     }
     try {
       await _api.updateTaskStatus(taskId, status);
@@ -229,7 +316,7 @@ class DashboardProvider extends ChangeNotifier {
     } catch (_) {
       if (idx >= 0 && original != null) {
         _tasks[idx] = original;
-        notifyListeners();
+        _safeNotify();
       }
       return false;
     }
@@ -237,6 +324,7 @@ class DashboardProvider extends ChangeNotifier {
 
   /// Wraps resolve-task with extend_days. Used by inline reschedule actions.
   Future<void> rescheduleTask(int taskId, int days) async {
+    _error = null;
     try {
       await _api.rescheduleTask(taskId, days);
       await _refreshAfterMutation();
@@ -244,6 +332,7 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   Future<void> rescheduleEvent(int eventId, int days) async {
+    _error = null;
     try {
       await _api.rescheduleEvent(eventId, days);
       await loadToday();
@@ -255,6 +344,7 @@ class DashboardProvider extends ChangeNotifier {
   /// `completeTask`, calling this again is a safe no-op from the user's
   /// perspective (a 404 is swallowed by the try/catch).
   Future<void> archiveTask(int taskId) async {
+    _error = null;
     try {
       await _api.archiveTask(taskId);
       await loadTasks();
@@ -264,20 +354,21 @@ class DashboardProvider extends ChangeNotifier {
   Future<void> loadInvitations() async {
     try {
       _invitations = await _api.getCalendarInvitations();
-      notifyListeners();
+      _safeNotify();
     } catch (_) {
       // leave previous list; do not surface a hard error for this side panel
     }
   }
 
   Future<bool> respondToInvitation(int invitationId, String action, {String? notes}) async {
+    _error = null;
     try {
       final updated = await _api.respondToInvitation(invitationId, action, notes: notes);
       final idx = _invitations.indexWhere((i) => i.id == invitationId);
       if (idx >= 0) {
         _invitations[idx] = updated;
       }
-      notifyListeners();
+      _safeNotify();
       return true;
     } catch (_) {
       return false;
@@ -285,6 +376,7 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   Future<bool> acknowledgeInvitation(int invitationId) async {
+    _error = null;
     try {
       await _api.acknowledgeInvitation(invitationId);
       await loadInvitations();
@@ -295,6 +387,7 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   Future<int> archiveAllDone() async {
+    _error = null;
     try {
       final archived = await _api.archiveAllDone();
       await loadTasks();

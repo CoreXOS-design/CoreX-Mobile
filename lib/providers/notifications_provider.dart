@@ -24,6 +24,20 @@ class NotificationsProvider extends ChangeNotifier {
 
   final ApiService _api = ApiService();
 
+  bool _disposed = false;
+
+  // Stale-response guards (one sequence per logical load).
+  int _feedSeq = 0;
+  int _overdueSeq = 0;
+
+  // Poller backoff + failure cap (project convention).
+  static const int _maxConsecutiveFailures = 3;
+  static const Duration _backoffWindow = Duration(seconds: 30);
+  int _feedFailures = 0;
+  DateTime? _feedLastFailureAt;
+  int _overdueFailures = 0;
+  DateTime? _overdueLastFailureAt;
+
   // Feed
   final List<NotificationItem> _items = [];
   int _unread = 0;
@@ -53,21 +67,43 @@ class NotificationsProvider extends ChangeNotifier {
   String? get prefsError => _prefsError;
   bool get saving => _saving;
 
-  Future<void> loadFeed({bool unreadOnly = false}) async {
+  Future<void> loadFeed({bool unreadOnly = false, bool manual = false}) async {
+    // Poller backoff + failure cap: a manual/explicit refresh always proceeds
+    // and resets the gate; auto refetches back off after repeated failures.
+    if (!manual && _feedFailures >= _maxConsecutiveFailures) {
+      final last = _feedLastFailureAt;
+      if (last != null && DateTime.now().difference(last) < _backoffWindow) {
+        return;
+      }
+    }
+    if (manual) {
+      _feedFailures = 0;
+      _feedLastFailureAt = null;
+    }
+    final reqId = ++_feedSeq;
     _loadingFeed = true;
     _feedError = null;
-    notifyListeners();
+    _safeNotify();
     try {
       final res = await _api.getNotifications(unreadOnly: unreadOnly);
+      if (reqId != _feedSeq) return;
       _items
         ..clear()
         ..addAll(res.items);
       _unread = res.unread;
+      _feedFailures = 0;
+      _feedLastFailureAt = null;
     } catch (e) {
+      if (reqId != _feedSeq) return;
       _feedError = e.toString();
+      _feedFailures++;
+      _feedLastFailureAt = DateTime.now();
+    } finally {
+      if (reqId == _feedSeq) {
+        _loadingFeed = false;
+        _safeNotify();
+      }
     }
-    _loadingFeed = false;
-    notifyListeners();
   }
 
   Future<void> markRead(String id) async {
@@ -92,7 +128,7 @@ class NotificationsProvider extends ChangeNotifier {
       data: n.data,
     );
     _unread = (_unread - 1).clamp(0, 1 << 30);
-    notifyListeners();
+    _safeNotify();
 
     try {
       await _api.markNotificationRead(id);
@@ -102,6 +138,10 @@ class NotificationsProvider extends ChangeNotifier {
   }
 
   Future<void> markAllRead() async {
+    // Snapshot for rollback on failure.
+    final prevItems = List<NotificationItem>.from(_items);
+    final prevUnread = _unread;
+
     _unread = 0;
     final now = DateTime.now();
     for (var i = 0; i < _items.length; i++) {
@@ -122,23 +162,51 @@ class NotificationsProvider extends ChangeNotifier {
         data: n.data,
       );
     }
-    notifyListeners();
+    _safeNotify();
 
     try {
       await _api.markAllNotificationsRead();
-    } catch (_) {}
+    } catch (_) {
+      // Roll back the optimistic update.
+      _items
+        ..clear()
+        ..addAll(prevItems);
+      _unread = prevUnread;
+      _safeNotify();
+    }
   }
 
-  Future<void> loadOverdue() async {
-    _loadingOverdue = true;
-    notifyListeners();
-    try {
-      _overdue = await _api.getOverdueSnapshot();
-    } catch (e) {
-      debugPrint('[notifications] overdue failed: $e');
+  Future<void> loadOverdue({bool manual = false}) async {
+    if (!manual && _overdueFailures >= _maxConsecutiveFailures) {
+      final last = _overdueLastFailureAt;
+      if (last != null && DateTime.now().difference(last) < _backoffWindow) {
+        return;
+      }
     }
-    _loadingOverdue = false;
-    notifyListeners();
+    if (manual) {
+      _overdueFailures = 0;
+      _overdueLastFailureAt = null;
+    }
+    final reqId = ++_overdueSeq;
+    _loadingOverdue = true;
+    _safeNotify();
+    try {
+      final snap = await _api.getOverdueSnapshot();
+      if (reqId != _overdueSeq) return;
+      _overdue = snap;
+      _overdueFailures = 0;
+      _overdueLastFailureAt = null;
+    } catch (e) {
+      if (reqId != _overdueSeq) return;
+      debugPrint('[notifications] overdue failed: $e');
+      _overdueFailures++;
+      _overdueLastFailureAt = DateTime.now();
+    } finally {
+      if (reqId == _overdueSeq) {
+        _loadingOverdue = false;
+        _safeNotify();
+      }
+    }
   }
 
   /// Loads cached prefs immediately (instant render), then revalidates from
@@ -160,11 +228,11 @@ class NotificationsProvider extends ChangeNotifier {
           DateTime.now().difference(stamp) < _prefsCacheTtl &&
           _prefs != null) {
         _loadingPrefs = false;
-        notifyListeners();
+        _safeNotify();
         return;
       }
     }
-    notifyListeners();
+    _safeNotify();
 
     try {
       final fresh = await _api.getNotificationPreferences();
@@ -175,7 +243,7 @@ class NotificationsProvider extends ChangeNotifier {
       _prefsError = e.toString();
     }
     _loadingPrefs = false;
-    notifyListeners();
+    _safeNotify();
   }
 
   /// Returns true on success. Caller should already have guarded against the
@@ -187,7 +255,7 @@ class NotificationsProvider extends ChangeNotifier {
 
     _saving = true;
     _prefsError = null;
-    notifyListeners();
+    _safeNotify();
 
     try {
       if (p.locked) {
@@ -207,7 +275,7 @@ class NotificationsProvider extends ChangeNotifier {
       }
       await _writeCachedPrefs(p);
       _saving = false;
-      notifyListeners();
+      _safeNotify();
       return true;
     } on AgencyControlledException {
       // Server flipped to agency-controlled since the form loaded.
@@ -220,12 +288,12 @@ class NotificationsProvider extends ChangeNotifier {
         groups: p.groups,
       );
       _saving = false;
-      notifyListeners();
+      _safeNotify();
       return false;
     } catch (e) {
       _prefsError = e.toString();
       _saving = false;
-      notifyListeners();
+      _safeNotify();
       return false;
     }
   }
@@ -263,6 +331,31 @@ class NotificationsProvider extends ChangeNotifier {
     _unread = 0;
     _overdue = OverdueSnapshot.empty();
     _prefs = null;
+    _prefsFetchedAt = null;
+    _feedError = null;
+    _prefsError = null;
+    _loadingFeed = false;
+    _loadingOverdue = false;
+    _loadingPrefs = false;
+    _saving = false;
+    // Invalidate any in-flight loads and clear poller backoff state.
+    _feedSeq++;
+    _overdueSeq++;
+    _feedFailures = 0;
+    _feedLastFailureAt = null;
+    _overdueFailures = 0;
+    _overdueLastFailureAt = null;
+    _safeNotify();
+  }
+
+  void _safeNotify() {
+    if (_disposed) return;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 }

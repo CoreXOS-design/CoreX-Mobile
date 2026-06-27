@@ -64,6 +64,12 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   // Cached list of back-facing physical cameras, in their reported order.
   List<CameraDescription> _backCameras = const [];
 
+  // Guards against concurrent / re-entrant camera bring-up (resume races,
+  // double taps on lens/flip). While set, init paths bail out early.
+  bool _initInFlight = false;
+  // Guards overlapping pinch-zoom calls — only one setZoomLevel in flight.
+  bool _zooming = false;
+
   @override
   void initState() {
     super.initState();
@@ -84,17 +90,22 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final ctrl = _controller;
-    if (ctrl == null || !ctrl.value.isInitialized) return;
     if (state == AppLifecycleState.inactive) {
-      ctrl.dispose();
+      final ctrl = _controller;
+      if (ctrl == null || !ctrl.value.isInitialized) return;
+      // Show a spinner (not a dead preview) and release the device.
       _controller = null;
+      if (mounted) setState(() => _initializing = true);
+      ctrl.dispose();
     } else if (state == AppLifecycleState.resumed) {
-      _initCamera();
+      // Only bring the camera back if we actually let it go.
+      if (_controller == null && !_initInFlight) _initCamera();
     }
   }
 
   Future<void> _initCamera() async {
+    if (_initInFlight) return;
+    _initInFlight = true;
     try {
       _cameras = await availableCameras();
       if (!mounted) return;
@@ -141,12 +152,24 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
         _initializing = false;
         _error = 'Camera error: $e';
       });
+    } finally {
+      _initInFlight = false;
     }
   }
 
   Future<void> _startLens(int index) async {
-    final preset = _lensPresets[index];
-    _controller?.dispose();
+    // Clamp the index defensively — the preset list is rebuilt asynchronously
+    // and a stale _activeLens (e.g. from back-from-front) could overflow it.
+    if (_lensPresets.isEmpty) return;
+    final safeIndex = index.clamp(0, _lensPresets.length - 1);
+    final preset = _lensPresets[safeIndex];
+    index = safeIndex;
+    // Release the device before opening it again — disposing synchronously and
+    // immediately re-opening races the OS and throws "camera already in use".
+    final old = _controller;
+    _controller = null;
+    if (mounted) setState(() => _initializing = true);
+    await old?.dispose();
     final ctrl =
         CameraController(preset.camera, ResolutionPreset.high, enableAudio: false);
     _controller = ctrl;
@@ -276,6 +299,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   Future<void> _setLens(int index) async {
     final ctrl = _controller;
     if (ctrl == null || _initializing) return;
+    if (index < 0 || index >= _lensPresets.length) return;
     final target = _lensPresets[index];
     // Same physical camera — just adjust digital zoom.
     if (!_onFront && target.camera == ctrl.description) {
@@ -292,8 +316,13 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
     }
     // Different physical camera — restart controller on it, then the
     // post-init rebuild will refresh chips and reset _activeLens.
+    if (_initInFlight) return;
+    _initInFlight = true;
     setState(() => _initializing = true);
-    _controller?.dispose();
+    final oldCtrl = _controller;
+    _controller = null;
+    // Release the device before re-opening on the new lens.
+    await oldCtrl?.dispose();
     final newCtrl =
         CameraController(target.camera, ResolutionPreset.high, enableAudio: false);
     _controller = newCtrl;
@@ -326,17 +355,24 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
         _initializing = false;
         _error = 'Could not switch lens';
       });
+    } finally {
+      _initInFlight = false;
     }
   }
 
   Future<void> _switchCamera() async {
+    if (_initInFlight) return;
     final front = _cameras
         .where((c) => c.lensDirection == CameraLensDirection.front)
         .toList();
     if (front.isEmpty) return;
-    setState(() => _initializing = true);
     if (!_onFront) {
-      _controller?.dispose();
+      _initInFlight = true;
+      setState(() => _initializing = true);
+      final oldCtrl = _controller;
+      _controller = null;
+      // Release the back camera before opening the front one.
+      await oldCtrl?.dispose();
       final ctrl =
           CameraController(front.first, ResolutionPreset.high, enableAudio: false);
       _controller = ctrl;
@@ -362,8 +398,12 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
           _initializing = false;
           _error = 'Could not start front camera';
         });
+      } finally {
+        _initInFlight = false;
       }
     } else {
+      // Back from front. _activeLens may index a stale preset list; _startLens
+      // clamps it and shows its own spinner.
       await _startLens(_activeLens);
     }
   }
@@ -398,11 +438,22 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   Future<void> _onScaleUpdate(ScaleUpdateDetails details) async {
     final ctrl = _controller;
     if (ctrl == null) return;
+    // Drop overlapping gestures — only one setZoomLevel in flight at a time so
+    // we don't queue a burst of calls against the camera.
+    if (_zooming) return;
     final newZoom =
         (_baseZoom * details.scale).clamp(_minZoom, _maxZoom).toDouble();
     if (newZoom == _currentZoom) return;
+    _zooming = true;
     setState(() => _currentZoom = newZoom);
-    await ctrl.setZoomLevel(newZoom);
+    try {
+      await ctrl.setZoomLevel(newZoom);
+    } catch (_) {
+      // ignore — controller may have been swapped/disposed mid-gesture
+    } finally {
+      _zooming = false;
+    }
+    if (!mounted) return;
   }
 
   Future<void> _takePicture() async {
@@ -463,12 +514,6 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                       '${_captured.length} taken',
                       style: const TextStyle(
                           color: Colors.white70, fontSize: 14),
-                    )
-                  else
-                    Text(
-                      'lenses: ${_backCameras.length} · zoom ${_minZoom.toStringAsFixed(1)}–${_maxZoom.toStringAsFixed(1)}x',
-                      style: const TextStyle(
-                          color: Colors.white38, fontSize: 11),
                     ),
                   const Spacer(),
                   if (_cameras.any(
@@ -492,7 +537,24 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                       ? Center(
                           child: Text(_error!,
                               style: const TextStyle(color: Colors.white70)))
-                      : GestureDetector(
+                      : Builder(
+                          builder: (context) {
+                            final ctrl = _controller;
+                            // previewSize can be null briefly after init (and
+                            // on some emulators/devices never resolves). Don't
+                            // dereference it with `!` — that hard-crashes the
+                            // whole screen. Fall back to a spinner until it's
+                            // ready, and use a sane default aspect if missing.
+                            if (ctrl == null ||
+                                !ctrl.value.isInitialized) {
+                              return const Center(
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white));
+                            }
+                            final preview = ctrl.value.previewSize;
+                            final pw = preview?.height ?? 720.0;
+                            final ph = preview?.width ?? 1280.0;
+                            return GestureDetector(
                           onScaleStart: _onScaleStart,
                           onScaleUpdate: _onScaleUpdate,
                           child: Stack(
@@ -504,11 +566,9 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                                   child: FittedBox(
                                     fit: BoxFit.cover,
                                     child: SizedBox(
-                                      width: _controller!
-                                          .value.previewSize!.height,
-                                      height: _controller!
-                                          .value.previewSize!.width,
-                                      child: CameraPreview(_controller!),
+                                      width: pw,
+                                      height: ph,
+                                      child: CameraPreview(ctrl),
                                     ),
                                   ),
                                 ),
@@ -592,6 +652,8 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                               ),
                             ],
                           ),
+                            );
+                          },
                         ),
             ),
             Container(
@@ -609,7 +671,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(8),
                               child: Image.file(_captured.last,
-                                  fit: BoxFit.cover),
+                                  cacheWidth: 150, fit: BoxFit.cover),
                             ),
                           )
                         : null,
@@ -695,7 +757,8 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(AppTheme.radius),
-                child: Image.file(_captured[i], fit: BoxFit.cover),
+                child: Image.file(_captured[i],
+                    cacheWidth: 300, fit: BoxFit.cover),
               ),
               Positioned(
                 top: 4,

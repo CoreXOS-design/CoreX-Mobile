@@ -4,23 +4,20 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart' show MediaType;
-import 'package:shared_preferences/shared_preferences.dart';
 import '../config/env.dart';
 import 'api_service.dart';
 
 /// Client for the AI-feature endpoints added on backend commit 9f8a9604.
 ///
-/// These all live under `$baseUrl/v1/mobile/...`. Token is the same
-/// `auth_token` SharedPreferences key that [ApiService] uses.
+/// These all live under `$baseUrl/v1/mobile/...`. Token is read from the same
+/// source as [ApiService] so the two stay consistent (secure storage, with
+/// legacy SharedPreferences migration handled by [ApiService.getToken]).
 class AiApi {
   static String get _baseUrl => Env.apiBaseUrl;
   static const Duration _timeout = Duration(seconds: 15);
   static const Duration _voiceTimeout = Duration(seconds: 30);
 
-  Future<String?> _token() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('auth_token');
-  }
+  Future<String?> _token() => ApiService().getToken();
 
   Future<Map<String, String>> _headers({String? contentType}) async {
     final tok = await _token();
@@ -36,12 +33,11 @@ class AiApi {
   Future<MobileFeatureFlags> getFeatures() async {
     final url = '$_baseUrl/v1/mobile/features';
     final headers = await _headers();
-    debugPrint('[ai_api] GET $url '
-        '(auth=${headers['Authorization']?.substring(0, 16) ?? "<none>"}…)');
+    debugPrint('[ai_api] GET $url');
     final res = await http
         .get(Uri.parse(url), headers: headers)
         .timeout(_timeout);
-    debugPrint('[ai_api] ← ${res.statusCode} ${res.body}');
+    debugPrint('[ai_api] ← ${res.statusCode}');
     if (res.statusCode == 200) {
       return MobileFeatureFlags.fromJson(
           Map<String, dynamic>.from(jsonDecode(res.body) as Map));
@@ -69,9 +65,9 @@ class AiApi {
     debugPrint('[ai_api] POST $_baseUrl/v1/mobile/ellie/voice '
         '(audio=${await audio.length()} bytes)');
     final streamed = await req.send().timeout(_voiceTimeout);
-    final body = await streamed.stream.bytesToString();
+    final body = await streamed.stream.bytesToString().timeout(_voiceTimeout);
     final status = streamed.statusCode;
-    debugPrint('[ai_api] ← $status $body');
+    debugPrint('[ai_api] ← $status');
 
     Map<String, dynamic> json = const {};
     try {
