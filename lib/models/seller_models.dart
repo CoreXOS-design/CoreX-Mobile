@@ -95,7 +95,7 @@ class SellerPropertyInsights {
   factory SellerPropertyInsights.fromJson(Map<String, dynamic> json) =>
       SellerPropertyInsights(
         property: SellerInsightProperty.fromJson(
-            Map<String, dynamic>.from(json['property'] as Map)),
+            Map<String, dynamic>.from(json['property'] as Map? ?? const {})),
         role: json['role']?.toString(),
         agency: json['agency'] is Map
             ? SellerAgency.fromJson(

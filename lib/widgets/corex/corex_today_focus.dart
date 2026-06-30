@@ -34,16 +34,20 @@ class CorexTodayFocus extends StatelessWidget {
             decoration: BoxDecoration(
               color: t.accentSoft,
               borderRadius: BorderRadius.circular(10),
-              image: thumbnailUrl != null
-                  ? DecorationImage(
-                      image: NetworkImage(thumbnailUrl!),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
             ),
+            clipBehavior: Clip.antiAlias,
             child: thumbnailUrl == null
                 ? Icon(TablerIcons.home_2, color: t.accent, size: 26)
-                : null,
+                : Image.network(
+                    thumbnailUrl!,
+                    fit: BoxFit.cover,
+                    width: 64,
+                    height: 64,
+                    // Fall back to the placeholder icon if the thumbnail fails
+                    // to load, rather than showing a blank accent box.
+                    errorBuilder: (_, __, ___) =>
+                        Icon(TablerIcons.home_2, color: t.accent, size: 26),
+                  ),
           ),
           const SizedBox(width: 14),
           Expanded(

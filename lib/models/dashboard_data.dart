@@ -1,3 +1,16 @@
+/// Tolerant JSON coercion helpers. The backend occasionally sends ids as
+/// strings, numbers as doubles, or a nested object as a scalar/null. These
+/// never throw on type drift, so a single odd field can't take out the whole
+/// dashboard/Today parse.
+int _jInt(dynamic v, [int fallback = 0]) =>
+    v is num ? v.toInt() : int.tryParse('${v ?? ''}') ?? fallback;
+int? _jIntOrNull(dynamic v) =>
+    v == null ? null : (v is num ? v.toInt() : int.tryParse('$v'));
+String _jStr(dynamic v, [String fallback = '']) => v?.toString() ?? fallback;
+String? _jStrOrNull(dynamic v) => v?.toString();
+Map<String, dynamic>? _jMap(dynamic v) =>
+    v is Map ? Map<String, dynamic>.from(v) : null;
+
 /// One attendee on a calendar event, with their RSVP response.
 /// Server emits `attendees: [{ user_id, name, response }, ...]` under
 /// `GET /command-center/calendar/{id}` and the range fetch.
@@ -112,36 +125,38 @@ class CalendarEvent {
     final endsRaw = json['ends_at'] ?? json['end_date'];
 
     return CalendarEvent(
-      id: json['id'] ?? 0,
-      title: json['title'] ?? '',
-      eventType: json['event_type'] ?? 'manual',
-      category: json['category'],
+      id: _jInt(json['id']),
+      title: _jStr(json['title']),
+      eventType: _jStr(json['event_type'], 'manual'),
+      category: _jStrOrNull(json['category']),
       eventDate: DateTime.tryParse(startsRaw.toString()) ?? DateTime.now(),
       endDate: endsRaw == null ? null : DateTime.tryParse(endsRaw.toString()),
       allDay: json['all_day'] == true || json['all_day'] == 1,
-      priority: json['priority'] ?? 'normal',
-      status: json['status'] ?? 'pending',
-      resolution: json['resolution'],
-      resolutionNote: json['resolution_note'],
+      priority: _jStr(json['priority'], 'normal'),
+      status: _jStr(json['status'], 'pending'),
+      resolution: _jStrOrNull(json['resolution']),
+      resolutionNote: _jStrOrNull(json['resolution_note']),
       colour: (ecMap?['color'] ??
               json['colour'] ??
               json['color'] ??
-              _typeColour(json['event_type']))
+              _typeColour(_jStrOrNull(json['event_type'])))
           .toString(),
-      propertyId: json['property_id'],
-      contactId: json['contact_id'],
-      propertyAddress: json['property']?['display_address'] ?? json['property_address'],
-      contactName: json['contact']?['name'] ?? json['contact_name'],
-      pillarTag: json['pillar_tag'],
+      propertyId: _jIntOrNull(json['property_id']),
+      contactId: _jIntOrNull(json['contact_id']),
+      propertyAddress: _jStrOrNull(_jMap(json['property'])?['display_address']) ??
+          _jStrOrNull(json['property_address']),
+      contactName: _jStrOrNull(_jMap(json['contact'])?['name']) ??
+          _jStrOrNull(json['contact_name']),
+      pillarTag: _jStrOrNull(json['pillar_tag']),
       sendReminder: json['send_reminder'] == true || json['send_reminder'] == 1,
-      description: json['description'],
-      location: json['location']?.toString(),
-      eventClassId: (ecMap?['id'] as num?)?.toInt() ??
-          (json['event_class_id'] as num?)?.toInt(),
+      description: _jStrOrNull(json['description']),
+      location: _jStrOrNull(json['location']),
+      eventClassId: _jIntOrNull(ecMap?['id']) ??
+          _jIntOrNull(json['event_class_id']),
       eventClassName:
-          (ecMap?['name'] ?? json['event_class_name'])?.toString(),
-      createdByName: (json['created_by']?['name'] ?? json['created_by_name'])
-          ?.toString(),
+          _jStrOrNull(ecMap?['name']) ?? _jStrOrNull(json['event_class_name']),
+      createdByName: _jStrOrNull(_jMap(json['created_by'])?['name']) ??
+          _jStrOrNull(json['created_by_name']),
       attendees: attendees,
     );
   }
@@ -234,25 +249,27 @@ class CommandTask {
 
   factory CommandTask.fromJson(Map<String, dynamic> json) {
     return CommandTask(
-      id: json['id'] ?? 0,
-      title: json['title'] ?? '',
-      taskType: json['task_type'] ?? 'custom',
-      status: json['status'] ?? 'todo',
-      priority: json['priority'] ?? 'normal',
-      resolution: json['resolution'],
-      resolutionNote: json['resolution_note'],
-      assignedTo: json['assigned_to'],
-      dueDate: json['due_date'] != null ? DateTime.tryParse(json['due_date']) : null,
-      startedAt: json['started_at'] != null ? DateTime.tryParse(json['started_at']) : null,
-      completedAt: json['completed_at'] != null ? DateTime.tryParse(json['completed_at']) : null,
-      deletedAt: json['deleted_at'] != null ? DateTime.tryParse(json['deleted_at']) : null,
-      propertyId: json['property_id'],
-      contactId: json['contact_id'],
-      dealId: json['deal_id'],
-      propertyAddress: json['property']?['display_address'] ?? json['property_address'],
-      contactName: json['contact']?['name'] ?? json['contact_name'],
-      pillarTag: json['pillar_tag'],
-      description: json['description'],
+      id: _jInt(json['id']),
+      title: _jStr(json['title']),
+      taskType: _jStr(json['task_type'], 'custom'),
+      status: _jStr(json['status'], 'todo'),
+      priority: _jStr(json['priority'], 'normal'),
+      resolution: _jStrOrNull(json['resolution']),
+      resolutionNote: _jStrOrNull(json['resolution_note']),
+      assignedTo: _jIntOrNull(json['assigned_to']),
+      dueDate: DateTime.tryParse(_jStr(json['due_date'])),
+      startedAt: DateTime.tryParse(_jStr(json['started_at'])),
+      completedAt: DateTime.tryParse(_jStr(json['completed_at'])),
+      deletedAt: DateTime.tryParse(_jStr(json['deleted_at'])),
+      propertyId: _jIntOrNull(json['property_id']),
+      contactId: _jIntOrNull(json['contact_id']),
+      dealId: _jIntOrNull(json['deal_id']),
+      propertyAddress: _jStrOrNull(_jMap(json['property'])?['display_address']) ??
+          _jStrOrNull(json['property_address']),
+      contactName: _jStrOrNull(_jMap(json['contact'])?['name']) ??
+          _jStrOrNull(json['contact_name']),
+      pillarTag: _jStrOrNull(json['pillar_tag']),
+      description: _jStrOrNull(json['description']),
       sendReminder: json['send_reminder'] == true || json['send_reminder'] == 1,
       serverIsOverdue: json['is_overdue'] is bool ? json['is_overdue'] as bool : null,
     );

@@ -15,7 +15,6 @@ import '../../widgets/corex/corex_ellie_card.dart';
 import '../../widgets/corex/corex_module_tile.dart';
 import '../../widgets/corex/corex_next_appointment.dart';
 import '../../providers/portal_leads_provider.dart';
-import '../coming_soon_screen.dart';
 import '../contacts/contacts_list_screen.dart';
 import '../ellie/ellie_screen.dart';
 import '../notifications/notifications_screen.dart';
@@ -182,11 +181,6 @@ class HomeScreen extends StatelessWidget {
         label: 'Portal Leads',
         dot: context.watch<PortalLeadsProvider>().totalUnread > 0,
         builder: () => const PortalLeadsScreen(),
-      ),
-      _ModuleSpec(
-        icon: TablerIcons.hourglass_high,
-        label: 'Coming Soon',
-        builder: () => const ComingSoonScreen(feature: 'Coming Soon'),
       ),
     ];
 

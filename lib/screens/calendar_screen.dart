@@ -9,8 +9,8 @@ import '../models/dashboard_data.dart';
 import '../utils/app_time.dart';
 import '../widgets/event_card.dart';
 import 'calendar/event_action_sheet.dart';
+import 'calendar/event_form_sheet.dart';
 import 'calendar/invitations_screen.dart';
-import 'shared/quick_add_sheet.dart';
 
 class CalendarScreen extends StatefulWidget {
   final bool embedded;
@@ -325,18 +325,14 @@ class _CalendarScreenState extends State<CalendarScreen>
     return FloatingActionButton(
       heroTag: 'calendar_fab',
       onPressed: () async {
-        final created = await showModalBottomSheet<bool>(
-          context: context,
-          isScrollControlled: true,
-          backgroundColor: Colors.transparent,
-          builder: (_) => QuickAddSheet(
-            initialMode: 'event',
-            // Pre-fill the day the user is currently viewing.
-            initialDate: _selectedDate ?? DateTime.now(),
-          ),
+        // Full add-event flow (event classes, properties, attendees, …).
+        final created = await showCreateEventSheet(
+          context,
+          // Pre-fill the day the user is currently viewing.
+          initialDate: _selectedDate ?? DateTime.now(),
         );
         // Refresh the visible range so the new event shows without leaving.
-        if (created == true && mounted) await _reload();
+        if (created && mounted) await _reload();
       },
       backgroundColor: AppTheme.brand,
       child: const Icon(Icons.add, color: Colors.white),

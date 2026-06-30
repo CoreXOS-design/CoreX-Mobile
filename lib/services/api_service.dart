@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/env.dart';
+import '../models/calendar_form.dart';
 import '../models/contact.dart';
 import '../models/contact_compliance.dart';
 import '../models/core_match.dart';
@@ -79,6 +80,9 @@ class ApiService {
 
   Future<void> saveToken(String token) async {
     _inMemoryToken = token;
+    // Fresh session — clear any stale 401 streak from a previous session.
+    _consecutive401s = 0;
+    _last401At = null;
     try {
       await _secureStorage.write(key: _tokenKey, value: token);
     } catch (e) {
@@ -105,12 +109,33 @@ class ApiService {
   /// debounce by ignoring the signal when already logged out.
   static final ValueNotifier<int> sessionExpired = ValueNotifier<int>(0);
 
+  /// Tracks consecutive 401s so a single spurious 401 (a token-refresh race,
+  /// a gateway blip) doesn't bounce a still-valid session back to login. Only
+  /// a second 401 inside [_unauthorizedWindow] is treated as a real expiry.
+  static int _consecutive401s = 0;
+  static DateTime? _last401At;
+  static const Duration _unauthorizedWindow = Duration(seconds: 12);
+
   /// On a 401, drop the (now invalid) token and signal the auth layer to route
   /// the user back to login. Safe to call on unauthenticated endpoints (e.g. a
   /// failed login) — listeners guard on being logged in, so a login 401 is a
   /// no-op for them.
+  ///
+  /// Debounced: the first 401 is treated as possibly-transient and the token is
+  /// left intact; a second 401 within [_unauthorizedWindow] confirms the
+  /// session is genuinely gone, at which point we clear the token and signal.
   Future<void> _handleUnauthorized(int status) async {
     if (status != 401) return;
+    final now = DateTime.now();
+    if (_last401At == null ||
+        now.difference(_last401At!) > _unauthorizedWindow) {
+      _consecutive401s = 0;
+    }
+    _consecutive401s++;
+    _last401At = now;
+    if (_consecutive401s < 2) return;
+    _consecutive401s = 0;
+    _last401At = null;
     await clearToken();
     sessionExpired.value++;
   }
@@ -796,8 +821,10 @@ class ApiService {
     debugPrint('[calendar] GET $uri');
     final response =
         await http.get(uri, headers: await _headers()).timeout(_timeout);
-    debugPrint('[calendar] ← ${response.statusCode} '
-        '(${response.body.length} bytes) ${response.body.length > 800 ? "${response.body.substring(0, 800)}…" : response.body}');
+    if (kDebugMode) {
+      debugPrint('[calendar] ← ${response.statusCode} '
+          '(${response.body.length} bytes) ${response.body.length > 800 ? "${response.body.substring(0, 800)}…" : response.body}');
+    }
     if (response.statusCode == 200) {
       final body = jsonDecode(response.body);
       final list = body is List
@@ -1047,6 +1074,149 @@ class ApiService {
     }
   }
 
+  // --- Full Add / Edit Event flow (v1 command-center) ---
+  //
+  // These hit the `/api/v1/command-center/calendar/*` endpoints (note the `v1`
+  // prefix) that mirror the web add-event panel: form bootstrap, property +
+  // attendee search, property-owner suggestions, and the rich create/update
+  // that auto-files link records and sends agent invitations server-side.
+
+  /// `GET /v1/command-center/calendar/options` — event classes, priorities and
+  /// attendee roles used to render the add-event form.
+  Future<CalendarOptions> getCalendarOptions() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/v1/command-center/calendar/options'),
+      headers: await _headers(),
+    ).timeout(_timeout);
+    if (response.statusCode == 200) {
+      return CalendarOptions.fromJson(
+          Map<String, dynamic>.from(jsonDecode(response.body) as Map));
+    }
+    await _handleUnauthorized(response.statusCode);
+    throw ApiException(response.statusCode, 'Failed to load event options');
+  }
+
+  /// `GET /v1/mobile/properties?q=` — lightweight property search for the
+  /// add-event property picker (id, address, price_display, thumbnail, …).
+  Future<List<PropertySearchResult>> searchCalendarProperties(String q) async {
+    final uri = Uri.parse('$baseUrl/v1/mobile/properties')
+        .replace(queryParameters: {'q': q});
+    final response =
+        await http.get(uri, headers: await _headers()).timeout(_timeout);
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body);
+      final list = body is Map
+          ? (body['properties'] as List? ?? body['data'] as List? ?? const [])
+          : (body is List ? body : const []);
+      return list
+          .whereType<Map>()
+          .map((e) =>
+              PropertySearchResult.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    await _handleUnauthorized(response.statusCode);
+    throw ApiException(response.statusCode, 'Failed to search properties');
+  }
+
+  /// `GET /v1/command-center/calendar/properties/{id}/owners` — the linked
+  /// contacts (with a pre-set role) offered as one-tap attendee suggestions
+  /// when a property is added.
+  Future<List<PropertyOwner>> getPropertyOwners(int propertyId) async {
+    final response = await http.get(
+      Uri.parse(
+          '$baseUrl/v1/command-center/calendar/properties/$propertyId/owners'),
+      headers: await _headers(),
+    ).timeout(_timeout);
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body);
+      final list = body is List
+          ? body
+          : (body is Map ? (body['owners'] as List? ?? body['data'] as List? ?? const []) : const []);
+      return list
+          .whereType<Map>()
+          .map((e) => PropertyOwner.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    await _handleUnauthorized(response.statusCode);
+    throw ApiException(response.statusCode, 'Failed to load property owners');
+  }
+
+  /// `GET /v1/command-center/calendar/search/attendees?q=` — contacts + agents,
+  /// scoped to the agent's visibility. Each carries a `type` of
+  /// `contact` | `agent`.
+  Future<List<AttendeeSearchResult>> searchAttendees(String q) async {
+    final uri = Uri.parse('$baseUrl/v1/command-center/calendar/search/attendees')
+        .replace(queryParameters: {'q': q});
+    final response =
+        await http.get(uri, headers: await _headers()).timeout(_timeout);
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body);
+      final list = body is List
+          ? body
+          : (body is Map ? (body['results'] as List? ?? body['data'] as List? ?? const []) : const []);
+      return list
+          .whereType<Map>()
+          .map((e) =>
+              AttendeeSearchResult.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    await _handleUnauthorized(response.statusCode);
+    throw ApiException(response.statusCode, 'Failed to search attendees');
+  }
+
+  /// `POST /v1/command-center/calendar` — full create. The backend auto-files
+  /// property/contact link records and sends invitations to agent attendees.
+  /// Returns the full event payload as [EventFormData]. Throws
+  /// [ValidationException] on 422 so the form can map errors to fields.
+  Future<EventFormData> createCalendarEventFull(
+      Map<String, dynamic> body) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/v1/command-center/calendar'),
+      headers: await _headers(),
+      body: jsonEncode(body),
+    ).timeout(_timeout);
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return EventFormData.fromResponseBody(response.body);
+    }
+    if (response.statusCode == 422) throw _parseValidationError(response.body);
+    await _handleUnauthorized(response.statusCode);
+    throw ApiException(
+        response.statusCode, _serverErrorMessage(response.body, 'create event'));
+  }
+
+  /// `GET /v1/command-center/calendar/{id}` — full event for pre-filling the
+  /// edit sheet (linked properties + rich attendees + `is_editable`).
+  Future<EventFormData> getCalendarEventDetail(int eventId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/v1/command-center/calendar/$eventId'),
+      headers: await _headers(),
+    ).timeout(_timeout);
+    if (response.statusCode == 200) {
+      return EventFormData.fromResponseBody(response.body);
+    }
+    await _handleUnauthorized(response.statusCode);
+    throw ApiException(response.statusCode, 'Failed to load event');
+  }
+
+  /// `PUT /v1/command-center/calendar/{id}` — full update. Sending
+  /// `property_ids`/`attendees`/`deal_id` re-syncs those links (and invites any
+  /// newly added agents). Returns the full updated event.
+  Future<EventFormData> updateCalendarEventFull(
+      int eventId, Map<String, dynamic> body) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/v1/command-center/calendar/$eventId'),
+      headers: await _headers(),
+      body: jsonEncode(body),
+    ).timeout(_timeout);
+    if (response.statusCode == 200) {
+      return EventFormData.fromResponseBody(response.body);
+    }
+    if (response.statusCode == 422) throw _parseValidationError(response.body);
+    await _handleUnauthorized(response.statusCode);
+    throw ApiException(
+        response.statusCode, _serverErrorMessage(response.body, 'update event'));
+  }
+
   // --- Properties ---
 
   /// Session-scoped in-memory cache for the property options dropdown data.
@@ -1158,15 +1328,16 @@ class ApiService {
 
   Future<Property> createProperty(Map<String, dynamic> data) async {
     final reqBody = jsonEncode(data);
-    debugPrint('[createProperty] POST $baseUrl/mobile/properties');
-    debugPrint('[createProperty] body: $reqBody');
+    if (kDebugMode) debugPrint('[createProperty] body: $reqBody');
     final response = await http.post(
       Uri.parse('$baseUrl/mobile/properties'),
       headers: await _headers(),
       body: reqBody,
     ).timeout(_timeout);
 
-    debugPrint('[createProperty] ${response.statusCode}: ${response.body}');
+    if (kDebugMode) {
+      debugPrint('[createProperty] ${response.statusCode}: ${response.body}');
+    }
 
     if (response.statusCode == 200 || response.statusCode == 201) {
       final body = jsonDecode(response.body);
@@ -1181,15 +1352,16 @@ class ApiService {
 
   Future<Property> updateProperty(int id, Map<String, dynamic> data) async {
     final reqBody = jsonEncode(data);
-    debugPrint('[updateProperty] PUT $baseUrl/mobile/properties/$id');
-    debugPrint('[updateProperty] body: $reqBody');
+    if (kDebugMode) debugPrint('[updateProperty] body: $reqBody');
     final response = await http.put(
       Uri.parse('$baseUrl/mobile/properties/$id'),
       headers: await _headers(),
       body: reqBody,
     ).timeout(_timeout);
 
-    debugPrint('[updateProperty] ${response.statusCode}: ${response.body}');
+    if (kDebugMode) {
+      debugPrint('[updateProperty] ${response.statusCode}: ${response.body}');
+    }
 
     if (response.statusCode == 200) {
       final body = jsonDecode(response.body);

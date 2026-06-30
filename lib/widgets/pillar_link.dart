@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../config/env.dart';
 import '../screens/contacts/contact_show_screen.dart';
-import '../screens/deals/deal_show_screen.dart';
 import '../screens/properties/property_edit_screen.dart';
 
 /// Navigates to the first non-null pillar destination, following the
@@ -21,9 +22,14 @@ bool navigateToPillar(
     return true;
   }
   if (dealId != null) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => DealShowScreen(dealId: dealId)),
-    );
+    // No native deal screen yet — open the real web deal page rather than a
+    // placeholder. Host is derived from the configured API base (strip /api).
+    final webBase = Env.apiBaseUrl.replaceFirst(RegExp(r'/api/?$'), '');
+    final uri = Uri.tryParse('$webBase/deals/$dealId');
+    if (uri != null) {
+      // Fire-and-forget; the pillar tap shouldn't block on the launch.
+      launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
     return true;
   }
   if (contactId != null) {

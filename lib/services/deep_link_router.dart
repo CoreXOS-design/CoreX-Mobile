@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../screens/calendar_screen.dart';
 import '../screens/contacts/contact_show_screen.dart';
-import '../screens/deals/deal_show_screen.dart';
 import '../screens/portal_leads/portal_lead_detail_screen.dart';
 import '../screens/properties/property_overview_screen.dart';
 import '../screens/tasks_screen.dart';
@@ -12,7 +11,6 @@ import '../screens/tasks_screen.dart';
 /// Supported paths (web cockpit equivalents):
 ///   /properties/:id                              → PropertyDetail
 ///   /contacts/:id                                → ContactDetail
-///   /deals/:id                                   → DealDetail
 ///   /corex/command-center/calendar?event=:id     → Calendar (focused on event)
 ///   /corex#task-:id                              → Tasks (focused on task)
 /// Anything else falls back to opening in an external browser.
@@ -59,16 +57,8 @@ class DeepLinkRouter {
       }
     }
 
-    // /deals/:id
-    if (segments.length >= 2 && segments[0] == 'deals') {
-      final id = int.tryParse(segments[1]);
-      if (id != null) {
-        navigator.push(MaterialPageRoute(
-          builder: (_) => DealShowScreen(dealId: id),
-        ));
-        return;
-      }
-    }
+    // /deals/:id — no native deal screen yet; fall through to the external
+    // browser (handled below) so the user lands on the real web deal page.
 
     // /calendar/events/:id  (event-reminder push `deep_link`)
     if (segments.length >= 3 &&

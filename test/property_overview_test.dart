@@ -39,7 +39,10 @@ class _FakeApi extends ApiService {
   }
 }
 
-PropertyOverview _baseOverview({List<Placement> placements = const []}) {
+PropertyOverview _baseOverview({
+  List<Placement> placements = const [],
+  List<PortalLink> portalLinks = const [],
+}) {
   return PropertyOverview(
     id: 7,
     title: '4 Bed House',
@@ -49,6 +52,7 @@ PropertyOverview _baseOverview({List<Placement> placements = const []}) {
     priceDisplay: 'R 2 950 000',
     daysOnMarket: 14,
     placements: placements,
+    portalLinks: portalLinks,
     keyDates: const KeyDates(listed: '2026-01-10', expires: '2026-07-10'),
   );
 }
@@ -57,14 +61,14 @@ Widget _wrap(Widget child) =>
     MaterialApp(theme: ThemeData.dark(), home: child);
 
 void main() {
-  testWidgets('renders placement card with portal URL', (tester) async {
+  testWidgets('renders portal link card when live', (tester) async {
     final api = _FakeApi()
-      ..overview = _baseOverview(placements: const [
-        Placement(
-          key: 'property24',
+      ..overview = _baseOverview(portalLinks: const [
+        PortalLink(
+          portal: 'property24',
           label: 'Property24',
           url: 'https://www.property24.com/listing/123',
-          live: true,
+          status: 'live',
         ),
       ]);
 
@@ -75,12 +79,13 @@ void main() {
 
     expect(find.text('Property24'), findsOneWidget);
     expect(find.text('Live'), findsOneWidget);
-    expect(find.text('View on portal'), findsOneWidget);
+    expect(find.text('View on Property24'), findsOneWidget);
     expect(find.text('Where this listing is published'), findsOneWidget);
   });
 
-  testWidgets('shows empty state when placements is empty', (tester) async {
-    final api = _FakeApi()..overview = _baseOverview(placements: const []);
+  testWidgets('shows directive empty state when nothing is live',
+      (tester) async {
+    final api = _FakeApi()..overview = _baseOverview(portalLinks: const []);
 
     await tester.pumpWidget(_wrap(
       PropertyOverviewScreen(propertyId: 7, api: api),
@@ -88,8 +93,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.textContaining(
-          "isn't published anywhere yet"),
+      find.textContaining("isn't live anywhere yet"),
       findsOneWidget,
     );
   });

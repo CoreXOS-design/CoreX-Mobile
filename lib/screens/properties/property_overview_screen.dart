@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../config/env.dart';
 import '../../models/property_compliance.dart';
 import '../../models/property_overview.dart';
 import '../../providers/auth_provider.dart';
@@ -936,12 +937,18 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
   /// `action_url`. The authority/mandate gate opens the e-sign creator for
   /// this property; the seller-FICA gate opens the FICA creator.
   String? _overrideActionUrl(String gateKey) {
+    // Derive the web host from the configured API base (strip the trailing
+    // `/api`) so these flows follow staging/production automatically and are
+    // always HTTPS — never a hardcoded cleartext host. The backend's own
+    // `action_url` is preferred over this (see _gateRow); this is the fallback
+    // for gates the backend doesn't return an action for.
+    final webBase = Env.apiBaseUrl.replaceFirst(RegExp(r'/api/?$'), '');
     switch (gateKey) {
       case 'authority_to_market':
-        return 'http://91.99.130.85:8084/docuperfect/esign/create'
+        return '$webBase/docuperfect/esign/create'
             '?property_id=${widget.propertyId}&template_type=mandate';
       case 'fica_sellers':
-        return 'http://91.99.130.85:8084/corex/compliance/fica/create';
+        return '$webBase/corex/compliance/fica/create';
       default:
         return null;
     }
@@ -1244,9 +1251,10 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
   Widget _gateRow(PropertyCompliance c, ComplianceGate gate) {
     final action = gate.passed ? null : _actionFor(c, gate.key);
     final overrideUrl = gate.passed ? null : _overrideActionUrl(gate.key);
-    // Prefer the fixed web flow for gates that have one, keeping the
-    // backend's button label when it supplied a matching action.
-    final actionUrl = overrideUrl ?? action?.actionUrl;
+    // Prefer the backend's own action_url (authoritative, correct per
+    // environment); fall back to the locally-derived HTTPS web flow only when
+    // the backend didn't supply one.
+    final actionUrl = action?.actionUrl ?? overrideUrl;
     final actionLabel = action?.label ??
         (gate.key == 'authority_to_market'
             ? 'Send mandate for signature'

@@ -67,32 +67,42 @@ class TaskCard extends StatelessWidget {
               padding: const EdgeInsets.all(14),
               child: Row(
                 children: [
+                  // Opaque, ~44dp hit target so a tap on/near the circle
+                  // completes the task instead of falling through to the
+                  // card's open-task InkWell. The visual stays 24dp.
                   GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: onComplete,
-                    child: Container(
-                      width: 24,
-                      height: 24,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: task.status == 'done'
-                            ? _done.withValues(alpha: 0.16)
-                            : Colors.transparent,
-                        border: Border.all(
-                          color: task.isOverdue
-                              ? _overdue
-                              : task.status == 'done'
-                                  ? _done
-                                  : AppTheme.textMuted(context),
-                          width: 2,
+                    child: SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Center(
+                        child: Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: task.status == 'done'
+                                ? _done.withValues(alpha: 0.16)
+                                : Colors.transparent,
+                            border: Border.all(
+                              color: task.isOverdue
+                                  ? _overdue
+                                  : task.status == 'done'
+                                      ? _done
+                                      : AppTheme.textMuted(context),
+                              width: 2,
+                            ),
+                          ),
+                          child: task.status == 'done'
+                              ? const Icon(Icons.check_rounded,
+                                  size: 14, color: _done)
+                              : null,
                         ),
                       ),
-                      child: task.status == 'done'
-                          ? const Icon(Icons.check_rounded,
-                              size: 14, color: _done)
-                          : null,
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 4),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,

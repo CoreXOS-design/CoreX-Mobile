@@ -335,7 +335,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 32),
                         Text(
-                          'v 2026.5.25',
+                          'v1.0.0',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: CorexTokens.textMuted(context),

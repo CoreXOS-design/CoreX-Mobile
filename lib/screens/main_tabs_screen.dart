@@ -49,11 +49,17 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
       backgroundColor: AppTheme.background(context),
       appBar: AppBar(
         title: Text(_titles[_index]),
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_rounded,
-              color: AppTheme.textPrimary(context)),
-          onPressed: () => Navigator.pop(context),
-        ),
+        // Only show a back affordance when there's actually something to pop.
+        // On a root tab destination a back arrow would eject the user from the
+        // app, so suppress it (AppBar's automatic leading is also disabled).
+        automaticallyImplyLeading: false,
+        leading: Navigator.of(context).canPop()
+            ? IconButton(
+                icon: Icon(Icons.arrow_back_rounded,
+                    color: AppTheme.textPrimary(context)),
+                onPressed: () => Navigator.pop(context),
+              )
+            : null,
         actions: const [BellIcon()],
       ),
       body: IndexedStack(

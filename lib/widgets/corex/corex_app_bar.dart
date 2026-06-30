@@ -51,29 +51,32 @@ class CorexAppBar extends StatelessWidget implements PreferredSizeWidget {
                   icon: Icon(TablerIcons.qrcode,
                       color: CorexTokens.textPrimary(context)),
                 ),
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  IconButton(
-                    onPressed: onBellTap,
-                    icon: Icon(TablerIcons.bell,
-                        color: CorexTokens.textPrimary(context)),
-                  ),
-                  if (unreadBadge > 0)
-                    Positioned(
-                      top: 10,
-                      right: 10,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: t.accent,
-                          shape: BoxShape.circle,
+              // Only show the bell when a handler is wired — avoids a
+              // dead/disabled icon on surfaces without a notifications screen.
+              if (onBellTap != null)
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    IconButton(
+                      onPressed: onBellTap,
+                      icon: Icon(TablerIcons.bell,
+                          color: CorexTokens.textPrimary(context)),
+                    ),
+                    if (unreadBadge > 0)
+                      Positioned(
+                        top: 10,
+                        right: 10,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: t.accent,
+                            shape: BoxShape.circle,
+                          ),
                         ),
                       ),
-                    ),
-                ],
-              ),
+                  ],
+                ),
               const SizedBox(width: 4),
               GestureDetector(
                 onTap: onAvatarTap,

@@ -192,7 +192,7 @@ class CoreMatchGroup {
 
   factory CoreMatchGroup.fromJson(Map<String, dynamic> j) => CoreMatchGroup(
         contact: CoreMatchContact.fromJson(
-            Map<String, dynamic>.from(j['contact'] as Map)),
+            Map<String, dynamic>.from(j['contact'] as Map? ?? const {})),
         matches: (j['matches'] as List? ?? const [])
             .whereType<Map>()
             .map((e) => CoreMatchSummary.fromJson(Map<String, dynamic>.from(e)))
@@ -387,9 +387,10 @@ class CoreMatchDetail {
   factory CoreMatchDetail.fromJson(Map<String, dynamic> j) {
     final scopeRaw = j['scope'];
     return CoreMatchDetail(
-      match: CoreMatch.fromJson(Map<String, dynamic>.from(j['match'] as Map)),
+      match: CoreMatch.fromJson(
+          Map<String, dynamic>.from(j['match'] as Map? ?? const {})),
       contact: CoreMatchContact.fromJson(
-          Map<String, dynamic>.from(j['contact'] as Map)),
+          Map<String, dynamic>.from(j['contact'] as Map? ?? const {})),
       results: (j['results'] as List? ?? const [])
           .whereType<Map>()
           .map((e) => CoreMatchResult.fromJson(Map<String, dynamic>.from(e)))

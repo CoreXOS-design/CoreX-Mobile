@@ -1,0 +1,17 @@
+# Android release signing credentials.
+#
+# Copy this file to `android/key.properties` (which is gitignored) and fill in
+# the real values, then build with `flutter build appbundle --release`.
+#
+# To generate a release keystore (do this ONCE and keep the .jks safe — losing
+# it means you can never update the app under the same listing):
+#
+#   keytool -genkey -v -keystore corex-release.jks -keyalg RSA -keysize 2048 \
+#           -validity 10000 -alias corex
+#
+# storeFile may be an absolute path or relative to the android/app directory.
+
+storePassword=CHANGE_ME
+keyPassword=CHANGE_ME
+keyAlias=corex
+storeFile=corex-release.jks

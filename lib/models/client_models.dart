@@ -235,7 +235,7 @@ class ClientLoginResponse {
             .map((e) => ClientAgency.fromJson(Map<String, dynamic>.from(e)))
             .toList(),
         client: ClientProfile.fromJson(
-            Map<String, dynamic>.from(json['client'] as Map)),
+            Map<String, dynamic>.from(json['client'] as Map? ?? const {})),
       );
 }
 
@@ -425,7 +425,7 @@ class ClientMatchDetail {
   factory ClientMatchDetail.fromJson(Map<String, dynamic> json) =>
       ClientMatchDetail(
         match: ClientMatch.fromJson(
-            Map<String, dynamic>.from(json['match'] as Map)),
+            Map<String, dynamic>.from(json['match'] as Map? ?? const {})),
         results: (json['results'] as List? ?? const [])
             .whereType<Map>()
             .map((e) =>
@@ -803,7 +803,7 @@ class AgentQrRegisterResponse {
         token: json['token']?.toString() ?? '',
         message: json['message']?.toString(),
         agent: AgentQrAgent.fromJson(
-            Map<String, dynamic>.from(json['agent'] as Map)),
+            Map<String, dynamic>.from(json['agent'] as Map? ?? const {})),
         agency: json['agency'] is Map
             ? AgentQrAgency.fromJson(
                 Map<String, dynamic>.from(json['agency'] as Map))

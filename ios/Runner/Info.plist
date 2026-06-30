@@ -5,7 +5,7 @@
 		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>
-		<string>Corex Mobile</string>
+		<string>CoreX OS</string>
 		<key>CFBundleExecutable</key>
 		<string>$(EXECUTABLE_NAME)</string>
 		<key>CFBundleIdentifier</key>
@@ -53,11 +53,6 @@
 		<string>This app needs photo library access to save property images.</string>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>CoreX uses the microphone so Ellie can hear your voice commands.</string>
-		<key>NSAppTransportSecurity</key>
-		<dict>
-			<key>NSAllowsArbitraryLoads</key>
-			<true/>
-		</dict>
 		<key>UIStatusBarHidden</key>
 		<false/>
 	</dict>

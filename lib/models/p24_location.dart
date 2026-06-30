@@ -13,7 +13,9 @@ class P24Location {
 
   factory P24Location.fromJson(Map<String, dynamic> json) {
     return P24Location(
-      id: json['id'] as int,
+      id: json['id'] is num
+          ? (json['id'] as num).toInt()
+          : int.tryParse('${json['id']}') ?? 0,
       name: (json['name'] ?? '').toString(),
       p24Id: json['p24_id'] is int
           ? json['p24_id'] as int

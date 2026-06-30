@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../theme.dart';
@@ -32,50 +31,22 @@ Future<void> maybeShowCameraInfo(BuildContext context) async {
   } catch (_) {/* never block the camera on a prefs hiccup */}
 }
 
-/// The explainer dialog. A short read-lock keeps it on screen long enough to
-/// actually be read before "Got it" enables.
-class CameraInfoDialog extends StatefulWidget {
+/// The explainer dialog, shown once per user. It's dismissible (tap outside or
+/// "Got it") so it never blocks the user from getting to the camera.
+class CameraInfoDialog extends StatelessWidget {
   const CameraInfoDialog({super.key});
 
   static Future<void> show(BuildContext context) {
     return showDialog<void>(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true,
       builder: (_) => const CameraInfoDialog(),
     );
   }
 
   @override
-  State<CameraInfoDialog> createState() => _CameraInfoDialogState();
-}
-
-class _CameraInfoDialogState extends State<CameraInfoDialog> {
-  static const int _lockSeconds = 5;
-  int _remaining = _lockSeconds;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) return;
-      setState(() => _remaining--);
-      if (_remaining <= 0) t.cancel();
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final canClose = _remaining <= 0;
-    return PopScope(
-      canPop: canClose,
-      child: AlertDialog(
+    return AlertDialog(
         backgroundColor: AppTheme.surface(context),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radius),
@@ -137,11 +108,10 @@ class _CameraInfoDialogState extends State<CameraInfoDialog> {
         ),
         actions: [
           TextButton(
-            onPressed: canClose ? () => Navigator.of(context).pop() : null,
-            child: Text(canClose ? 'Got it' : 'Got it (${_remaining}s)'),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Got it'),
           ),
         ],
-      ),
     );
   }
 

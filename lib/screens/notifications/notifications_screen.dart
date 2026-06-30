@@ -58,7 +58,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         onRefresh: () => context.read<NotificationsProvider>().loadFeed(),
         child: p.loadingFeed && p.items.isEmpty
             ? const Center(child: CircularProgressIndicator())
-            : p.items.isEmpty
+            : (p.feedError != null && p.items.isEmpty)
+                ? _error(context)
+                : p.items.isEmpty
                 ? _empty(context)
                 : ListView(
                     padding: const EdgeInsets.symmetric(vertical: 8),
@@ -84,6 +86,29 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           icon: Icons.notifications_off_outlined,
           title: "You're all caught up",
           subtitle: 'Nothing new to look at right now.',
+        ),
+      ],
+    );
+  }
+
+  Widget _error(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        const SizedBox(height: 80),
+        const EmptyState(
+          icon: Icons.cloud_off_rounded,
+          title: "Couldn't load notifications",
+          subtitle: 'Check your connection and try again.',
+        ),
+        const SizedBox(height: 16),
+        Center(
+          child: OutlinedButton.icon(
+            onPressed: () =>
+                context.read<NotificationsProvider>().loadFeed(manual: true),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retry'),
+          ),
         ),
       ],
     );

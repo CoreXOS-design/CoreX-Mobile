@@ -16,7 +16,6 @@ import '../../widgets/client/client_drawer.dart';
 import '../../widgets/corex/corex_app_bar.dart';
 import '../../widgets/corex/corex_card.dart';
 import '../../widgets/corex/corex_module_tile.dart';
-import 'client_coming_soon_screen.dart';
 import 'client_consent_screen.dart';
 import 'client_matches_list_screen.dart';
 import 'client_profile_screen.dart';
@@ -78,7 +77,6 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                     userInitials: initials,
                     unreadBadge: 0,
                     onMenuTap: () => Scaffold.of(ctx).openDrawer(),
-                    onBellTap: () => _comingSoon(ctx, 'Notifications'),
                     onAvatarTap: () => _push(ctx, const ClientProfileScreen()),
                   ),
                 ),
@@ -193,14 +191,6 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
           onTap: () => _push(context, const ClientConsentScreen()),
         ),
       ],
-    );
-  }
-
-  void _comingSoon(BuildContext context, String feature) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ClientComingSoonScreen(feature: feature),
-      ),
     );
   }
 
@@ -716,6 +706,9 @@ class _AgentContactCard extends StatelessWidget {
         radius: 30,
         backgroundColor: t.accentSoft,
         backgroundImage: NetworkImage(photo),
+        // Swallow load failures gracefully — fall back to the accent circle
+        // instead of throwing and logging an image exception.
+        onBackgroundImageError: (_, __) {},
       );
     }
     final initials = a != null ? _initialsOf(a.fullName) : null;
