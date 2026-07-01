@@ -7,6 +7,25 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:645211503812:android:0bfaf2f5b3c8913a7b9d91",
+        "android_client_info": {
+          "package_name": "za.co.corex_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBo2aQGnCip4UQiNzqiL-bEfh8ykplebcQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:645211503812:android:de33f4c8e3d4ef8b7b9d91",
         "android_client_info": {
           "package_name": "za.co.hfcoastal.corex_mobile"
