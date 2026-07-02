@@ -31,11 +31,16 @@ class EventClassOption {
   });
 
   factory EventClassOption.fromJson(Map<String, dynamic> json) {
+    // The backend's `calendarOptions` keys the class as `value`; older/parity
+    // shapes use `event_class`. Accept either so the picker never comes up empty.
+    final cls = _asString(json['event_class']).isNotEmpty
+        ? _asString(json['event_class'])
+        : _asString(json['value']);
     return EventClassOption(
-      eventClass: _asString(json['event_class']),
+      eventClass: cls,
       label: _asString(json['label']).isNotEmpty
           ? _asString(json['label'])
-          : _asString(json['event_class']),
+          : cls,
       // Default to true so an unknown/missing flag never silently blocks the
       // multi-property picker — the backend also caps single-property classes.
       allowMultipleProperties: json['allow_multiple_properties'] == null
@@ -75,23 +80,38 @@ class CalendarOptions {
     this.attendeeRoles = const [],
   });
 
+  /// Contact roles the backend accepts on create when the server doesn't ship
+  /// its own `attendee_roles` list. Mirrors the create validator's enum
+  /// (`attendee`, `buyer_contact`, `seller_contact`); `agent_contact` is
+  /// auto-assigned server-side for agents and never offered for contacts.
+  static const List<AttendeeRoleOption> defaultAttendeeRoles = [
+    AttendeeRoleOption(key: 'attendee', label: 'Attendee'),
+    AttendeeRoleOption(key: 'buyer_contact', label: 'Buyer'),
+    AttendeeRoleOption(key: 'seller_contact', label: 'Seller'),
+  ];
+
   factory CalendarOptions.fromJson(Map<String, dynamic> json) {
     final priorities = (json['priorities'] as List?)
             ?.map((e) => e.toString())
             .toList() ??
         const ['low', 'normal', 'high', 'critical'];
+    // The backend emits `categories`; parity/older shapes use `classes`.
+    final rawClasses = (json['classes'] ?? json['categories']) as List? ?? const [];
+    final roles = (json['attendee_roles'] as List? ?? const [])
+        .whereType<Map>()
+        .map((e) => AttendeeRoleOption.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
     return CalendarOptions(
-      classes: (json['classes'] as List? ?? const [])
+      classes: rawClasses
           .whereType<Map>()
           .map((e) => EventClassOption.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
       priorities: priorities.isEmpty
           ? const ['low', 'normal', 'high', 'critical']
           : priorities,
-      attendeeRoles: (json['attendee_roles'] as List? ?? const [])
-          .whereType<Map>()
-          .map((e) => AttendeeRoleOption.fromJson(Map<String, dynamic>.from(e)))
-          .toList(),
+      // Fall back to the built-in set when the server omits roles, so the
+      // contact-role picker still works instead of silently disappearing.
+      attendeeRoles: roles.isEmpty ? defaultAttendeeRoles : roles,
     );
   }
 }
