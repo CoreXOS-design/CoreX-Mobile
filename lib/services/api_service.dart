@@ -230,11 +230,11 @@ class ApiService {
 
   // --- Agent visibility ---
 
-  /// `GET /mobile/visibility` — per-module data-visibility descriptor.
+  /// `GET /v1/mobile/visibility` — per-module data-visibility descriptor.
   /// Throws on any non-200 so the caller can apply its safe fallback.
   Future<VisibilityDescriptor> getVisibility() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/visibility'),
+      Uri.parse('$baseUrl/v1/mobile/visibility'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -1246,14 +1246,14 @@ class ApiService {
 
   Future<List<Property>> getProperties({AgentFilter? agentFilter}) async {
     final agentValue = agentFilter?.queryValue;
-    final uri = Uri.parse('$baseUrl/mobile/properties').replace(
+    final uri = Uri.parse('$baseUrl/v1/mobile/properties').replace(
       queryParameters: {
         // Mine → omitted; All → '' ; specific agent → '<id>'.
         if (agentValue != null) 'agent_id': agentValue,
       },
     );
     final response = await http.get(
-      agentValue != null ? uri : Uri.parse('$baseUrl/mobile/properties'),
+      agentValue != null ? uri : Uri.parse('$baseUrl/v1/mobile/properties'),
       headers: await _headers(),
     ).timeout(_timeout);
 

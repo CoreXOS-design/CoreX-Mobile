@@ -1,5 +1,10 @@
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  exclude:
+    - third_party/**
+    - tool/**
+
 linter:
   rules:
     prefer_const_constructors: true

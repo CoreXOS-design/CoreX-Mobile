@@ -16,6 +16,7 @@ jobs:
         with:
           channel: stable
 
+      - run: cp .env.example .env
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
@@ -35,6 +36,7 @@ jobs:
         with:
           channel: stable
 
+      - run: cp .env.example .env
       - run: flutter pub get
       - run: flutter build ios --release --no-codesign
 

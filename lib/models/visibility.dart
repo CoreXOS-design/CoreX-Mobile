@@ -1,6 +1,6 @@
 // Agent data-visibility descriptor (mirrors the web).
 //
-// Returned by `GET /api/mobile/visibility`. Tells the app, per module,
+// Returned by `GET /api/v1/mobile/visibility`. Tells the app, per module,
 // whether the signed-in user may filter the list by teammate and which
 // agents are in scope.
 
