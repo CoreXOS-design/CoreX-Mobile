@@ -4,27 +4,32 @@ workflows:
     instance_type: mac_mini_m2
     max_build_duration: 60
     integrations:
-      # Name of the App Store Connect API key you add in Codemagic:
+      # Exact name of the App Store Connect API key integration in Codemagic:
       #   Codemagic → Teams/User settings → Integrations → App Store Connect.
-      # Replace "CoreX ASC" with the exact name you give that integration.
       app_store_connect: CoreX ASC
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: za.co.corexMobile
       flutter: stable
       xcode: latest
       cocoapods: default
+      vars:
+        BUNDLE_ID: "za.co.corexMobile"
     scripts:
       - name: Create .env (required asset)
         script: cp .env.example .env
       - name: Get Flutter packages
         script: flutter pub get
       - name: Install CocoaPods dependencies
+        script: find . -name "Podfile" -execdir pod install \;
+      - name: Set up code signing (fetch or create cert + profile)
         script: |
-          find . -name "Podfile" -execdir pod install \;
-      - name: Set up provisioning profiles
-        script: xcode-project use-profiles
+          keychain initialize
+          # --create registers the bundle id / creates the distribution
+          # certificate and App Store provisioning profile if they don't exist.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
       - name: Flutter build ipa
         script: |
           flutter build ipa --release \
@@ -35,6 +40,6 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-        # Uploads to TestFlight only. Flip to true later to auto-submit for App Store review.
+        # Uploads to TestFlight. Flip to true later to auto-submit for App Store review.
         submit_to_testflight: true
         submit_to_app_store: false
