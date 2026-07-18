@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../providers/auth_provider.dart';
-import '../../providers/feature_flags_provider.dart';
 import '../../providers/notifications_provider.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
@@ -88,8 +87,6 @@ class HomeScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 18),
                         CorexEllieCard(
-                          aiEnabled:
-                              context.watch<FeatureFlagsProvider>().aiEnabled,
                           onTap: () => _push(context, const EllieScreen()),
                         ),
                         const SizedBox(height: 16),

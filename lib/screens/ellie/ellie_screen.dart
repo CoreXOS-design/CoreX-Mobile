@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../providers/auth_provider.dart';
-import '../../providers/feature_flags_provider.dart';
 import '../../services/ai_api.dart';
 import '../../services/api_service.dart';
 import '../../services/ellie_voice_recorder.dart';
@@ -37,12 +36,6 @@ class _EllieScreenState extends State<EllieScreen>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
-    // Make sure flags are fresh — if the user just had AI enabled, this
-    // ensures the disabled-state copy doesn't linger.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      context.read<FeatureFlagsProvider>().ensureFresh();
-    });
   }
 
   @override
@@ -50,16 +43,6 @@ class _EllieScreenState extends State<EllieScreen>
     _pulse.dispose();
     _recorder.dispose();
     super.dispose();
-  }
-
-  bool _hasPermission(AuthProvider auth) {
-    final perms = auth.user?['permissions'];
-    if (perms is List) return perms.contains('use_ellie_voice');
-    if (perms is Map) {
-      final v = perms['use_ellie_voice'];
-      return v == true || v == 1 || v == '1';
-    }
-    return true;
   }
 
   bool _pointerDown = false;
@@ -193,10 +176,11 @@ class _EllieScreenState extends State<EllieScreen>
       if (!mounted) return;
       setState(() => _phase = _Phase.idle);
       if (e.statusCode == 403) {
-        await context.read<FeatureFlagsProvider>().refresh();
-        if (!mounted) return;
+        // Per-user permission denied (admin restricted this user). Not an
+        // agency gate — just tell them and stop.
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ellie voice is not available.')),
+          const SnackBar(
+              content: Text("You don't have permission to use Ellie voice.")),
         );
         return;
       }
@@ -220,10 +204,9 @@ class _EllieScreenState extends State<EllieScreen>
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final flags = context.watch<FeatureFlagsProvider>();
-    final allowed =
-        auth.isLoggedIn && flags.aiVoice && _hasPermission(auth);
+    // AI is available to everyone — no agency or per-user gate. Ellie voice is
+    // always active for any signed-in user who reaches this screen.
+    final allowed = context.watch<AuthProvider>().isLoggedIn;
 
     return Scaffold(
       backgroundColor: CorexTokens.pageBase(context),

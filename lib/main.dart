@@ -12,7 +12,6 @@ import 'providers/branding_provider.dart';
 import 'providers/client_matches_provider.dart';
 import 'providers/client_session_provider.dart';
 import 'providers/dashboard_provider.dart';
-import 'providers/feature_flags_provider.dart';
 import 'providers/notifications_provider.dart';
 import 'providers/portal_leads_provider.dart';
 import 'providers/property_provider.dart';
@@ -111,7 +110,6 @@ class CoreXApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ClientMatchesProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => VisibilityProvider()),
-        ChangeNotifierProvider(create: (_) => FeatureFlagsProvider()),
       ],
       child: Consumer2<ThemeProvider, BrandingProvider>(
         builder: (context, themeProvider, brandingProvider, _) {
@@ -174,7 +172,6 @@ class _AppBootstrapState extends State<AppBootstrap> {
         // falls back silently to own-only with no filter UI.
         context.read<VisibilityProvider>().refresh();
         context.read<ThemeProvider>().syncFromServer();
-        context.read<FeatureFlagsProvider>().refresh();
       });
     } else if (!auth.isLoggedIn && _brandingPulled) {
       _brandingPulled = false;
@@ -183,7 +180,6 @@ class _AppBootstrapState extends State<AppBootstrap> {
         // Tear down every per-user provider so the next account that signs in
         // on this device can never see the previous user's cached state.
         context.read<VisibilityProvider>().reset();
-        context.read<FeatureFlagsProvider>().reset();
         context.read<DashboardProvider>().reset();
         context.read<NotificationsProvider>().reset();
         context.read<PortalLeadsProvider>().reset();

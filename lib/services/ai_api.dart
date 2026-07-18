@@ -28,23 +28,6 @@ class AiApi {
     };
   }
 
-  // --- Feature flags ---
-
-  Future<MobileFeatureFlags> getFeatures() async {
-    final url = '$_baseUrl/v1/mobile/features';
-    final headers = await _headers();
-    debugPrint('[ai_api] GET $url');
-    final res = await http
-        .get(Uri.parse(url), headers: headers)
-        .timeout(_timeout);
-    debugPrint('[ai_api] ← ${res.statusCode}');
-    if (res.statusCode == 200) {
-      return MobileFeatureFlags.fromJson(
-          Map<String, dynamic>.from(jsonDecode(res.body) as Map));
-    }
-    throw ApiException(res.statusCode, 'Failed to load mobile features');
-  }
-
   // --- Ellie voice ---
 
   Future<EllieVoiceResult> sendVoice(File audio) async {
@@ -139,33 +122,6 @@ class AiApi {
 }
 
 // ---------- Models ----------
-
-class MobileFeatureFlags {
-  final bool aiVoice;
-  final bool aiImageRecognition;
-  final int? agencyId;
-  final int? userId;
-
-  const MobileFeatureFlags({
-    required this.aiVoice,
-    required this.aiImageRecognition,
-    this.agencyId,
-    this.userId,
-  });
-
-  static const empty = MobileFeatureFlags(
-    aiVoice: false,
-    aiImageRecognition: false,
-  );
-
-  factory MobileFeatureFlags.fromJson(Map<String, dynamic> j) =>
-      MobileFeatureFlags(
-        aiVoice: j['aiVoice'] == true,
-        aiImageRecognition: j['aiImageRecognition'] == true,
-        agencyId: (j['agencyId'] is num) ? (j['agencyId'] as num).toInt() : null,
-        userId: (j['userId'] is num) ? (j['userId'] as num).toInt() : null,
-      );
-}
 
 class EllieVoiceResult {
   final String transcript;

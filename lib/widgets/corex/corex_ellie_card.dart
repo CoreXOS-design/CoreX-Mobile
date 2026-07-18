@@ -10,15 +10,10 @@ import 'corex_card.dart';
 /// of inspiration combined into one tappable card. The daily line is chosen
 /// deterministically by calendar day, cycling every 100 days.
 ///
-/// When [aiEnabled] is false (the agency's Advanced AI Features are off) the
-/// "Meet Ellie" intro and tap-through are dropped, but the daily quote stays —
-/// it's a standalone bit of inspiration, not an AI feature.
+/// AI is available to every agency, so the "Meet Ellie" intro and tap-through
+/// are always shown.
 class CorexEllieCard extends StatelessWidget {
   final VoidCallback onTap;
-
-  /// Whether the agency's Advanced AI Features are enabled. Gates the
-  /// "Meet Ellie" intro header and the tap-through to the Ellie screen.
-  final bool aiEnabled;
 
   /// Overridable for testing; defaults to today.
   final DateTime? date;
@@ -26,7 +21,6 @@ class CorexEllieCard extends StatelessWidget {
   const CorexEllieCard({
     super.key,
     required this.onTap,
-    this.aiEnabled = true,
     this.date,
   });
 
@@ -37,54 +31,52 @@ class CorexEllieCard extends StatelessWidget {
 
     return CorexCard(
       accent: true,
-      onTap: aiEnabled ? onTap : null,
+      onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (aiEnabled) ...[
-            Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: t.accentSoft,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(TablerIcons.sparkles, color: t.accent, size: 22),
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: t.accentSoft,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Meet Ellie',
-                        style: TextStyle(
-                          color: CorexTokens.textPrimary(context),
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
+                child: Icon(TablerIcons.sparkles, color: t.accent, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Meet Ellie',
+                      style: TextStyle(
+                        color: CorexTokens.textPrimary(context),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Your AI assistant for CoreX',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: CorexTokens.textSecondary(context),
-                          fontSize: 12,
-                        ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Your AI assistant for CoreX',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: CorexTokens.textSecondary(context),
+                        fontSize: 12,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Divider(height: 1, thickness: 1, color: t.accentSoft),
-            const SizedBox(height: 14),
-          ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Divider(height: 1, thickness: 1, color: t.accentSoft),
+          const SizedBox(height: 14),
           Text(
             quote,
             style: TextStyle(

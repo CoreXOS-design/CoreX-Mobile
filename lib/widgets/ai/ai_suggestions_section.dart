@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../config/env.dart';
-import '../../providers/feature_flags_provider.dart';
 import '../../services/ai_api.dart';
 import '../../services/api_service.dart';
 import 'ai_badge.dart';
@@ -220,10 +218,8 @@ class _AiSuggestionsSectionState extends State<AiSuggestionsSection> {
 
   @override
   Widget build(BuildContext context) {
-    final flags = context.watch<FeatureFlagsProvider>();
-    if (!flags.aiImageRecognition) return const SizedBox.shrink();
-
     final c = widget.controller;
+
     final hasContent =
         c.data.features.isNotEmpty || c.data.spaces.isNotEmpty;
 
@@ -382,9 +378,6 @@ class _AiSuggestionsSectionState extends State<AiSuggestionsSection> {
       if (!mounted) return;
       // Capture before any await so we don't touch `context` across the gap.
       final messenger = ScaffoldMessenger.of(context);
-      if (e.statusCode == 403) {
-        await context.read<FeatureFlagsProvider>().refresh();
-      }
       messenger.showSnackBar(
         SnackBar(content: Text(e.message)),
       );
