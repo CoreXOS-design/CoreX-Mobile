@@ -8,6 +8,10 @@ workflows:
       #   Codemagic → Teams/User settings → Integrations → App Store Connect.
       app_store_connect: CoreX ASC
     environment:
+      groups:
+        # Codemagic env-var group holding CERTIFICATE_PRIVATE_KEY (the RSA key
+        # used to create/reuse the iOS distribution certificate).
+        - ios_signing
       flutter: stable
       xcode: latest
       cocoapods: default
@@ -27,6 +31,7 @@ workflows:
           # certificate and App Store provisioning profile if they don't exist.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
           keychain add-certificates
           xcode-project use-profiles
