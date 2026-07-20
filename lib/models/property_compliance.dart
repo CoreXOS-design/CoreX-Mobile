@@ -1,6 +1,6 @@
 // Compliance + contact-linking models for the property Overview screen.
-// Backed by `/api/mobile/properties/{id}/compliance` and
-// `/api/mobile/properties/{id}/contacts`.
+// Backed by `/api/v1/mobile/properties/{id}/compliance` and
+// `/api/v1/mobile/properties/{id}/contacts`.
 
 class ComplianceGate {
   final String key;

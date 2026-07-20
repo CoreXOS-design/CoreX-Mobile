@@ -6,7 +6,7 @@ import '../theme.dart';
 
 /// Loader signatures for the cascade so the picker can be backed by either the
 /// agent [ApiService] (default) or the client session — both expose the same
-/// `/mobile/p24/*` cascade, just with a different auth token.
+/// `/v1/mobile/p24/*` cascade, just with a different auth token.
 typedef P24ProvincesLoader = Future<List<P24Location>> Function(String q);
 typedef P24CitiesLoader = Future<List<P24Location>> Function(
     int provinceId, String q);
@@ -20,7 +20,7 @@ typedef P24SuburbsLoader = Future<List<P24Location>> Function(
 /// when the agent switches province/city to add more, since a wishlist can
 /// target suburbs across multiple cities.
 ///
-/// Backed by `/api/mobile/p24/*` — the SAME cascade the property create
+/// Backed by `/api/v1/mobile/p24/*` — the SAME cascade the property create
 /// screen uses, so the suburb `id` submitted as `p24_suburb_ids` is
 /// identical to the `p24_suburb_id` stored on a property —
 /// the same value submitted as `p24_suburb_ids` and matched against

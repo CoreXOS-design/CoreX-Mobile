@@ -599,7 +599,7 @@ class ClientAuthService {
 
   // -------------------- Property24 location cascade --------------------
 
-  // Reuses the SAME `/mobile/p24/*` cascade the agent property-create screen
+  // Reuses the SAME `/v1/mobile/p24/*` cascade the agent property-create screen
   // uses, but authenticated with the client session token instead of the agent
   // token (the agent's ApiService reads `auth_token` from SharedPreferences,
   // which a signed-in client never has — that was why the client suburb picker
@@ -608,7 +608,7 @@ class ClientAuthService {
   // suburbs line up with agent property suburbs.
   Future<List<P24Location>> _getP24(
       String path, Map<String, String> qp) async {
-    final uri = Uri.parse('$_baseUrl/mobile/p24/$path').replace(
+    final uri = Uri.parse('$_baseUrl/v1/mobile/p24/$path').replace(
       queryParameters: {
         for (final e in qp.entries)
           if (e.value.isNotEmpty) e.key: e.value,

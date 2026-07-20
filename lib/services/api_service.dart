@@ -1242,7 +1242,7 @@ class ApiService {
       return _cachedPropertyOptions!;
     }
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/properties/options'),
+      Uri.parse('$baseUrl/v1/mobile/properties/options'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -1283,7 +1283,7 @@ class ApiService {
 
   Future<Property> getProperty(int id) async {
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/properties/$id'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$id'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -1304,7 +1304,7 @@ class ApiService {
   // --- Property24 location cascade ---
 
   Future<List<P24Location>> _getP24(String path, Map<String, String> qp) async {
-    final uri = Uri.parse('$baseUrl/mobile/p24/$path')
+    final uri = Uri.parse('$baseUrl/v1/mobile/p24/$path')
         .replace(queryParameters: {
       for (final e in qp.entries)
         if (e.value.isNotEmpty) e.key: e.value,
@@ -1333,7 +1333,7 @@ class ApiService {
       _getP24('suburbs', {'city_id': '$cityId', 'q': q});
 
   // NOTE: the Core Matches / Buyer Wishlist suburb picker uses the same
-  // `/mobile/p24/*` cascade above (getP24Provinces/Cities/Suburbs). The
+  // `/v1/mobile/p24/*` cascade above (getP24Provinces/Cities/Suburbs). The
   // suburb `id` it returns is what gets submitted as `p24_suburb_ids`, and
   // is the same value stored as `p24_suburb_id` on a property — so a
   // match's suburbs always line up with property suburbs.
@@ -1342,7 +1342,7 @@ class ApiService {
     final reqBody = jsonEncode(data);
     if (kDebugMode) debugPrint('[createProperty] body: $reqBody');
     final response = await http.post(
-      Uri.parse('$baseUrl/mobile/properties'),
+      Uri.parse('$baseUrl/v1/mobile/properties'),
       headers: await _headers(),
       body: reqBody,
     ).timeout(_timeout);
@@ -1366,7 +1366,7 @@ class ApiService {
     final reqBody = jsonEncode(data);
     if (kDebugMode) debugPrint('[updateProperty] body: $reqBody');
     final response = await http.put(
-      Uri.parse('$baseUrl/mobile/properties/$id'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$id'),
       headers: await _headers(),
       body: reqBody,
     ).timeout(_timeout);
@@ -1455,7 +1455,7 @@ class ApiService {
 
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/mobile/properties/spaces/catalog'),
+        Uri.parse('$baseUrl/v1/mobile/properties/spaces/catalog'),
         headers: await _headers(),
       ).timeout(_timeout);
 
@@ -1483,7 +1483,7 @@ class ApiService {
 
   Future<PropertySpacesData> getPropertySpaces(int id) async {
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/properties/$id/spaces'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$id/spaces'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -1497,7 +1497,7 @@ class ApiService {
   Future<PropertySpacesData> updatePropertySpaces(
       int id, Map<String, dynamic> payload) async {
     final response = await http.put(
-      Uri.parse('$baseUrl/mobile/properties/$id/spaces'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$id/spaces'),
       headers: await _headers(),
       body: jsonEncode(payload),
     ).timeout(_timeout);
@@ -1556,7 +1556,7 @@ class ApiService {
     }
 
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/properties/$id/overview'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$id/overview'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -1597,7 +1597,7 @@ class ApiService {
 
   Future<PropertyCompliance> getPropertyCompliance(int id) async {
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/properties/$id/compliance'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$id/compliance'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -1616,7 +1616,7 @@ class ApiService {
   /// `marketing_blocked` response so the caller can re-render the gates.
   Future<PropertyCompliance> sendToMarket(int id) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/mobile/properties/$id/compliance/send-to-market'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$id/compliance/send-to-market'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -1652,7 +1652,7 @@ class ApiService {
 
   Future<List<PropertyContact>> getPropertyContacts(int id) async {
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/properties/$id/contacts'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$id/contacts'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -1674,7 +1674,7 @@ class ApiService {
   /// Throws [DuplicateContactException] on a 422 carrying `duplicate_id`.
   Future<void> addPropertyContact(int id, Map<String, dynamic> body) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/mobile/properties/$id/contacts'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$id/contacts'),
       headers: await _headers(),
       body: jsonEncode(body),
     ).timeout(_timeout);
@@ -1711,7 +1711,7 @@ class ApiService {
   /// Unlinks (does not delete) a contact from a property.
   Future<void> deletePropertyContact(int id, int contactId) async {
     final response = await http.delete(
-      Uri.parse('$baseUrl/mobile/properties/$id/contacts/$contactId'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$id/contacts/$contactId'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -1730,7 +1730,7 @@ class ApiService {
 
   Future<GalleryTagsData> addGalleryTag(int propertyId, String tag) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/mobile/properties/$propertyId/gallery/tags'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$propertyId/gallery/tags'),
       headers: await _headers(),
       body: jsonEncode({'tag': tag}),
     ).timeout(_timeout);
@@ -1764,7 +1764,7 @@ class ApiService {
 
   Future<GalleryTagsData> deleteGalleryTag(int propertyId, String tag) async {
     final response = await http.delete(
-      Uri.parse('$baseUrl/mobile/properties/$propertyId/gallery/tags'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$propertyId/gallery/tags'),
       headers: await _headers(),
       body: jsonEncode({'tag': tag}),
     ).timeout(_timeout);
@@ -1781,7 +1781,7 @@ class ApiService {
 
   Future<GalleryTagsData> getGalleryTags(int propertyId) async {
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/properties/$propertyId/gallery/tags'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$propertyId/gallery/tags'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -1835,7 +1835,7 @@ class ApiService {
     final token = await getToken();
     final request = http.MultipartRequest(
       'POST',
-      Uri.parse('$baseUrl/mobile/properties/$propertyId/images'),
+      Uri.parse('$baseUrl/v1/mobile/properties/$propertyId/images'),
     );
     request.headers['Accept'] = 'application/json';
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
@@ -2093,7 +2093,7 @@ class ApiService {
       // All → '' ; specific agent → '<id>'.
       if (agentValue != null) 'agent_id': agentValue,
     };
-    final uri = Uri.parse('$baseUrl/mobile/contacts').replace(queryParameters: qp);
+    final uri = Uri.parse('$baseUrl/v1/mobile/contacts').replace(queryParameters: qp);
     final response = await http.get(uri, headers: await _headers()).timeout(_timeout);
 
     if (response.statusCode == 200) {
@@ -2111,7 +2111,7 @@ class ApiService {
 
   Future<Contact> getContact(int id) async {
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/contacts/$id'),
+      Uri.parse('$baseUrl/v1/mobile/contacts/$id'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -2157,7 +2157,7 @@ class ApiService {
 
   Future<ContactConsentData> getContactConsent(int id) async {
     final response = await http
-        .get(Uri.parse('$baseUrl/mobile/contacts/$id/consent'),
+        .get(Uri.parse('$baseUrl/v1/mobile/contacts/$id/consent'),
             headers: await _headers())
         .timeout(_timeout);
     if (response.statusCode == 200) {
@@ -2173,7 +2173,7 @@ class ApiService {
   Future<ContactConsentData> giveContactConsent(
       int id, String consentType, String method) async {
     final response = await http
-        .post(Uri.parse('$baseUrl/mobile/contacts/$id/consent'),
+        .post(Uri.parse('$baseUrl/v1/mobile/contacts/$id/consent'),
             headers: await _headers(),
             body: jsonEncode({'consent_type': consentType, 'method': method}))
         .timeout(_timeout);
@@ -2192,7 +2192,7 @@ class ApiService {
   Future<ContactConsentData> revokeContactConsent(int id, String consentType,
       {String? reason}) async {
     final response = await http
-        .post(Uri.parse('$baseUrl/mobile/contacts/$id/consent/revoke'),
+        .post(Uri.parse('$baseUrl/v1/mobile/contacts/$id/consent/revoke'),
             headers: await _headers(),
             body: jsonEncode({
               'consent_type': consentType,
@@ -2213,7 +2213,7 @@ class ApiService {
 
   Future<ContactDriveData> getContactDrive(int id) async {
     final response = await http
-        .get(Uri.parse('$baseUrl/mobile/contacts/$id/drive'),
+        .get(Uri.parse('$baseUrl/v1/mobile/contacts/$id/drive'),
             headers: await _headers())
         .timeout(_timeout);
     if (response.statusCode == 200) {
@@ -2232,7 +2232,7 @@ class ApiService {
     final token = await getToken();
     final request = http.MultipartRequest(
       'POST',
-      Uri.parse('$baseUrl/mobile/contacts/$id/drive'),
+      Uri.parse('$baseUrl/v1/mobile/contacts/$id/drive'),
     );
     request.headers['Accept'] = 'application/json';
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
@@ -2287,7 +2287,7 @@ class ApiService {
         'property_id': propertyId,
     };
     final response = await http
-        .put(Uri.parse('$baseUrl/mobile/contacts/$id/drive/$docId'),
+        .put(Uri.parse('$baseUrl/v1/mobile/contacts/$id/drive/$docId'),
             headers: await _headers(), body: jsonEncode(payload))
         .timeout(_timeout);
     if (response.statusCode == 200) {
@@ -2309,7 +2309,7 @@ class ApiService {
   Future<DownloadedFile> downloadContactDocument(
       int id, int docId, String fallbackName) async {
     final response = await http
-        .get(Uri.parse('$baseUrl/mobile/contacts/$id/drive/$docId/download'),
+        .get(Uri.parse('$baseUrl/v1/mobile/contacts/$id/drive/$docId/download'),
             headers: await _headers())
         .timeout(_timeout);
     if (response.statusCode == 200) {
@@ -2336,7 +2336,7 @@ class ApiService {
 
   Future<void> deleteContactDocument(int id, int docId) async {
     final response = await http
-        .delete(Uri.parse('$baseUrl/mobile/contacts/$id/drive/$docId'),
+        .delete(Uri.parse('$baseUrl/v1/mobile/contacts/$id/drive/$docId'),
             headers: await _headers())
         .timeout(_timeout);
     if (response.statusCode == 200 || response.statusCode == 204) return;
@@ -2349,7 +2349,7 @@ class ApiService {
 
   Future<ContactFicaData> getContactFica(int id) async {
     final response = await http
-        .get(Uri.parse('$baseUrl/mobile/contacts/$id/fica'),
+        .get(Uri.parse('$baseUrl/v1/mobile/contacts/$id/fica'),
             headers: await _headers())
         .timeout(_timeout);
     if (response.statusCode == 200) {
@@ -2364,7 +2364,7 @@ class ApiService {
 
   Future<List<ContactType>> getContactOptions() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/contacts/options'),
+      Uri.parse('$baseUrl/v1/mobile/contacts/options'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -2381,7 +2381,7 @@ class ApiService {
 
   Future<Contact> createContact(Map<String, dynamic> body) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/mobile/contacts'),
+      Uri.parse('$baseUrl/v1/mobile/contacts'),
       headers: await _headers(),
       body: jsonEncode(body),
     ).timeout(_timeout);
@@ -2411,7 +2411,7 @@ class ApiService {
 
   Future<Contact> updateContact(int id, Map<String, dynamic> body) async {
     final response = await http.put(
-      Uri.parse('$baseUrl/mobile/contacts/$id'),
+      Uri.parse('$baseUrl/v1/mobile/contacts/$id'),
       headers: await _headers(),
       body: jsonEncode(body),
     ).timeout(_timeout);
@@ -2429,7 +2429,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> whatsappContact(int id) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/mobile/contacts/$id/whatsapp'),
+      Uri.parse('$baseUrl/v1/mobile/contacts/$id/whatsapp'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -2442,7 +2442,7 @@ class ApiService {
 
   Future<ContactMatch> createMatch(int contactId, Map<String, dynamic> body) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/mobile/contacts/$contactId/matches'),
+      Uri.parse('$baseUrl/v1/mobile/contacts/$contactId/matches'),
       headers: await _headers(),
       body: jsonEncode(body),
     ).timeout(_timeout);
@@ -2472,7 +2472,7 @@ class ApiService {
 
   Future<List<CoreMatchGroup>> listCoreMatches() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/core-matches'),
+      Uri.parse('$baseUrl/v1/mobile/core-matches'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -2489,7 +2489,7 @@ class ApiService {
 
   Future<CoreMatchDetail> getCoreMatch(int id,
       {bool showOtherAgents = false}) async {
-    final uri = Uri.parse('$baseUrl/mobile/core-matches/$id').replace(
+    final uri = Uri.parse('$baseUrl/v1/mobile/core-matches/$id').replace(
       queryParameters: showOtherAgents ? {'show_other_agents': '1'} : null,
     );
     final response =
@@ -2504,7 +2504,7 @@ class ApiService {
 
   Future<bool> getCoreMatchAllowCrossAgent() async {
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/core-matches/settings'),
+      Uri.parse('$baseUrl/v1/mobile/core-matches/settings'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -2517,7 +2517,7 @@ class ApiService {
 
   Future<CoreMatch> updateCoreMatch(int id, Map<String, dynamic> body) async {
     final response = await http.put(
-      Uri.parse('$baseUrl/mobile/core-matches/$id'),
+      Uri.parse('$baseUrl/v1/mobile/core-matches/$id'),
       headers: await _headers(),
       body: jsonEncode(body),
     ).timeout(_timeout);
@@ -2535,7 +2535,7 @@ class ApiService {
 
   Future<void> setCoreMatchStatus(int id, String status) async {
     final response = await http.patch(
-      Uri.parse('$baseUrl/mobile/core-matches/$id/status'),
+      Uri.parse('$baseUrl/v1/mobile/core-matches/$id/status'),
       headers: await _headers(),
       body: jsonEncode({'status': status}),
     ).timeout(_timeout);
@@ -2557,7 +2557,7 @@ class ApiService {
       {String? reason}) async {
     final hasReason = reason != null && reason.trim().isNotEmpty;
     final response = await http.post(
-      Uri.parse('$baseUrl/mobile/core-matches/$matchId/hide/$propertyId'),
+      Uri.parse('$baseUrl/v1/mobile/core-matches/$matchId/hide/$propertyId'),
       headers: await _headers(),
       body: hasReason ? jsonEncode({'reason': reason.trim()}) : null,
     ).timeout(_timeout);
@@ -2578,7 +2578,7 @@ class ApiService {
 
   Future<WhatsAppShare> previewMatchWhatsApp(int matchId) async {
     final response = await http.get(
-      Uri.parse('$baseUrl/mobile/core-matches/$matchId/share-whatsapp'),
+      Uri.parse('$baseUrl/v1/mobile/core-matches/$matchId/share-whatsapp'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -2591,7 +2591,7 @@ class ApiService {
 
   Future<WhatsAppShare> sendMatchWhatsApp(int matchId, String message) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/mobile/core-matches/$matchId/share-whatsapp'),
+      Uri.parse('$baseUrl/v1/mobile/core-matches/$matchId/share-whatsapp'),
       headers: await _headers(),
       body: jsonEncode({'message': message}),
     ).timeout(_timeout);
@@ -2605,7 +2605,7 @@ class ApiService {
 
   Future<void> deleteCoreMatch(int id) async {
     final response = await http.delete(
-      Uri.parse('$baseUrl/mobile/core-matches/$id'),
+      Uri.parse('$baseUrl/v1/mobile/core-matches/$id'),
       headers: await _headers(),
     ).timeout(_timeout);
 
@@ -2975,7 +2975,7 @@ class MarketingBlockedException extends ApiException {
       : super(422, message);
 }
 
-/// Server returned 422 with `duplicate_id` from POST /mobile/contacts —
+/// Server returned 422 with `duplicate_id` from POST /v1/mobile/contacts —
 /// caller should offer to open the existing contact instead of erroring.
 class DuplicateContactException extends ApiException {
   final int duplicateId;

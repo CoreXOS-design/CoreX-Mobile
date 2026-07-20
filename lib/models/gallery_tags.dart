@@ -1,4 +1,4 @@
-/// Response of `GET /api/mobile/properties/{id}/gallery/tags`.
+/// Response of `GET /api/v1/mobile/properties/{id}/gallery/tags`.
 ///
 /// - [availableTags] is the canonical ordered list of tags the agent may use
 ///   when uploading to this property. Derived server-side from the property's
@@ -54,7 +54,7 @@ class GalleryTagsData {
       );
 }
 
-/// Result of a successful `POST /api/mobile/properties/{id}/images`.
+/// Result of a successful `POST /api/v1/mobile/properties/{id}/images`.
 ///
 /// [analysisId] is non-null only when image-AI is enabled for the user +
 /// agency; the caller uses it to drive the `/ai-suggestions` poll batch.

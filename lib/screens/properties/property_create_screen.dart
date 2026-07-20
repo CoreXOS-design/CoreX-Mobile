@@ -32,7 +32,7 @@ class _MissingField {
 /// from Address/Details PUT to update that same record.
 class PropertyCreateScreen extends StatefulWidget {
   /// Optional contact link — when set, the very first POST to
-  /// `/mobile/properties` carries `link_contact_id` + `link_contact_role`
+  /// `/v1/mobile/properties` carries `link_contact_id` + `link_contact_role`
   /// so the new property is auto-linked to that contact.
   final int? linkContactId;
   final String? linkContactRole;
@@ -54,7 +54,7 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
 
   int _currentStep = 0;
 
-  /// Non-null after the first successful POST to `/mobile/properties`.
+  /// Non-null after the first successful POST to `/v1/mobile/properties`.
   /// Everything past Details depends on this.
   int? _propertyId;
 

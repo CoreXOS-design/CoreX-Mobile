@@ -22,7 +22,7 @@ class P24Selection {
 }
 
 /// Province → City → Suburb cascading selector backed by
-/// `/api/mobile/p24/*`. Mirrors the web app: City is locked until a
+/// `/api/v1/mobile/p24/*`. Mirrors the web app: City is locked until a
 /// Province is picked, Suburb until a City is picked, and changing a
 /// higher level clears everything below it.
 ///

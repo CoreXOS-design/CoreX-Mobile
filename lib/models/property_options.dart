@@ -15,7 +15,7 @@ class PropertyOption {
   });
 }
 
-/// All dropdown option lists returned by `GET /api/mobile/properties/options`.
+/// All dropdown option lists returned by `GET /api/v1/mobile/properties/options`.
 /// The API already sorts by `sort_order` then `name`; preserve the order.
 class PropertyOptions {
   final List<PropertyOption> categories;

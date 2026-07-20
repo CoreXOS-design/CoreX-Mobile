@@ -67,7 +67,7 @@ class VisibilityDescriptor {
     required this.properties,
   });
 
-  /// Safe fallback used when `/mobile/visibility` is unreachable: both
+  /// Safe fallback used when `/v1/mobile/visibility` is unreachable: both
   /// modules collapse to own-only with no filter UI.
   static const VisibilityDescriptor fallback = VisibilityDescriptor(
     contacts: ModuleVisibility.ownOnly,
