@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' show MediaType;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/env.dart';
@@ -30,6 +31,12 @@ class ApiService {
   static String get baseUrl => Env.apiBaseUrl;
   static bool get useMockData => Env.useMockData;
   static const Duration _timeout = Duration(seconds: 15);
+
+  /// Multipart photo/document uploads need a much wider window than ordinary
+  /// JSON calls — a single image over a weak mobile uplink can take far longer
+  /// than [_timeout]'s 15s. Uploads are compressed client-side, but we still
+  /// allow generous headroom so a slow connection doesn't drop the upload.
+  static const Duration _uploadTimeout = Duration(minutes: 5);
 
   static const String _tokenKey = 'auth_token';
   static const String _spacesCatalogKey = 'spaces_catalog_v1';
@@ -1784,6 +1791,35 @@ class ApiService {
     throw ApiException(response.statusCode, 'Failed to load gallery tags');
   }
 
+  /// Best-effort MIME type for an outgoing multipart part, derived from the
+  /// file extension. Without an explicit content-type the `http` package can
+  /// send `application/octet-stream`, which some backends reject. Pass
+  /// [imageDefault] `true` for photo uploads so an unknown extension (e.g. a
+  /// camera temp file) still goes up as JPEG rather than octet-stream.
+  MediaType _contentTypeForPath(String path, {bool imageDefault = false}) {
+    final ext = path.toLowerCase().split('.').last;
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return MediaType('image', 'jpeg');
+      case 'png':
+        return MediaType('image', 'png');
+      case 'webp':
+        return MediaType('image', 'webp');
+      case 'heic':
+      case 'heif':
+        return MediaType('image', 'heic');
+      case 'gif':
+        return MediaType('image', 'gif');
+      case 'pdf':
+        return MediaType('application', 'pdf');
+      default:
+        return imageDefault
+            ? MediaType('image', 'jpeg')
+            : MediaType('application', 'octet-stream');
+    }
+  }
+
   /// Uploads a single image. Pass [roomTag] `null` to upload untagged.
   ///
   /// Throws [TagValidationException] on a 422 response whose body contains
@@ -1797,11 +1833,22 @@ class ApiService {
     );
     request.headers['Accept'] = 'application/json';
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
-    request.files.add(await http.MultipartFile.fromPath('image', image.path));
+    request.files.add(await http.MultipartFile.fromPath(
+      'image',
+      image.path,
+      contentType: _contentTypeForPath(image.path, imageDefault: true),
+    ));
     if (roomTag != null) request.fields['room_tag'] = roomTag;
 
-    final streamed = await request.send().timeout(_timeout);
-    final body = await streamed.stream.bytesToString().timeout(_timeout);
+    final http.StreamedResponse streamed;
+    final String body;
+    try {
+      streamed = await request.send().timeout(_uploadTimeout);
+      body = await streamed.stream.bytesToString().timeout(_uploadTimeout);
+    } on TimeoutException {
+      throw ApiException(
+          0, 'Upload timed out. Check your connection and try again.');
+    }
     final status = streamed.statusCode;
 
     if (status == 200 || status == 201) {
@@ -1849,6 +1896,11 @@ class ApiService {
     if (status == 403) {
       throw ApiException(
           403, "You don't have permission to upload to this property");
+    }
+
+    if (status == 413) {
+      throw ApiException(
+          413, 'Image is too large to upload. Please try a smaller photo.');
     }
 
     throw ApiException(status, 'Failed to upload image');
@@ -1931,13 +1983,22 @@ class ApiService {
       request.fields['custom_id'] = customId;
     }
     for (final image in images) {
-      request.files
-          .add(await http.MultipartFile.fromPath('images[]', image.path));
+      request.files.add(await http.MultipartFile.fromPath(
+        'images[]',
+        image.path,
+        contentType: _contentTypeForPath(image.path, imageDefault: true),
+      ));
     }
 
-    final streamed = await request.send().timeout(const Duration(minutes: 5));
-    final body =
-        await streamed.stream.bytesToString().timeout(const Duration(minutes: 5));
+    final http.StreamedResponse streamed;
+    final String body;
+    try {
+      streamed = await request.send().timeout(_uploadTimeout);
+      body = await streamed.stream.bytesToString().timeout(_uploadTimeout);
+    } on TimeoutException {
+      throw ApiException(
+          0, 'Upload timed out. Check your connection and try again.');
+    }
     return _parseRentalBody(streamed.statusCode, body);
   }
 
@@ -2164,14 +2225,25 @@ class ApiService {
     );
     request.headers['Accept'] = 'application/json';
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
-    request.files.add(await http.MultipartFile.fromPath('file', file.path));
+    request.files.add(await http.MultipartFile.fromPath(
+      'file',
+      file.path,
+      contentType: _contentTypeForPath(file.path),
+    ));
     if (documentTypeId != null) {
       request.fields['document_type_id'] = '$documentTypeId';
     }
     if (propertyId != null) request.fields['property_id'] = '$propertyId';
 
-    final streamed = await request.send().timeout(_timeout);
-    final body = await streamed.stream.bytesToString().timeout(_timeout);
+    final http.StreamedResponse streamed;
+    final String body;
+    try {
+      streamed = await request.send().timeout(_uploadTimeout);
+      body = await streamed.stream.bytesToString().timeout(_uploadTimeout);
+    } on TimeoutException {
+      throw ApiException(
+          0, 'Upload timed out. Check your connection and try again.');
+    }
     final status = streamed.statusCode;
 
     if (status == 200 || status == 201) {
@@ -2183,6 +2255,10 @@ class ApiService {
     }
     if (status == 403) throw ApiException(403, _forbiddenMessage(body));
     if (status == 422) throw _parseValidationError(body);
+    if (status == 413) {
+      throw ApiException(
+          413, 'File is too large to upload. Please try a smaller file.');
+    }
     throw ApiException(status, _serverErrorMessage(body, 'upload document'));
   }
 

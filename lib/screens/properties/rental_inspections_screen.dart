@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../models/rental_inspections.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
+import '../../utils/image_upload.dart';
 import 'camera_info.dart';
 import 'multi_capture_camera.dart';
 
@@ -274,7 +275,11 @@ class _RentalInspectionsScreenState extends State<RentalInspectionsScreen> {
         case _PhotoSource.multiCapture:
           return await MultiCaptureCamera.open(context);
         case _PhotoSource.gallery:
-          final picked = await _picker.pickMultiImage();
+          final picked = await _picker.pickMultiImage(
+            maxWidth: ImageUploadConfig.maxWidth,
+            maxHeight: ImageUploadConfig.maxHeight,
+            imageQuality: ImageUploadConfig.quality,
+          );
           return picked.map((x) => File(x.path)).toList();
         case _PhotoSource.native:
           // OS camera takes one shot per launch; loop so the user can take
@@ -284,6 +289,9 @@ class _RentalInspectionsScreenState extends State<RentalInspectionsScreen> {
             final shot = await _picker.pickImage(
               source: ImageSource.camera,
               preferredCameraDevice: CameraDevice.rear,
+              maxWidth: ImageUploadConfig.maxWidth,
+              maxHeight: ImageUploadConfig.maxHeight,
+              imageQuality: ImageUploadConfig.quality,
             );
             if (shot == null) break;
             files.add(File(shot.path));

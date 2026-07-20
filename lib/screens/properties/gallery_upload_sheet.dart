@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../models/gallery_tags.dart';
 import '../../services/api_service.dart';
+import '../../services/upload_queue.dart';
 import '../../theme.dart';
+import '../../utils/image_upload.dart';
 import 'camera_info.dart';
 import 'multi_capture_camera.dart';
 
@@ -49,12 +51,6 @@ class GalleryUploadSheet extends StatefulWidget {
   State<GalleryUploadSheet> createState() => _GalleryUploadSheetState();
 }
 
-class _FailedUpload {
-  final File file;
-  final String error;
-  _FailedUpload({required this.file, required this.error});
-}
-
 class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   final ApiService _api = ApiService();
   final ImagePicker _picker = ImagePicker();
@@ -66,22 +62,58 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   // null means "No tag"
   String? _selectedTag;
 
-  final List<File> _queue = [];
-  final List<_FailedUpload> _failed = [];
+  /// All durable queue items for this property — both pending and failed.
+  /// Backed by [UploadQueue] so nothing is lost when the sheet closes.
+  final List<PendingUpload> _items = [];
 
   bool _uploading = false;
   int _uploadedCount = 0;
   int _targetCount = 0;
   bool _anySuccess = false;
 
+  List<PendingUpload> get _pending =>
+      _items.where((e) => e.state == PendingUploadState.pending).toList();
+  List<PendingUpload> get _failed =>
+      _items.where((e) => e.state == PendingUploadState.failed).toList();
+
   @override
   void initState() {
     super.initState();
     _selectedTag = widget.initialTag;
     _loadTags();
+    _loadQueue();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) maybeShowCameraInfo(context);
     });
+  }
+
+  /// Restore any photos left over from a previous session (sheet closed or app
+  /// killed mid-upload) so the user can finish the batch.
+  Future<void> _loadQueue() async {
+    final items = await UploadQueue.instance.itemsFor(widget.propertyId);
+    if (!mounted) return;
+    setState(() {
+      _items
+        ..clear()
+        ..addAll(items);
+    });
+  }
+
+  /// Copy each picked file into durable storage and add it to the queue.
+  Future<void> _enqueueAll(List<File> files) async {
+    for (final f in files) {
+      try {
+        final item = await UploadQueue.instance.enqueue(
+          propertyId: widget.propertyId,
+          source: f,
+          roomTag: _selectedTag,
+        );
+        if (!mounted) return;
+        setState(() => _items.add(item));
+      } catch (_) {
+        // Copy failed (e.g. storage full) — skip this file rather than crash.
+      }
+    }
   }
 
   Future<void> _loadTags() async {
@@ -118,11 +150,13 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
 
   Future<void> _pickFromGallery() async {
     try {
-      final picked = await _picker.pickMultiImage();
+      final picked = await _picker.pickMultiImage(
+        maxWidth: ImageUploadConfig.maxWidth,
+        maxHeight: ImageUploadConfig.maxHeight,
+        imageQuality: ImageUploadConfig.quality,
+      );
       if (picked.isEmpty || !mounted) return;
-      setState(() {
-        _queue.addAll(picked.map((x) => File(x.path)));
-      });
+      await _enqueueAll(picked.map((x) => File(x.path)).toList());
     } catch (_) {
       // user cancelled, ignore
     }
@@ -132,7 +166,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     try {
       final files = await MultiCaptureCamera.open(context);
       if (files.isEmpty || !mounted) return;
-      setState(() => _queue.addAll(files));
+      await _enqueueAll(files);
     } catch (_) {/* user cancelled, ignore */}
   }
 
@@ -146,37 +180,48 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
         final shot = await _picker.pickImage(
           source: ImageSource.camera,
           preferredCameraDevice: CameraDevice.rear,
+          maxWidth: ImageUploadConfig.maxWidth,
+          maxHeight: ImageUploadConfig.maxHeight,
+          imageQuality: ImageUploadConfig.quality,
         );
         if (shot == null) break;
-        setState(() => _queue.add(File(shot.path)));
+        await _enqueueAll([File(shot.path)]);
       }
     } catch (_) {/* user cancelled, ignore */}
   }
 
   Future<void> _upload() async {
-    if (_queue.isEmpty || _uploading) return;
+    final pending = _pending;
+    if (pending.isEmpty || _uploading) return;
 
     setState(() {
       _uploading = true;
       _uploadedCount = 0;
-      _targetCount = _queue.length;
+      _targetCount = pending.length;
     });
 
-    final toUpload = List<File>.from(_queue);
-    for (final file in toUpload) {
+    for (final item in pending) {
+      // Persist the tag we're actually attempting with, so a resumed batch
+      // records the right tag.
+      if (item.roomTag != _selectedTag) {
+        item.roomTag = _selectedTag;
+        await UploadQueue.instance.setRoomTag(item.id, _selectedTag);
+      }
       try {
         await _api.uploadPropertyImage(
-            widget.propertyId, file, _selectedTag);
+            widget.propertyId, item.file, _selectedTag);
+        await UploadQueue.instance.remove(item.id);
         if (!mounted) return;
         setState(() {
-          _queue.remove(file);
+          _items.remove(item);
           _uploadedCount++;
           _anySuccess = true;
         });
       } on TagValidationException catch (e) {
+        // The tag we were using is no longer valid. Keep the photo queued
+        // (not failed), refresh the local list, drop the selection, and stop.
+        await UploadQueue.instance.markPending(item.id);
         if (!mounted) return;
-        // The tag we were using is no longer valid. Refresh the local list
-        // from the response, drop the selection, and stop the queue.
         setState(() {
           _uploading = false;
           _tags = (_tags ?? GalleryTagsData.empty(widget.propertyId))
@@ -191,17 +236,13 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
         );
         return;
       } on ApiException catch (e) {
+        await UploadQueue.instance.markFailed(item.id, e.message);
         if (!mounted) return;
-        setState(() {
-          _queue.remove(file);
-          _failed.add(_FailedUpload(file: file, error: e.message));
-        });
+        setState(() {});
       } catch (e) {
+        await UploadQueue.instance.markFailed(item.id, e.toString());
         if (!mounted) return;
-        setState(() {
-          _queue.remove(file);
-          _failed.add(_FailedUpload(file: file, error: e.toString()));
-        });
+        setState(() {});
       }
     }
 
@@ -218,33 +259,49 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     }
   }
 
-  Future<void> _retryFailed(_FailedUpload failed) async {
-    setState(() => _failed.remove(failed));
+  Future<void> _retryFailed(PendingUpload item) async {
+    // Optimistically move it back to pending while we retry.
+    setState(() {
+      item.state = PendingUploadState.pending;
+      item.error = null;
+      item.roomTag = _selectedTag;
+    });
+    await UploadQueue.instance.markPending(item.id);
+    await UploadQueue.instance.setRoomTag(item.id, _selectedTag);
     try {
       await _api.uploadPropertyImage(
-          widget.propertyId, failed.file, _selectedTag);
+          widget.propertyId, item.file, _selectedTag);
+      await UploadQueue.instance.remove(item.id);
       if (!mounted) return;
-      setState(() => _anySuccess = true);
+      setState(() {
+        _items.remove(item);
+        _anySuccess = true;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Uploaded')),
       );
     } on TagValidationException catch (e) {
+      // Leave it queued so the user can re-tag and upload again.
+      await UploadQueue.instance.markPending(item.id);
       if (!mounted) return;
       setState(() {
         _tags = (_tags ?? GalleryTagsData.empty(widget.propertyId))
             .withAvailable(e.availableTags);
         _selectedTag = null;
-        _failed.add(failed);
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text(
                 'Some tags are no longer available — please re-select')),
       );
-    } catch (e) {
+    } on ApiException catch (e) {
+      await UploadQueue.instance.markFailed(item.id, e.message);
       if (!mounted) return;
-      setState(() => _failed.add(
-          _FailedUpload(file: failed.file, error: e.toString())));
+      setState(() {});
+    } catch (e) {
+      await UploadQueue.instance.markFailed(item.id, e.toString());
+      if (!mounted) return;
+      setState(() {});
     }
   }
 
@@ -291,7 +348,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                       const SizedBox(height: 16),
                       _buildPickerButtons(),
                       const SizedBox(height: 12),
-                      if (_queue.isNotEmpty) _buildQueueList(),
+                      if (_pending.isNotEmpty) _buildQueueList(),
                       if (_failed.isNotEmpty) _buildFailedList(),
                     ],
                   ),
@@ -492,6 +549,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   }
 
   Widget _buildQueueList() {
+    final pending = _pending;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -500,7 +558,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           child: Text(
             _uploading
                 ? 'Uploading ${(_uploadedCount + 1).clamp(1, _targetCount)} of $_targetCount…'
-                : '${_queue.length} selected',
+                : '${pending.length} selected',
             style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -511,15 +569,15 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           height: 90,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: _queue.length,
+            itemCount: pending.length,
             separatorBuilder: (_, __) => const SizedBox(width: 8),
             itemBuilder: (_, i) {
-              final file = _queue[i];
+              final item = pending[i];
               return Stack(
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(AppTheme.radius),
-                    child: Image.file(file,
+                    child: Image.file(item.file,
                         width: 90, height: 90, fit: BoxFit.cover),
                   ),
                   if (!_uploading)
@@ -527,7 +585,11 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                       top: 2,
                       right: 2,
                       child: InkWell(
-                        onTap: () => setState(() => _queue.removeAt(i)),
+                        onTap: () async {
+                          await UploadQueue.instance.remove(item.id);
+                          if (!mounted) return;
+                          setState(() => _items.remove(item));
+                        },
                         child: Container(
                           decoration: const BoxDecoration(
                             color: Colors.black54,
@@ -581,7 +643,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    f.error,
+                    f.error ?? 'Upload failed',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -602,7 +664,8 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   }
 
   Widget _buildUploadButton() {
-    final canUpload = !_uploading && _queue.isNotEmpty;
+    final count = _pending.length;
+    final canUpload = !_uploading && count > 0;
     return SizedBox(
       width: double.infinity,
       height: 48,
@@ -615,9 +678,9 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                 child: CircularProgressIndicator(
                     strokeWidth: 2, color: Colors.white),
               )
-            : Text(_queue.isEmpty
+            : Text(count == 0
                 ? 'Upload'
-                : 'Upload ${_queue.length} photo${_queue.length == 1 ? '' : 's'}'),
+                : 'Upload $count photo${count == 1 ? '' : 's'}'),
       ),
     );
   }
