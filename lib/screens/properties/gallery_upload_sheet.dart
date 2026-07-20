@@ -1,10 +1,13 @@
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../models/gallery_tags.dart';
 import '../../services/api_service.dart';
 import '../../services/upload_queue.dart';
 import '../../theme.dart';
+import '../../utils/image_processing.dart';
 import '../../utils/image_upload.dart';
 import 'camera_info.dart';
 import 'multi_capture_camera.dart';
@@ -66,6 +69,25 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   /// Backed by [UploadQueue] so nothing is lost when the sheet closes.
   final List<PendingUpload> _items = [];
 
+  /// Up to this many uploads run at once — bounded so we never fire the whole
+  /// batch at the server (or the radio) simultaneously.
+  static const int _maxConcurrent = 3;
+
+  /// Attempts per photo before it is marked failed (1 initial + retries).
+  static const int _maxAttempts = 3;
+
+  /// Ids currently mid-request, for the per-photo spinner.
+  final Set<String> _inFlight = {};
+
+  /// Set when a stale-tag 422 aborts the run so the summary is suppressed.
+  bool _cancelBatch = false;
+
+  /// True while picked photos are being downscaled/orientation-baked.
+  bool _preparing = false;
+  int _prepSeq = 0;
+
+  final Random _rng = Random();
+
   bool _uploading = false;
   int _uploadedCount = 0;
   int _targetCount = 0;
@@ -99,20 +121,66 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     });
   }
 
-  /// Copy each picked file into durable storage and add it to the queue.
+  /// Downscale + orientation-bake each picked file, then add it to the durable
+  /// queue. Processing runs in a background isolate so the UI stays responsive;
+  /// if it fails (e.g. an undecodable format) we enqueue the original rather
+  /// than drop the photo.
   Future<void> _enqueueAll(List<File> files) async {
+    if (files.isEmpty) return;
+    if (mounted) setState(() => _preparing = true);
+    var skipped = 0;
+    Directory? tmpDir;
+    try {
+      tmpDir = await getTemporaryDirectory();
+    } catch (_) {
+      tmpDir = null;
+    }
     for (final f in files) {
+      File toEnqueue = f;
+      File? processed;
+      if (tmpDir != null) {
+        try {
+          final dest =
+              '${tmpDir.path}/corex_prep_${DateTime.now().microsecondsSinceEpoch}_${_prepSeq++}.jpg';
+          final ok = await processImageForUpload(
+            srcPath: f.path,
+            destPath: dest,
+            maxEdge: ImageUploadConfig.maxEdge,
+            quality: ImageUploadConfig.quality,
+          );
+          if (ok) {
+            processed = File(dest);
+            toEnqueue = processed;
+          }
+        } catch (_) {
+          // Fall back to the original file.
+        }
+      }
       try {
         final item = await UploadQueue.instance.enqueue(
           propertyId: widget.propertyId,
-          source: f,
+          source: toEnqueue,
           roomTag: _selectedTag,
         );
-        if (!mounted) return;
-        setState(() => _items.add(item));
+        if (mounted) setState(() => _items.add(item));
       } catch (_) {
-        // Copy failed (e.g. storage full) — skip this file rather than crash.
+        // Couldn't copy into durable storage (e.g. storage full). Count it so
+        // we can warn the user rather than losing the photo silently.
+        skipped++;
+      } finally {
+        // The queue copied it into durable storage; drop the temp file.
+        try {
+          if (processed != null && await processed.exists()) {
+            await processed.delete();
+          }
+        } catch (_) {}
       }
+      if (!mounted) return;
+    }
+    if (mounted) setState(() => _preparing = false);
+    if (skipped > 0) {
+      _showSnack(
+          "Couldn't add $skipped photo${skipped == 1 ? '' : 's'} — device storage may be full");
     }
   }
 
@@ -191,118 +259,154 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   }
 
   Future<void> _upload() async {
+    if (_uploading) return;
     final pending = _pending;
-    if (pending.isEmpty || _uploading) return;
+    if (pending.isEmpty) return;
+    await _runBatch(pending);
+  }
 
+  /// Upload [items] through a bounded worker pool with per-photo retry. A photo
+  /// leaves the queue only on a confirmed 2xx; everything else is retried or
+  /// marked failed so nothing is dropped silently.
+  Future<void> _runBatch(List<PendingUpload> items) async {
+    if (items.isEmpty) return;
     setState(() {
       _uploading = true;
+      _cancelBatch = false;
       _uploadedCount = 0;
-      _targetCount = pending.length;
+      _targetCount = items.length;
     });
 
-    for (final item in pending) {
-      // Persist the tag we're actually attempting with, so a resumed batch
-      // records the right tag.
-      if (item.roomTag != _selectedTag) {
-        item.roomTag = _selectedTag;
-        await UploadQueue.instance.setRoomTag(item.id, _selectedTag);
-      }
-      try {
-        await _api.uploadPropertyImage(
-            widget.propertyId, item.file, _selectedTag);
-        await UploadQueue.instance.remove(item.id);
-        if (!mounted) return;
-        setState(() {
-          _items.remove(item);
-          _uploadedCount++;
-          _anySuccess = true;
-        });
-      } on TagValidationException catch (e) {
-        // The tag we were using is no longer valid. Keep the photo queued
-        // (not failed), refresh the local list, drop the selection, and stop.
-        await UploadQueue.instance.markPending(item.id);
-        if (!mounted) return;
-        setState(() {
-          _uploading = false;
-          _tags = (_tags ?? GalleryTagsData.empty(widget.propertyId))
-              .withAvailable(e.availableTags);
-          _selectedTag = null;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                'Some tags are no longer available — please re-select'),
-          ),
-        );
-        return;
-      } on ApiException catch (e) {
-        await UploadQueue.instance.markFailed(item.id, e.message);
-        if (!mounted) return;
-        setState(() {});
-      } catch (e) {
-        await UploadQueue.instance.markFailed(item.id, e.toString());
-        if (!mounted) return;
-        setState(() {});
+    final queue = List<PendingUpload>.from(items);
+    var next = 0;
+
+    // The event loop is single-threaded, so reading and bumping [next] between
+    // awaits is race-free — no two workers grab the same index.
+    Future<void> worker() async {
+      while (!_cancelBatch && next < queue.length) {
+        final item = queue[next++];
+        await _uploadOne(item);
       }
     }
 
+    final workers = _maxConcurrent < queue.length ? _maxConcurrent : queue.length;
+    await Future.wait(List.generate(workers, (_) => worker()));
+
     if (!mounted) return;
     setState(() => _uploading = false);
+    _announceBatchResult();
+  }
 
-    if (_failed.isEmpty && _uploadedCount > 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(
-                '$_uploadedCount photo${_uploadedCount == 1 ? '' : 's'} uploaded')),
-      );
+  /// Uploads a single photo with up to [_maxAttempts] tries and exponential
+  /// backoff. Retries network errors, timeouts and transient non-2xx; treats
+  /// 403/413 (and a stale-tag 422) as terminal.
+  Future<void> _uploadOne(PendingUpload item) async {
+    if (item.roomTag != _selectedTag) {
+      item.roomTag = _selectedTag;
+      await UploadQueue.instance.setRoomTag(item.id, _selectedTag);
+    }
+    if (mounted) setState(() => _inFlight.add(item.id));
+    try {
+      for (var attempt = 1; attempt <= _maxAttempts; attempt++) {
+        if (_cancelBatch) return;
+        try {
+          await _api.uploadPropertyImage(
+              widget.propertyId, item.file, _selectedTag,
+              clientId: item.id);
+          await UploadQueue.instance.remove(item.id);
+          if (!mounted) return;
+          setState(() {
+            _items.remove(item);
+            _uploadedCount++;
+            _anySuccess = true;
+          });
+          return;
+        } on TagValidationException catch (e) {
+          // Stale tag — retrying won't help. Keep the photo queued, stop the
+          // whole batch, and prompt a re-select.
+          await UploadQueue.instance.markPending(item.id);
+          _cancelBatch = true;
+          if (!mounted) return;
+          setState(() {
+            _tags = (_tags ?? GalleryTagsData.empty(widget.propertyId))
+                .withAvailable(e.availableTags);
+            _selectedTag = null;
+          });
+          _showSnack('Some tags are no longer available — please re-select');
+          return;
+        } on ApiException catch (e) {
+          final terminal = e.statusCode == 403 || e.statusCode == 413;
+          if (terminal || attempt >= _maxAttempts) {
+            await UploadQueue.instance.markFailed(item.id, e.message);
+            if (mounted) setState(() {});
+            return;
+          }
+          await _backoff(attempt);
+        } catch (e) {
+          // Network error / socket drop — retry unless we're out of attempts.
+          if (attempt >= _maxAttempts) {
+            await UploadQueue.instance
+                .markFailed(item.id, 'Upload failed — check your connection');
+            if (mounted) setState(() {});
+            return;
+          }
+          await _backoff(attempt);
+        }
+      }
+    } finally {
+      _inFlight.remove(item.id);
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// Exponential backoff (~1s, 2s, 4s) with jitter to avoid a retry stampede.
+  Future<void> _backoff(int attempt) async {
+    final base = 1000 * (1 << (attempt - 1));
+    await Future.delayed(Duration(milliseconds: base + _rng.nextInt(500)));
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _announceBatchResult() {
+    if (_cancelBatch) return; // the re-select prompt was already shown
+    final failed = _failed.length;
+    final pending = _pending.length;
+    if (failed == 0 && pending == 0 && _uploadedCount > 0) {
+      _showSnack(
+          '$_uploadedCount photo${_uploadedCount == 1 ? '' : 's'} uploaded');
       Navigator.of(context).pop(true);
+    } else if (failed > 0) {
+      _showSnack(
+          "$failed photo${failed == 1 ? '' : 's'} didn't upload — tap Retry below");
     }
   }
 
   Future<void> _retryFailed(PendingUpload item) async {
-    // Optimistically move it back to pending while we retry.
+    if (_uploading) return;
     setState(() {
       item.state = PendingUploadState.pending;
       item.error = null;
-      item.roomTag = _selectedTag;
     });
     await UploadQueue.instance.markPending(item.id);
-    await UploadQueue.instance.setRoomTag(item.id, _selectedTag);
-    try {
-      await _api.uploadPropertyImage(
-          widget.propertyId, item.file, _selectedTag);
-      await UploadQueue.instance.remove(item.id);
-      if (!mounted) return;
-      setState(() {
-        _items.remove(item);
-        _anySuccess = true;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Uploaded')),
-      );
-    } on TagValidationException catch (e) {
-      // Leave it queued so the user can re-tag and upload again.
+    await _runBatch([item]);
+  }
+
+  Future<void> _retryAllFailed() async {
+    if (_uploading) return;
+    final failed = _failed;
+    if (failed.isEmpty) return;
+    for (final item in failed) {
+      item.state = PendingUploadState.pending;
+      item.error = null;
       await UploadQueue.instance.markPending(item.id);
-      if (!mounted) return;
-      setState(() {
-        _tags = (_tags ?? GalleryTagsData.empty(widget.propertyId))
-            .withAvailable(e.availableTags);
-        _selectedTag = null;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                'Some tags are no longer available — please re-select')),
-      );
-    } on ApiException catch (e) {
-      await UploadQueue.instance.markFailed(item.id, e.message);
-      if (!mounted) return;
-      setState(() {});
-    } catch (e) {
-      await UploadQueue.instance.markFailed(item.id, e.toString());
-      if (!mounted) return;
-      setState(() {});
     }
+    if (!mounted) return;
+    setState(() {});
+    await _runBatch(_pending);
   }
 
   @override
@@ -347,6 +451,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                         _buildTagSection(),
                       const SizedBox(height: 16),
                       _buildPickerButtons(),
+                      if (_preparing) _buildPreparing(),
                       const SizedBox(height: 12),
                       if (_pending.isNotEmpty) _buildQueueList(),
                       if (_failed.isNotEmpty) _buildFailedList(),
@@ -499,7 +604,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
       children: [
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: _uploading ? null : _pickFromBurst,
+            onPressed: (_uploading || _preparing) ? null : _pickFromBurst,
             icon: const Icon(Icons.burst_mode, size: 18),
             label: const FittedBox(
                 fit: BoxFit.scaleDown, child: Text('Multi Capture')),
@@ -515,7 +620,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
         const SizedBox(width: 8),
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: _uploading ? null : _pickFromOsCamera,
+            onPressed: (_uploading || _preparing) ? null : _pickFromOsCamera,
             icon: const Icon(Icons.photo_camera, size: 18),
             label: const FittedBox(
                 fit: BoxFit.scaleDown, child: Text('Native')),
@@ -531,7 +636,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
         const SizedBox(width: 8),
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: _uploading ? null : _pickFromGallery,
+            onPressed: (_uploading || _preparing) ? null : _pickFromGallery,
             icon: const Icon(Icons.photo_library, size: 18),
             label: const FittedBox(
                 fit: BoxFit.scaleDown, child: Text('Gallery')),
@@ -557,7 +662,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           padding: const EdgeInsets.only(top: 8, bottom: 6),
           child: Text(
             _uploading
-                ? 'Uploading ${(_uploadedCount + 1).clamp(1, _targetCount)} of $_targetCount…'
+                ? 'Uploaded $_uploadedCount of $_targetCount…'
                 : '${pending.length} selected',
             style: TextStyle(
                 fontSize: 13,
@@ -573,6 +678,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
             separatorBuilder: (_, __) => const SizedBox(width: 8),
             itemBuilder: (_, i) {
               final item = pending[i];
+              final inFlight = _inFlight.contains(item.id);
               return Stack(
                 children: [
                   ClipRRect(
@@ -580,6 +686,23 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                     child: Image.file(item.file,
                         width: 90, height: 90, fit: BoxFit.cover),
                   ),
+                  if (inFlight)
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black45,
+                          borderRadius: BorderRadius.circular(AppTheme.radius),
+                        ),
+                        child: const Center(
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ),
                   if (!_uploading)
                     Positioned(
                       top: 2,
@@ -610,18 +733,50 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     );
   }
 
+  Widget _buildPreparing() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Preparing photos…',
+            style: TextStyle(
+                fontSize: 13, color: AppTheme.textSecondary(context)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFailedList() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 12, bottom: 6),
-          child: Text(
-            'Failed (${_failed.length}) — tap to retry',
-            style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Colors.redAccent),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  "${_failed.length} photo${_failed.length == 1 ? '' : 's'} didn't upload — tap to retry",
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.redAccent),
+                ),
+              ),
+              if (!_uploading && _failed.length > 1)
+                TextButton(
+                  onPressed: _retryAllFailed,
+                  child: const Text('Retry all'),
+                ),
+            ],
           ),
         ),
         ..._failed.map(
@@ -652,7 +807,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                   ),
                 ),
                 TextButton(
-                  onPressed: () => _retryFailed(f),
+                  onPressed: _uploading ? null : () => _retryFailed(f),
                   child: const Text('Retry'),
                 ),
               ],
@@ -665,7 +820,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
 
   Widget _buildUploadButton() {
     final count = _pending.length;
-    final canUpload = !_uploading && count > 0;
+    final canUpload = !_uploading && !_preparing && count > 0;
     return SizedBox(
       width: double.infinity,
       height: 48,

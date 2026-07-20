@@ -14,6 +14,12 @@ class ImageUploadConfig {
   ImageUploadConfig._();
 
   /// Longest-edge cap in logical pixels.
+  static const int maxEdge = 2560;
+
+  /// Same cap expressed as doubles for `image_picker` (which pre-downscales at
+  /// pick time so we never decode a 48MP original in the `image` package and
+  /// risk an out-of-memory crash on low-end devices). Keep in sync with
+  /// [maxEdge].
   static const double maxWidth = 2560;
   static const double maxHeight = 2560;
 

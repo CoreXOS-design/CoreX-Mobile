@@ -38,6 +38,11 @@ class ApiService {
   /// allow generous headroom so a slow connection doesn't drop the upload.
   static const Duration _uploadTimeout = Duration(minutes: 5);
 
+  /// Per-request timeout for a single property photo. Downscaled photos are
+  /// 1-3MB, so 60s is generous even on a rural link; the gallery upload retries
+  /// with backoff on top of this, so a slow attempt is retried, not fatal.
+  static const Duration _imageUploadTimeout = Duration(seconds: 60);
+
   static const String _tokenKey = 'auth_token';
   static const String _spacesCatalogKey = 'spaces_catalog_v1';
   static const String _spacesCatalogTsKey = 'spaces_catalog_v1_ts';
@@ -1825,7 +1830,8 @@ class ApiService {
   /// Throws [TagValidationException] on a 422 response whose body contains
   /// `available_tags`, so the caller can refresh its local tag list.
   Future<UploadedImage> uploadPropertyImage(
-      int propertyId, File image, String? roomTag) async {
+      int propertyId, File image, String? roomTag,
+      {String? clientId}) async {
     final token = await getToken();
     final request = http.MultipartRequest(
       'POST',
@@ -1839,12 +1845,17 @@ class ApiService {
       contentType: _contentTypeForPath(image.path, imageDefault: true),
     ));
     if (roomTag != null) request.fields['room_tag'] = roomTag;
+    // Idempotency key: the client retries on timeout, so the same photo may be
+    // POSTed more than once. A stable per-photo id lets the server dedupe
+    // instead of creating duplicate gallery rows.
+    if (clientId != null) request.fields['client_upload_id'] = clientId;
 
     final http.StreamedResponse streamed;
     final String body;
     try {
-      streamed = await request.send().timeout(_uploadTimeout);
-      body = await streamed.stream.bytesToString().timeout(_uploadTimeout);
+      streamed = await request.send().timeout(_imageUploadTimeout);
+      body =
+          await streamed.stream.bytesToString().timeout(_imageUploadTimeout);
     } on TimeoutException {
       throw ApiException(
           0, 'Upload timed out. Check your connection and try again.');
