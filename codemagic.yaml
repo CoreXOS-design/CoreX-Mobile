@@ -45,6 +45,17 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-        # Uploads to TestFlight. Flip to true later to auto-submit for App Store review.
-        submit_to_testflight: true
+        # The IPA is uploaded and processed regardless of the flags below —
+        # that alone makes it installable by internal TestFlight testers
+        # (App Store Connect users), which needs no review.
+        #
+        # submit_to_testflight submits for EXTERNAL beta review, which requires
+        # Beta App Information (feedback email) and Beta App Review Information
+        # (name, phone, email) to be filled in under TestFlight → Test
+        # Information. Left off so the pipeline doesn't fail on a step that
+        # isn't needed to ship to the App Store. Turn on once those forms are
+        # filled and you actually want outside testers.
+        submit_to_testflight: false
+        # Kept manual: the App Store submission is attached to a version record
+        # and needs a Resolution Center reply to the 2.1(a) rejection.
         submit_to_app_store: false
