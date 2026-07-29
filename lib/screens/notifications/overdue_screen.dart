@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/notification_models.dart';
 import '../../providers/notifications_provider.dart';
 import '../../services/deep_link_router.dart';
@@ -26,7 +27,7 @@ class OverdueScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.background(context),
       appBar: AppBar(title: Text(title)),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: RefreshIndicator(
         color: AppTheme.brand,

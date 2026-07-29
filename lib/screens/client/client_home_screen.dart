@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../widgets/ui/content_width.dart';
+import '../../utils/external_launch.dart';
 
 import '../../models/client_models.dart';
 import '../../models/seller_models.dart';
@@ -68,7 +69,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
         body: Container(
           decoration:
               BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
-          child: SafeArea(
+          child: ContentSafeArea(
             bottom: false,
             child: Column(
               children: [
@@ -308,8 +309,8 @@ class _MatchedCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = CorexAccentTheme.of(context);
     final r = item.result;
-    final price = r.priceDisplay ??
-        (r.price != null ? 'R ${_money(r.price!)}' : null);
+    final price =
+        r.priceDisplay ?? (r.price != null ? 'R ${_money(r.price!)}' : null);
 
     return SizedBox(
       width: 190,
@@ -672,8 +673,7 @@ class _AgentContactCard extends StatelessWidget {
                       context,
                       icon: TablerIcons.brand_whatsapp,
                       label: 'WhatsApp',
-                      onTap: () =>
-                          _launch(context, _waUrl(a.whatsapp!)),
+                      onTap: () => _launch(context, _waUrl(a.whatsapp!)),
                     ),
                   ),
                 ],
@@ -783,17 +783,8 @@ class _AgentContactCard extends StatelessWidget {
     return 'https://wa.me/$digits';
   }
 
-  Future<void> _launch(BuildContext context, String url) async {
-    final ok = await launchUrl(
-      Uri.parse(url),
-      mode: LaunchMode.externalApplication,
-    );
-    if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not open that app')),
-      );
-    }
-  }
+  Future<void> _launch(BuildContext context, String url) =>
+      launchExternal(context, url);
 
   static String _initialsOf(String full) {
     final parts = full.trim().split(RegExp(r'\s+'));

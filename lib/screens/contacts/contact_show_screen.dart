@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/contact.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
@@ -137,7 +138,7 @@ class _ContactShowScreenState extends State<ContactShowScreen> {
                 ),
               ],
       ),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: _loading
             ? const Center(child: CircularProgressIndicator())

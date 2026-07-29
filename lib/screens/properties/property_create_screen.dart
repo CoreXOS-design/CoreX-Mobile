@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/gallery_tags.dart';
 import '../../models/property_options.dart';
 import '../../providers/property_provider.dart';
@@ -563,7 +564,7 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
             ),
           ],
         ),
-        body: SafeArea(
+        body: ContentSafeArea(
           top: false,
           child: Column(
             children: [

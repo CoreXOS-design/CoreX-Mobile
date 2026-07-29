@@ -6,6 +6,7 @@ import 'package:gal/gal.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
+import '../widgets/ui/content_width.dart';
 
 import '../services/api_service.dart';
 import '../theme.dart';
@@ -79,6 +80,18 @@ class _MyAgentQrScreenState extends State<MyAgentQrScreen> {
   bool _sharing = false;
   bool _saving = false;
 
+  /// Anchors the iPad share popover. UIKit raises an uncatchable
+  /// NSInvalidArgumentException if a UIActivityViewController is presented on
+  /// iPad without a source rect, so this is not optional.
+  final GlobalKey _shareButtonKey = GlobalKey();
+
+  Rect? _shareOrigin() {
+    final box =
+        _shareButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -146,13 +159,15 @@ class _MyAgentQrScreenState extends State<MyAgentQrScreen> {
     if (url == null) return;
     setState(() => _sharing = true);
     try {
+      final origin = _shareOrigin();
       if (png != null) {
         await Share.shareXFiles(
           [XFile.fromData(png, name: 'agent-qr.png', mimeType: 'image/png')],
           text: url,
+          sharePositionOrigin: origin,
         );
       } else {
-        await Share.share(url);
+        await Share.share(url, sharePositionOrigin: origin);
       }
     } catch (_) {
       if (!mounted) return;
@@ -199,7 +214,7 @@ class _MyAgentQrScreenState extends State<MyAgentQrScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('My QR Code')),
-      body: SafeArea(child: _body()),
+      body: ContentSafeArea(child: _body()),
     );
   }
 
@@ -285,6 +300,7 @@ class _MyAgentQrScreenState extends State<MyAgentQrScreen> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
+                  key: _shareButtonKey,
                   onPressed: _sharing ? null : _share,
                   icon: _sharing
                       ? const SizedBox(

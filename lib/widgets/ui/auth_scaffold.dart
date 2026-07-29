@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme.dart';
+import 'content_width.dart';
 import 'glow_background.dart';
 
 /// Shared chrome for auth flow screens. Provides:
@@ -37,8 +38,10 @@ class AuthScaffold extends StatelessWidget {
         child: SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 28),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
+            // Centred, not just constrained — a bare ConstrainedBox is ignored
+            // under the tight width a scroll view passes down, which left the
+            // auth column full-bleed on iPad.
+            child: ContentWidth.form(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../widgets/ui/content_width.dart';
 
 import '../../providers/client_matches_provider.dart';
 import '../../providers/client_session_provider.dart';
@@ -27,7 +28,7 @@ class ClientSettingsScreen extends StatelessWidget {
 
     return CorexScaffold(
       title: 'Settings',
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),

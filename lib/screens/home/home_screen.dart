@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../widgets/ui/content_width.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../providers/notifications_provider.dart';
@@ -42,7 +43,7 @@ class HomeScreen extends StatelessWidget {
         drawer: const CorexDrawer(),
         body: Container(
           decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
-          child: SafeArea(
+          child: ContentSafeArea(
             bottom: false,
             child: Column(
               children: [

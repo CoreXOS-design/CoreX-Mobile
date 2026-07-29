@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../widgets/ui/content_width.dart';
 
 import '../../models/client_models.dart';
 import '../../providers/client_session_provider.dart';
@@ -167,7 +168,7 @@ class _ClientConsentScreenState extends State<ClientConsentScreen> {
     final t = CorexAccentTheme.of(context);
     return CorexScaffold(
       title: 'Privacy & Consent',
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: RefreshIndicator(
           color: t.accent,

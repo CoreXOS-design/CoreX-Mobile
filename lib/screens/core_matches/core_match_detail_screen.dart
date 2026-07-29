@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/core_match.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
@@ -387,7 +388,7 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
           ),
         ],
       ),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: RefreshIndicator(
           color: AppTheme.brand,

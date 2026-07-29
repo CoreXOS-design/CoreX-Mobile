@@ -103,6 +103,34 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
     }
   }
 
+  @override
+  void didChangeMetrics() {
+    // Covers rotation on iPad, where the portrait lock requested in initState
+    // is ignored.
+    final ctrl = _controller;
+    if (ctrl != null && ctrl.value.isInitialized) {
+      _applyCaptureOrientation(ctrl);
+    }
+  }
+
+  /// Keeps saved photos upright on every device.
+  ///
+  /// Phones are pinned portrait by initState, so pinning capture to portraitUp
+  /// matches what the user sees. iPad ignores that lock — forcing portraitUp
+  /// there would write every landscape photo sideways, so hand orientation
+  /// back to the plugin and let it follow the device.
+  Future<void> _applyCaptureOrientation(CameraController ctrl) async {
+    if (!mounted) return;
+    final portrait = MediaQuery.orientationOf(context) == Orientation.portrait;
+    try {
+      if (portrait) {
+        await ctrl.lockCaptureOrientation(DeviceOrientation.portraitUp);
+      } else {
+        await ctrl.unlockCaptureOrientation();
+      }
+    } catch (_) {}
+  }
+
   Future<void> _initCamera() async {
     if (_initInFlight) return;
     _initInFlight = true;
@@ -176,9 +204,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
     try {
       await ctrl.initialize();
       if (!mounted) return;
-      try {
-        await ctrl.lockCaptureOrientation(DeviceOrientation.portraitUp);
-      } catch (_) {}
+      await _applyCaptureOrientation(ctrl);
       final minZ = await ctrl.getMinZoomLevel();
       final maxZ = await ctrl.getMaxZoomLevel();
       // Real-estate mode: always sit at the widest available zoom on the
@@ -329,9 +355,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
     try {
       await newCtrl.initialize();
       if (!mounted) return;
-      try {
-        await newCtrl.lockCaptureOrientation(DeviceOrientation.portraitUp);
-      } catch (_) {}
+      await _applyCaptureOrientation(newCtrl);
       final minZ = await newCtrl.getMinZoomLevel();
       final maxZ = await newCtrl.getMaxZoomLevel();
       try {
@@ -378,9 +402,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
       _controller = ctrl;
       try {
         await ctrl.initialize();
-        try {
-          await ctrl.lockCaptureOrientation(DeviceOrientation.portraitUp);
-        } catch (_) {}
+        await _applyCaptureOrientation(ctrl);
         final minZ = await ctrl.getMinZoomLevel();
         final maxZ = await ctrl.getMaxZoomLevel();
         if (!mounted) return;
@@ -551,9 +573,19 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                                   child: CircularProgressIndicator(
                                       color: Colors.white));
                             }
+                            // previewSize is reported in sensor (landscape)
+                            // orientation. Swap it only when we're actually
+                            // laid out portrait — iPad ignores the
+                            // setPreferredOrientations lock in initState, so
+                            // this screen really can be landscape.
                             final preview = ctrl.value.previewSize;
-                            final pw = preview?.height ?? 720.0;
-                            final ph = preview?.width ?? 1280.0;
+                            final sensorW = preview?.width ?? 1280.0;
+                            final sensorH = preview?.height ?? 720.0;
+                            final isPortrait =
+                                MediaQuery.orientationOf(context) ==
+                                    Orientation.portrait;
+                            final pw = isPortrait ? sensorH : sensorW;
+                            final ph = isPortrait ? sensorW : sensorH;
                             return GestureDetector(
                           onScaleStart: _onScaleStart,
                           onScaleUpdate: _onScaleUpdate,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../widgets/ui/content_width.dart';
 
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
@@ -18,7 +19,7 @@ class ClientComingSoonScreen extends StatelessWidget {
     final t = CorexAccentTheme.of(context);
     return CorexScaffold(
       title: feature,
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: Padding(
           padding: const EdgeInsets.all(24),

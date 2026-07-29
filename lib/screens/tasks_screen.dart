@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../widgets/ui/content_width.dart';
 import '../theme.dart';
 import '../providers/dashboard_provider.dart';
 import '../models/dashboard_data.dart';
@@ -191,7 +192,7 @@ class _TasksScreenState extends State<TasksScreen> with WidgetsBindingObserver {
     }
     return Scaffold(
       backgroundColor: AppTheme.background(context),
-      body: SafeArea(child: body),
+      body: ContentSafeArea(child: body),
       floatingActionButton: _tab == _TasksTab.active ? fab : null,
     );
   }

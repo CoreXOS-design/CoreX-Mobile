@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../widgets/ui/content_width.dart';
 
 import '../../models/client_models.dart';
 import '../../services/api_service.dart' show ApiException, ValidationException;
@@ -194,7 +195,7 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
           child: Text(_saving ? 'Saving…' : 'Save'),
         ),
       ],
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: _loadingOptions
             ? const Center(child: CircularProgressIndicator())

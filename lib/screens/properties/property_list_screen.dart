@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/branding.dart';
 import '../../theme.dart';
 import '../../models/property.dart';
@@ -366,7 +367,7 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
         if (!mounted) return;
         provider.fetchProperties();
       }),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: Column(
         children: [

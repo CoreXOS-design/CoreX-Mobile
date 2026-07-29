@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../utils/external_launch.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../config/env.dart';
 import '../../models/property_compliance.dart';
 import '../../models/property_overview.dart';
@@ -77,21 +79,12 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
     }
   }
 
-  Future<void> _open(String? url) async {
-    if (url == null || url.isEmpty) return;
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
+  Future<void> _open(String? url) => launchExternal(context, url);
 
   /// The document / FICA / photo flows live on the web — open them in an
   /// in-app browser so the agent stays inside the app.
-  Future<void> _openWeb(String? url) async {
-    if (url == null || url.isEmpty) return;
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-    await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
-  }
+  Future<void> _openWeb(String? url) =>
+      launchExternal(context, url, mode: LaunchMode.inAppBrowserView);
 
   Future<void> _loadComplianceAndContacts() async {
     final results = await Future.wait([
@@ -225,7 +218,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
           ),
         ],
       ),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: _loading
             ? const Center(child: CircularProgressIndicator())

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../models/today_card.dart';
+import '../../utils/external_launch.dart';
+import '../../widgets/ui/content_width.dart';
 
 /// Generic destination for Today cards whose dedicated screen has not been
 /// built yet. Shows the card's [items] as a read-only list and offers a
@@ -12,18 +13,8 @@ class CardFallbackScreen extends StatelessWidget {
   final TodayCard card;
   const CardFallbackScreen({super.key, required this.card});
 
-  Future<void> _openWeb(BuildContext context) async {
-    final url = card.viewAllUrl;
-    if (url == null || url.isEmpty) return;
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open $url')),
-      );
-    }
-  }
+  Future<void> _openWeb(BuildContext context) =>
+      launchExternal(context, card.viewAllUrl);
 
   /// Per-card-id item rendering. Each branch knows the item shape from the
   /// cockpit spec; everything else falls back to a generic title+subtitle.
@@ -171,7 +162,7 @@ class CardFallbackScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(card.title)),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: card.items.isEmpty
             ? Center(

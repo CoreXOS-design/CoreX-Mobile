@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../theme/corex_tokens.dart';
+import '../ui/content_width.dart';
 
 /// Standard CoreX redesign page shell: a radial-backlit gradient page with a
 /// lightweight transparent header (back button + title + optional actions).
@@ -50,13 +51,17 @@ class CorexScaffold extends StatelessWidget {
               BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
           child: SafeArea(
             bottom: false,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _Header(title: title, showBack: showBack, actions: actions),
-                Expanded(child: body),
-                if (bottomBar != null) bottomBar!,
-              ],
+            // Header and body share one measure so they stay aligned when the
+            // page is wider than a phone column (iPad, landscape, split view).
+            child: ContentWidth(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _Header(title: title, showBack: showBack, actions: actions),
+                  Expanded(child: body),
+                  if (bottomBar != null) bottomBar!,
+                ],
+              ),
             ),
           ),
         ),

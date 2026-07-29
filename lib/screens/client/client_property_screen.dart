@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tabler_icons/tabler_icons.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../utils/external_launch.dart';
 
 import '../../models/client_models.dart';
 import '../../services/api_service.dart' show ApiException;
@@ -140,11 +140,7 @@ class _ClientPropertyScreenState extends State<ClientPropertyScreen> {
     }
   }
 
-  Future<void> _launch(String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
+  Future<void> _launch(String url) => launchExternal(context, url);
 
   @override
   Widget build(BuildContext context) {

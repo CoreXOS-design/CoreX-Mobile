@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../widgets/ui/content_width.dart';
 import '../models/notification_models.dart';
 import '../providers/notifications_provider.dart';
 import '../theme.dart';
@@ -71,7 +72,7 @@ class _NotificationScheduleScreenState
             ),
         ],
       ),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: oh == null
             ? Center(

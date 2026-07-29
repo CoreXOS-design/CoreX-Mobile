@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/contact.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
@@ -134,7 +135,7 @@ class _NewContactScreenState extends State<NewContactScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('New Contact')),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: ListView(
           padding: const EdgeInsets.all(20),

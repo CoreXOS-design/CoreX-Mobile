@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../widgets/ui/content_width.dart';
+import '../../utils/external_launch.dart';
 
 import '../../models/portal_lead.dart';
 import '../../providers/portal_leads_provider.dart';
@@ -61,8 +62,9 @@ class _PortalLeadDetailScreenState extends State<PortalLeadDetailScreen> {
       child: Scaffold(
         backgroundColor: CorexTokens.pageBase(context),
         body: Container(
-          decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
-          child: SafeArea(
+          decoration:
+              BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
+          child: ContentSafeArea(
             bottom: false,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -147,8 +149,8 @@ class _PortalLeadDetailScreenState extends State<PortalLeadDetailScreen> {
               const SizedBox(width: 8),
               if (l.leadType != null && l.leadType!.isNotEmpty)
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: t.accentSoft,
                     borderRadius: BorderRadius.circular(999),
@@ -192,9 +194,7 @@ class _PortalLeadDetailScreenState extends State<PortalLeadDetailScreen> {
                 icon: TablerIcons.phone,
                 label: l.phone!,
                 onTap: () => _launch('tel:${l.phone}'),
-                trailing: l.isWhatsapp
-                    ? const _Tag(label: 'WhatsApp')
-                    : null,
+                trailing: l.isWhatsapp ? const _Tag(label: 'WhatsApp') : null,
               ),
             if (l.email != null && l.email!.isNotEmpty)
               _ContactRow(
@@ -281,12 +281,7 @@ class _PortalLeadDetailScreenState extends State<PortalLeadDetailScreen> {
     );
   }
 
-  Future<void> _launch(String u) async {
-    final uri = Uri.tryParse(u);
-    if (uri != null && await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    }
-  }
+  Future<void> _launch(String u) => launchExternal(context, u);
 
   static String _formatDateTime(DateTime dt) {
     final h = dt.hour.toString().padLeft(2, '0');

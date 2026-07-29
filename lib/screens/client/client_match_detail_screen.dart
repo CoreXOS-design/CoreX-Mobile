@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../widgets/ui/content_width.dart';
 
 import '../../models/client_models.dart';
 import '../../screens/core_matches/core_matches_common.dart';
@@ -211,7 +212,7 @@ class _ClientMatchDetailScreenState extends State<ClientMatchDetailScreen> {
           onPressed: _detail == null ? null : _edit,
         ),
       ],
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: RefreshIndicator(
           color: t.accent,

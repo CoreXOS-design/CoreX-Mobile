@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/contact.dart';
 import '../../models/visibility.dart';
 import '../../providers/visibility_provider.dart';
@@ -115,7 +116,7 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Contacts')),
       floatingActionButton: _GlowFab(onPressed: _openNew),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: Column(
           children: [

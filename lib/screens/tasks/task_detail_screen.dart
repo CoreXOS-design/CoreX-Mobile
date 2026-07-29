@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../theme.dart';
 import '../../models/dashboard_data.dart';
 import '../../models/task_extras.dart';
@@ -183,7 +184,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
           ),
         ],
       ),
-      body: SafeArea(
+      body: ContentSafeArea(
         child: RefreshIndicator(
           color: AppTheme.brand,
           backgroundColor: AppTheme.surface(context),

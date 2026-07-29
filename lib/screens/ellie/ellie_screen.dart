@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../widgets/ui/content_width.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../services/ai_api.dart';
@@ -22,12 +23,16 @@ class EllieScreen extends StatefulWidget {
 }
 
 class _EllieScreenState extends State<EllieScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final EllieVoiceRecorder _recorder = EllieVoiceRecorder();
   final AiApi _api = AiApi();
   late final AnimationController _pulse;
   _Phase _phase = _Phase.idle;
   String? _lastTranscript;
+
+  /// Null until the first status read completes.
+  MicPermission? _mic;
+  bool _askingMic = false;
 
   @override
   void initState() {
@@ -36,19 +41,84 @@ class _EllieScreenState extends State<EllieScreen>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
+    WidgetsBinding.instance.addObserver(this);
+    _refreshMic();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pulse.dispose();
     _recorder.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Picks up access granted from the Settings app without needing a restart.
+    if (state == AppLifecycleState.resumed) _refreshMic();
+  }
+
+  /// Reads current access without ever prompting.
+  Future<void> _refreshMic() async {
+    final status = await _recorder.permissionStatus();
+    if (!mounted || status == _mic) return;
+    setState(() => _mic = status);
+  }
+
+  /// Resolves microphone access as a step of its own.
+  ///
+  /// The system alert cancels the touch that triggered it, so a press-and-hold
+  /// that also asks for permission can never record — it always releases at
+  /// ~0 ms and is discarded as an accidental tap. Grant first, record on the
+  /// next press.
+  Future<void> _askForMic() async {
+    if (_askingMic) return;
+    _askingMic = true;
+    try {
+      final result = await _recorder.ensurePermission();
+      if (!mounted) return;
+      setState(() => _mic = result);
+      final messenger = ScaffoldMessenger.of(context);
+      switch (result) {
+        case MicPermission.granted:
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Microphone on — hold the mic and speak.'),
+            ),
+          );
+        case MicPermission.denied:
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Ellie needs the microphone to hear you.'),
+            ),
+          );
+        case MicPermission.permanentlyDenied:
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'Microphone access is off for CoreX. Turn it on in Settings.'),
+              duration: Duration(seconds: 6),
+              action: SnackBarAction(
+                label: 'Settings',
+                onPressed: EllieVoiceRecorder.openSettings,
+              ),
+            ),
+          );
+      }
+    } finally {
+      _askingMic = false;
+    }
   }
 
   bool _pointerDown = false;
 
   Future<void> _onPointerDown() async {
     if (_phase != _Phase.idle || _pointerDown) return;
+    if (_mic != MicPermission.granted) {
+      await _askForMic();
+      return;
+    }
     _pointerDown = true;
     final ok = await _recorder.start(onAutoStop: () {
       if (!mounted) return;
@@ -56,9 +126,22 @@ class _EllieScreenState extends State<EllieScreen>
     });
     if (!ok) {
       _pointerDown = false;
+      // Access can be revoked from Settings while the screen is open — resync
+      // so the button reverts to its enable state instead of failing silently.
+      await _refreshMic();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Microphone permission denied')),
+        SnackBar(
+          content: Text(_mic == MicPermission.granted
+              ? "Couldn't start recording — check nothing else is using the mic."
+              : 'Microphone access is off for CoreX.'),
+          action: _mic == MicPermission.granted
+              ? null
+              : const SnackBarAction(
+                  label: 'Settings',
+                  onPressed: EllieVoiceRecorder.openSettings,
+                ),
+        ),
       );
       return;
     }
@@ -104,7 +187,8 @@ class _EllieScreenState extends State<EllieScreen>
       case EllieClipStatus.tooShort:
         setState(() => _phase = _Phase.idle);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Hold to talk — press and hold the mic')),
+          const SnackBar(
+              content: Text('Hold to talk — press and hold the mic')),
         );
         return;
       case EllieClipStatus.empty:
@@ -125,8 +209,8 @@ class _EllieScreenState extends State<EllieScreen>
         setState(() => _phase = _Phase.idle);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content:
-                Text("Didn't catch that — hold the mic and speak after the tone"),
+            content: Text(
+                "Didn't catch that — hold the mic and speak after the tone"),
           ),
         );
         return;
@@ -211,9 +295,8 @@ class _EllieScreenState extends State<EllieScreen>
     return Scaffold(
       backgroundColor: CorexTokens.pageBase(context),
       body: Container(
-        decoration:
-            BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
-        child: SafeArea(
+        decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
+        child: ContentSafeArea(
           bottom: false,
           child: Column(
             children: [
@@ -253,142 +336,167 @@ class _EllieScreenState extends State<EllieScreen>
   Widget _activeBody() {
     final recording = _phase == _Phase.recording;
     final thinking = _phase == _Phase.thinking;
+    // Treat the pre-read state as ready so the button never flashes a
+    // permission prompt on a device that already granted access.
+    final needsMic = _mic != null && _mic != MicPermission.granted;
     final accent = CorexAccentTheme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Column(
-        children: [
-          const SizedBox(height: 24),
-          Text(
-            recording
-                ? 'Listening…'
-                : (thinking
-                    ? 'Thinking…'
-                    : 'Hold the mic and tell Ellie what to do'),
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 15,
-              color: CorexTokens.textSecondary(context),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Try: "Book a viewing with John at 12 Beach Road tomorrow at 11am"',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12,
-              fontStyle: FontStyle.italic,
-              color: CorexTokens.textTertiary(context),
-            ),
-          ),
-          const Spacer(),
-          Listener(
-            behavior: HitTestBehavior.opaque,
-            onPointerDown: thinking ? null : (_) => _onPointerDown(),
-            onPointerUp: thinking ? null : (_) => _onPointerUp(),
-            onPointerCancel: thinking ? null : (_) => _onPointerUp(),
-            child: AnimatedBuilder(
-              animation: _pulse,
-              builder: (_, __) {
-                final t = recording ? _pulse.value : 0.0;
-                final scale = 1.0 + (t * 0.1);
-                final baseColor =
-                    recording ? const Color(0xFFE53935) : accent.accent;
-                return Transform.scale(
-                  scale: scale,
-                  child: Container(
-                    width: 140,
-                    height: 140,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: recording
-                            ? const [Color(0xFFE53935), Color(0xFFB71C1C)]
-                            : [
-                                accent.accent,
-                                Color.lerp(
-                                        accent.accent, Colors.black, 0.35) ??
+    // ~470pt of fixed content (mic target, labels, transcript) does not fit a
+    // landscape phone or a short iPad window. Centre it while there's room and
+    // let it scroll once there isn't — Spacers would overflow instead.
+    return LayoutBuilder(
+      builder: (_, constraints) => SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(height: 24),
+              Text(
+                recording
+                    ? 'Listening…'
+                    : (thinking
+                        ? 'Thinking…'
+                        : (needsMic
+                            ? 'Ellie needs your microphone to hear you'
+                            : 'Hold the mic and tell Ellie what to do')),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 15,
+                  color: CorexTokens.textSecondary(context),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                needsMic
+                    ? (_mic == MicPermission.permanentlyDenied
+                        ? 'Turn on Microphone for CoreX in Settings, then come back.'
+                        : 'Tap the mic to allow access.')
+                    : 'Try: "Book a viewing with John at 12 Beach Road tomorrow at 11am"',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                  color: CorexTokens.textTertiary(context),
+                ),
+              ),
+              const SizedBox(height: 32),
+              Listener(
+                behavior: HitTestBehavior.opaque,
+                onPointerDown: thinking ? null : (_) => _onPointerDown(),
+                onPointerUp: thinking ? null : (_) => _onPointerUp(),
+                onPointerCancel: thinking ? null : (_) => _onPointerUp(),
+                child: AnimatedBuilder(
+                  animation: _pulse,
+                  builder: (_, __) {
+                    final t = recording ? _pulse.value : 0.0;
+                    final scale = 1.0 + (t * 0.1);
+                    final baseColor =
+                        recording ? const Color(0xFFE53935) : accent.accent;
+                    return Transform.scale(
+                      scale: scale,
+                      child: Container(
+                        width: 140,
+                        height: 140,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: recording
+                                ? const [Color(0xFFE53935), Color(0xFFB71C1C)]
+                                : [
                                     accent.accent,
-                              ],
+                                    Color.lerp(accent.accent, Colors.black,
+                                            0.35) ??
+                                        accent.accent,
+                                  ],
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.25),
+                              blurRadius: 18,
+                              offset: const Offset(0, 6),
+                            ),
+                            BoxShadow(
+                              color: baseColor.withValues(
+                                  alpha: recording ? 0.5 * (1 - t) : 0.35),
+                              blurRadius: 30 + (t * 20),
+                              spreadRadius: recording ? 6 + (t * 8) : 4,
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          thinking
+                              ? TablerIcons.loader_2
+                              : (recording
+                                  ? TablerIcons.microphone_2
+                                  : (needsMic
+                                      ? TablerIcons.microphone_off
+                                      : TablerIcons.microphone)),
+                          color: Colors.white,
+                          size: 56,
+                        ),
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.25),
-                          blurRadius: 18,
-                          offset: const Offset(0, 6),
-                        ),
-                        BoxShadow(
-                          color: baseColor.withValues(
-                              alpha: recording ? 0.5 * (1 - t) : 0.35),
-                          blurRadius: 30 + (t * 20),
-                          spreadRadius: recording ? 6 + (t * 8) : 4,
-                        ),
-                      ],
-                    ),
-                    child: Icon(
-                      thinking
-                          ? TablerIcons.loader_2
-                          : (recording
-                              ? TablerIcons.microphone_2
-                              : TablerIcons.microphone),
-                      color: Colors.white,
-                      size: 56,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            recording
-                ? 'Release to send'
-                : (thinking ? 'Sending to Ellie…' : 'Hold to talk'),
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: CorexTokens.textSecondary(context),
-            ),
-          ),
-          const Spacer(),
-          if (_lastTranscript != null && _lastTranscript!.isNotEmpty) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                gradient: CorexTokens.surfaceGradient(context),
-                borderRadius:
-                    BorderRadius.circular(CorexTokens.radius),
-                border: Border.all(color: accent.accentSoft),
+                    );
+                  },
+                ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'LAST TRANSCRIPT',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: CorexTokens.textTertiary(context),
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '"${_lastTranscript!}"',
-                    style: TextStyle(
-                      fontStyle: FontStyle.italic,
-                      color: CorexTokens.textPrimary(context),
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 16),
+              Text(
+                recording
+                    ? 'Release to send'
+                    : (thinking
+                        ? 'Sending to Ellie…'
+                        : (needsMic
+                            ? (_mic == MicPermission.permanentlyDenied
+                                ? 'Open Settings'
+                                : 'Tap to enable')
+                            : 'Hold to talk')),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: CorexTokens.textSecondary(context),
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-          ],
-        ],
+              const SizedBox(height: 32),
+              if (_lastTranscript != null && _lastTranscript!.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    gradient: CorexTokens.surfaceGradient(context),
+                    borderRadius: BorderRadius.circular(CorexTokens.radius),
+                    border: Border.all(color: accent.accentSoft),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'LAST TRANSCRIPT',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: CorexTokens.textTertiary(context),
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '"${_lastTranscript!}"',
+                        style: TextStyle(
+                          fontStyle: FontStyle.italic,
+                          color: CorexTokens.textPrimary(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

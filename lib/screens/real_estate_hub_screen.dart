@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../widgets/ui/content_width.dart';
 
 import '../theme/corex_tokens.dart';
 import '../widgets/corex/corex_module_tile.dart';
@@ -43,7 +44,7 @@ class RealEstateHubScreen extends StatelessWidget {
         backgroundColor: CorexTokens.pageBase(context),
         body: Container(
           decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
-          child: SafeArea(
+          child: ContentSafeArea(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

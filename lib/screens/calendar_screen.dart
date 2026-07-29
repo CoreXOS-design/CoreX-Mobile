@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../widgets/ui/content_width.dart';
 import '../theme.dart';
 import '../theme/corex_tokens.dart';
 import '../widgets/corex/corex_bottom_nav.dart';
@@ -359,7 +360,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         onTap: (tab) =>
             corexNavigateTo(context, tab, CorexNavTab.calendar),
       ),
-      body: SafeArea(
+      body: ContentSafeArea(
         bottom: false,
         child: Column(
           children: [

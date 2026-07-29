@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/notification_models.dart';
 import '../../models/today_card.dart';
 import '../../providers/dashboard_provider.dart';
@@ -92,7 +93,7 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
         backgroundColor: CorexTokens.pageBase(context),
         body: Container(
           decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
-          child: SafeArea(
+          child: ContentSafeArea(
             bottom: false,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

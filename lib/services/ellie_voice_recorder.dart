@@ -24,6 +24,18 @@ class EllieClip {
   const EllieClip(this.status, [this.file]);
 }
 
+/// Microphone access as the UI needs to reason about it.
+enum MicPermission {
+  granted,
+
+  /// Declined, but asking again is still possible (Android).
+  denied,
+
+  /// The OS will not prompt again — only Settings can turn it back on.
+  /// iOS reports this after a single "Don't Allow", because it never re-asks.
+  permanentlyDenied,
+}
+
 /// Push-to-talk recorder for Ellie. AAC m4a, 16 kHz mono. Caps at 28 seconds
 /// to leave headroom before the backend's 30 s hard limit.
 ///
@@ -47,35 +59,72 @@ class EllieVoiceRecorder {
   /// actually cut, so the tail of the last word isn't clipped.
   static const Duration stopTailDelay = Duration(milliseconds: 300);
 
-  /// Requests mic permission and starts recording. Returns `true` if
-  /// recording started, `false` if permission denied.
+  static MicPermission _map(PermissionStatus s) {
+    if (s.isGranted || s.isLimited) return MicPermission.granted;
+    if (s.isPermanentlyDenied || s.isRestricted) {
+      return MicPermission.permanentlyDenied;
+    }
+    return MicPermission.denied;
+  }
+
+  /// Current microphone access. Never shows a system prompt — safe to call on
+  /// screen build / app resume.
+  Future<MicPermission> permissionStatus() async =>
+      _map(await Permission.microphone.status);
+
+  /// Shows the system microphone prompt if it hasn't been answered yet.
+  ///
+  /// This is deliberately NOT part of [start]: the system alert cancels
+  /// whatever touch triggered it, so a press-and-hold that also asks for
+  /// permission can never produce a recording. Resolve access first, record on
+  /// the next press.
+  Future<MicPermission> ensurePermission() async {
+    final current = await permissionStatus();
+    if (current != MicPermission.denied) return current;
+    return _map(await Permission.microphone.request());
+  }
+
+  /// Opens the OS settings page for this app so access can be re-enabled.
+  static Future<bool> openSettings() => openAppSettings();
+
+  /// Starts recording. Returns `false` if the microphone isn't granted (call
+  /// [ensurePermission] first) or if the audio session refused to start.
   Future<bool> start({VoidCallback? onAutoStop}) async {
-    final status = await Permission.microphone.request();
-    if (!status.isGranted) return false;
-    if (!await _recorder.hasPermission()) return false;
+    // Single source of truth. Asking `record` for permission as well would
+    // fire a second, independent request against the same OS permission and
+    // can spuriously report "denied" while the first one is still settling.
+    if (await permissionStatus() != MicPermission.granted) return false;
 
     final dir = await getTemporaryDirectory();
     final path =
         '${dir.path}/ellie_${DateTime.now().millisecondsSinceEpoch}.m4a';
-    await _recorder.start(
-      const RecordConfig(
-        encoder: AudioEncoder.aacLc,
-        sampleRate: 16000,
-        numChannels: 1,
-        bitRate: 64000,
-        // Capture the raw mic signal — these strip soft/accented speech.
-        echoCancel: false,
-        noiseSuppress: false,
-        autoGain: false,
-        // VOICE_RECOGNITION avoids the aggressive voice-comm AGC/NS that the
-        // default source applies on many devices, which is the mobile
-        // equivalent of disabling the browser DSP constraints.
-        androidConfig: AndroidRecordConfig(
-          audioSource: AndroidAudioSource.voiceRecognition,
+    try {
+      await _recorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          sampleRate: 16000,
+          numChannels: 1,
+          bitRate: 64000,
+          // Capture the raw mic signal — these strip soft/accented speech.
+          echoCancel: false,
+          noiseSuppress: false,
+          autoGain: false,
+          // VOICE_RECOGNITION avoids the aggressive voice-comm AGC/NS that the
+          // default source applies on many devices, which is the mobile
+          // equivalent of disabling the browser DSP constraints.
+          androidConfig: AndroidRecordConfig(
+            audioSource: AndroidAudioSource.voiceRecognition,
+          ),
         ),
-      ),
-      path: path,
-    );
+        path: path,
+      );
+    } catch (_) {
+      // Audio session refused to start (another app holds the mic, or we were
+      // backgrounded mid-call). Leave no half-armed state behind.
+      _path = null;
+      _startedAt = null;
+      return false;
+    }
     _path = path;
     _startedAt = DateTime.now();
 

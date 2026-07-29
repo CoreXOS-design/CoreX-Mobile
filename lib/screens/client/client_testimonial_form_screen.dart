@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../widgets/ui/content_width.dart';
 
 import '../../models/client_models.dart';
 import '../../services/api_service.dart' show ApiException, ValidationException;
@@ -115,7 +116,7 @@ class _ClientTestimonialFormScreenState
   Widget build(BuildContext context) {
     return CorexScaffold(
       title: _done ? 'Review sent' : 'Review your agent',
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: _done ? _successView() : _formView(),
       ),

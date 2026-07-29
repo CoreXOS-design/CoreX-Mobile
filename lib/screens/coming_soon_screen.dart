@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../widgets/ui/content_width.dart';
 
 import '../theme/corex_accent_theme.dart';
 import '../theme/corex_tokens.dart';
@@ -31,8 +32,9 @@ class ComingSoonScreen extends StatelessWidget {
           onTap: (tab) => corexNavigateTo(context, tab, activeTab),
         ),
         body: Container(
-          decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
-          child: SafeArea(
+          decoration:
+              BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
+          child: ContentSafeArea(
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Column(
@@ -45,45 +47,62 @@ class ComingSoonScreen extends StatelessWidget {
                           color: CorexTokens.textPrimary(context)),
                     ),
                   ),
-                  const Spacer(),
-                  Icon(TablerIcons.sparkles, color: t.accent, size: 48),
-                  const SizedBox(height: 20),
-                  Text(
-                    feature,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: CorexTokens.textPrimary(context),
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'COMING SOON',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: CorexTokens.textSecondary(context),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 2.2,
-                    ),
-                  ),
-                  if (description != null) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      description!,
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: CorexTokens.textSecondary(context),
-                        fontSize: 14,
-                        height: 1.4,
+                  // Centred when there's room, scrollable when there isn't —
+                  // a fixed Spacer/Spacer sandwich overflows in landscape on
+                  // short viewports.
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (_, c) => SingleChildScrollView(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minHeight: c.maxHeight),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(TablerIcons.sparkles,
+                                  color: t.accent, size: 48),
+                              const SizedBox(height: 20),
+                              Text(
+                                feature,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: CorexTokens.textPrimary(context),
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.4,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'COMING SOON',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: CorexTokens.textSecondary(context),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 2.2,
+                                ),
+                              ),
+                              if (description != null) ...[
+                                const SizedBox(height: 16),
+                                Text(
+                                  description!,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: CorexTokens.textSecondary(context),
+                                    fontSize: 14,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                  ],
-                  const Spacer(),
+                  ),
+                  const SizedBox(height: 16),
                   CorexSecondaryButton(
                     label: 'Back',
                     leading: TablerIcons.arrow_left,

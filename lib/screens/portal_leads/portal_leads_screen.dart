@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../widgets/ui/content_width.dart';
 
 import '../../models/portal_lead.dart';
 import '../../providers/portal_leads_provider.dart';
@@ -54,7 +55,7 @@ class _PortalLeadsScreenState extends State<PortalLeadsScreen> {
         backgroundColor: CorexTokens.pageBase(context),
         body: Container(
           decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
-          child: SafeArea(
+          child: ContentSafeArea(
             bottom: false,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

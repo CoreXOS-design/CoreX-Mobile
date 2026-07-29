@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../widgets/ui/content_width.dart';
 
 import '../../models/seller_models.dart';
 import '../../providers/client_session_provider.dart';
@@ -113,7 +114,7 @@ class _ClientSellerListingsScreenState
     final t = CorexAccentTheme.of(context);
     return CorexScaffold(
       title: 'My Listings',
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: RefreshIndicator(
           color: t.accent,

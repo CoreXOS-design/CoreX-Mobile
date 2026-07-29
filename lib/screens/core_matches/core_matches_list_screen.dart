@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/core_match.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
@@ -64,7 +65,7 @@ class _CoreMatchesListScreenState extends State<CoreMatchesListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Core Matches')),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: RefreshIndicator(
           color: Theme.of(context).colorScheme.primary,

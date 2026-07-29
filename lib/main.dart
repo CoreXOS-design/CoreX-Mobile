@@ -72,11 +72,11 @@ void main() async {
 }
 
 Future<void> _requestInitialPermissions() async {
-  final cameraStatus = await Permission.camera.status;
-  if (!cameraStatus.isGranted && !cameraStatus.isPermanentlyDenied) {
-    await Permission.camera.request();
-  }
-
+  // Camera is NOT requested here on purpose. Asking up front stacks a second
+  // system alert on top of the notification one at cold start — iOS drops
+  // queued alerts, leaving permissions in a state the user never actually
+  // answered. image_picker raises the camera prompt at the point of capture,
+  // which is also what the user expects.
   final notificationStatus = await Permission.notification.status;
   if (!notificationStatus.isGranted &&
       !notificationStatus.isPermanentlyDenied) {

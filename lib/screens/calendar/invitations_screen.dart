@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/dashboard_data.dart';
 import '../../providers/dashboard_provider.dart';
 import '../../utils/app_time.dart';
@@ -34,7 +35,7 @@ class _InvitationsScreenState extends State<InvitationsScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Invitations')),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: RefreshIndicator(
           onRefresh: () => dash.loadInvitations(),

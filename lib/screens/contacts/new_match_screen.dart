@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
 import '../../widgets/p24_suburbs_picker.dart';
@@ -94,7 +95,7 @@ class _NewMatchScreenState extends State<NewMatchScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('New Match')),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: ListView(
           padding: const EdgeInsets.all(20),

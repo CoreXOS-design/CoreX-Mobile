@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../widgets/ui/content_width.dart';
 
 import '../../models/client_models.dart';
 import '../../providers/client_session_provider.dart';
@@ -118,7 +119,7 @@ class _ClientTestimonialsScreenState extends State<ClientTestimonialsScreen> {
               icon: const Icon(TablerIcons.plus),
               label: const Text('New review'),
             ),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: RefreshIndicator(
           color: t.accent,

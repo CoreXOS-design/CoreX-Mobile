@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/dashboard_data.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
@@ -74,7 +75,7 @@ class _ArchivedTasksScreenState extends State<ArchivedTasksScreen> {
       appBar: AppBar(
         title: Text('Archived${data != null ? ' · ${data.total}' : ''}'),
       ),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: RefreshIndicator(
           color: AppTheme.brand,

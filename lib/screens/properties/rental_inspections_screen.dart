@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../widgets/ui/content_width.dart';
 import '../../models/rental_inspections.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
@@ -324,7 +325,7 @@ class _RentalInspectionsScreenState extends State<RentalInspectionsScreen> {
       appBar: AppBar(
         title: const Text('Rental Inspections'),
       ),
-      body: SafeArea(
+      body: ContentSafeArea(
         top: false,
         child: Stack(
           children: [
