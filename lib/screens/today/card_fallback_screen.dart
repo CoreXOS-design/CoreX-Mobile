@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/today_card.dart';
+import '../../utils/display_text.dart';
 import '../../utils/external_launch.dart';
 import '../../widgets/ui/content_width.dart';
 
@@ -155,8 +156,7 @@ class CardFallbackScreen extends StatelessWidget {
     }
   }
 
-  String _humanise(String key) =>
-      key.replaceAll('_', ' ').replaceFirstMapped(RegExp(r'^.'), (m) => m[0]!.toUpperCase());
+  String _humanise(String key) => sentenceCaseLabel(key);
 
   @override
   Widget build(BuildContext context) {

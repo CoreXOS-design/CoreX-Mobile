@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../utils/display_text.dart';
 import '../../widgets/ui/content_width.dart';
 import '../../models/dashboard_data.dart';
 import '../../providers/dashboard_provider.dart';
@@ -92,7 +93,7 @@ class _InvitationCard extends StatelessWidget {
             ],
             if (!isPending) ...[
               const SizedBox(height: 8),
-              Text('Status: ${invitation.status}',
+              Text('Status: ${titleCaseLabel(invitation.status)}',
                   style: Theme.of(context).textTheme.bodySmall),
             ],
             const SizedBox(height: 12),

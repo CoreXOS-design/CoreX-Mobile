@@ -1,6 +1,67 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
+
+import 'image_upload.dart';
+
+/// A photo on its way to the upload queue, plus whatever we know about how it
+/// was captured.
+///
+/// [sensorRotation] is the only trustworthy fallback we have when a file's EXIF
+/// `Orientation` tag is missing or invalid: it is the device's own report of how
+/// far its camera sensor is mounted from upright, read from the `camera` plugin
+/// at the moment of capture. It is set only for in-app captures — photos coming
+/// from `image_picker` (OS camera app or gallery) carry no such reading, so it
+/// stays null and we never guess.
+class CapturedPhoto {
+  final File file;
+
+  /// Clockwise degrees the raw pixels must be rotated to sit upright, from the
+  /// capture-time sensor reading. Null when unknown (all `image_picker` paths).
+  final int? sensorRotation;
+
+  const CapturedPhoto(this.file, {this.sensorRotation});
+}
+
+/// How [processImageForUpload] decided which way is up.
+enum PhotoOrientationSource {
+  /// The file carried a valid EXIF `Orientation` (1-8). Pixels baked to match.
+  exif,
+
+  /// EXIF was absent or invalid, and the caller supplied a capture-time sensor
+  /// reading, which we applied.
+  sensor,
+
+  /// EXIF was absent or invalid and no trusted fallback existed. Pixels were
+  /// left alone AND the original (bad) tag was preserved, so the server keeps
+  /// whatever signal it has. This is the case worth logging.
+  unknown,
+}
+
+/// Outcome of a single [processImageForUpload] run.
+class ImageProcessResult {
+  /// False when the file couldn't be decoded/written — caller should upload the
+  /// original rather than drop the photo.
+  final bool ok;
+  final PhotoOrientationSource source;
+
+  /// The raw EXIF `Orientation` value as found, null when the tag was absent.
+  /// Values outside 1-8 are the defect this file exists to absorb.
+  final int? exifOrientation;
+
+  /// Degrees clockwise actually baked into the pixels.
+  final int appliedRotation;
+
+  const ImageProcessResult({
+    required this.ok,
+    this.source = PhotoOrientationSource.unknown,
+    this.exifOrientation,
+    this.appliedRotation = 0,
+  });
+
+  static const failed = ImageProcessResult(ok: false);
+}
 
 /// Parameters for [processImageForUpload], sent to a background isolate.
 class ImageProcessArgs {
@@ -8,34 +69,57 @@ class ImageProcessArgs {
   final String destPath;
   final int maxEdge;
   final int quality;
+
+  /// Clockwise degrees to apply when — and only when — the file's EXIF
+  /// `Orientation` is absent or outside the valid 1-8 range. Null means "no
+  /// trusted fallback"; the pixels and the bad tag are then both left as-is.
+  final int? fallbackRotation;
+
   const ImageProcessArgs({
     required this.srcPath,
     required this.destPath,
     required this.maxEdge,
     required this.quality,
+    this.fallbackRotation,
   });
 }
 
-/// Decodes [ImageProcessArgs.srcPath], **bakes the EXIF orientation into the
+/// Decodes [ImageProcessArgs.srcPath], **bakes the orientation into the
 /// pixels**, downscales the longest edge to [ImageProcessArgs.maxEdge], and
-/// writes a normal-orientation JPEG to [ImageProcessArgs.destPath].
+/// writes an upright JPEG to [ImageProcessArgs.destPath].
 ///
-/// Baking is the important part: the server re-encodes thumbnails and drops any
-/// EXIF Orientation flag, so a JPEG whose pixels are unrotated but rely on that
-/// flag renders sideways on the web. We physically rotate the pixels and emit a
-/// JPEG with no orientation flag (i.e. orientation = 1 / normal).
+/// Baking is the important part: the server re-encodes thumbnails with GD, which
+/// drops the EXIF Orientation flag without rotating the pixels, so a JPEG whose
+/// pixels rely on that flag renders sideways on the web.
 ///
-/// Returns `true` on success. On any failure (e.g. an undecodable format such
-/// as an iOS HEIC the picker didn't transcode) it returns `false` so the caller
-/// can fall back to uploading the original rather than dropping the photo.
+/// Orientation is resolved in strict priority order:
 ///
-/// Runs the CPU-heavy decode/resize/encode in a background isolate via
+///  1. **Valid EXIF (1-8)** — `img.decodeImage` already rotates the pixels for
+///     these while decoding (see the note below); we just stamp the tag to 1 so
+///     every downstream reader knows the pixels are correct and must not be
+///     turned again.
+///  2. **[ImageProcessArgs.fallbackRotation]** — used only when EXIF gives no
+///     usable answer. This is the device's own sensor reading from an in-app
+///     capture, not a guess.
+///  3. **Neither** — leave the pixels alone and put the original bad tag back.
+///     We do not guess a rotation from an absent tag, and we deliberately do not
+///     stamp a "1" we can't stand behind, so the server keeps whatever signal it
+///     has. [ImageProcessResult.source] reports this so the caller can log it.
+///
+/// NOTE ON READING THE TAG: the orientation must be read from the raw bytes with
+/// [img.decodeJpgExif], never from the decoded image. `img.decodeImage` applies
+/// orientation 2-8 itself while decoding and then *nulls the tag*, so a
+/// post-decode read always reports "absent" — which would silently push every
+/// well-behaved device down the fallback branch and rotate it a second time.
+///
+/// Runs the CPU-heavy decode/rotate/resize/encode in a background isolate via
 /// [compute] so it never janks the UI.
-Future<bool> processImageForUpload({
+Future<ImageProcessResult> processImageForUpload({
   required String srcPath,
   required String destPath,
   int maxEdge = 2560,
   int quality = 82,
+  int? fallbackRotation,
 }) {
   return compute(
     _processImageInIsolate,
@@ -44,20 +128,55 @@ Future<bool> processImageForUpload({
       destPath: destPath,
       maxEdge: maxEdge,
       quality: quality,
+      fallbackRotation: fallbackRotation,
     ),
   );
 }
 
 /// Top-level entry point for [compute]. Must not touch Flutter/UI state.
-bool _processImageInIsolate(ImageProcessArgs a) {
+ImageProcessResult _processImageInIsolate(ImageProcessArgs a) {
   try {
     final bytes = File(a.srcPath).readAsBytesSync();
-    final decoded = img.decodeImage(bytes);
-    if (decoded == null) return false;
 
-    // Rotate pixels to match the EXIF orientation, then the result carries no
-    // orientation flag — upright regardless of what the server does.
-    var image = img.bakeOrientation(decoded);
+    // Read the tag from the raw bytes FIRST — decoding consumes it.
+    final srcIfd = img.decodeJpgExif(bytes)?.imageIfd;
+    final int? rawOrientation =
+        (srcIfd != null && srcIfd.hasOrientation) ? srcIfd.orientation : null;
+    // 1-8 are the only values the EXIF spec defines. The HUAWEI/HONOR defect
+    // writes 0 (or nothing at all) onto pixels that genuinely need rotating, so
+    // an out-of-range tag must be treated as "no information", never as 1.
+    final validExif =
+        rawOrientation != null && rawOrientation >= 1 && rawOrientation <= 8;
+
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) return ImageProcessResult.failed;
+
+    img.Image image;
+    PhotoOrientationSource source;
+    var applied = 0;
+
+    if (validExif) {
+      // decodeImage already turned the pixels upright. Stamp the tag rather
+      // than leave it absent, so an absent tag downstream unambiguously means
+      // "nobody has vouched for these pixels".
+      image = decoded;
+      image.exif.imageIfd.orientation = 1;
+      source = PhotoOrientationSource.exif;
+      applied = _degreesForOrientation(rawOrientation);
+    } else if (a.fallbackRotation != null) {
+      final degrees = a.fallbackRotation! % 360;
+      image = degrees == 0 ? decoded : img.copyRotate(decoded, angle: degrees);
+      image.exif.imageIfd.orientation = 1;
+      source = PhotoOrientationSource.sensor;
+      applied = degrees;
+    } else {
+      // Nothing we can stand behind. Leave the pixels alone and put the
+      // original tag back (the decoder nulls it) so the server still sees
+      // whatever the device wrote and can apply its own safety net.
+      image = decoded;
+      image.exif.imageIfd.orientation = rawOrientation;
+      source = PhotoOrientationSource.unknown;
+    }
 
     // Downscale so the longest edge is at most [maxEdge]. copyResize keeps the
     // aspect ratio when only one dimension is given.
@@ -69,8 +188,81 @@ bool _processImageInIsolate(ImageProcessArgs a) {
     }
 
     File(a.destPath).writeAsBytesSync(img.encodeJpg(image, quality: a.quality));
-    return true;
+    return ImageProcessResult(
+      ok: true,
+      source: source,
+      exifOrientation: rawOrientation,
+      appliedRotation: applied,
+    );
   } catch (_) {
-    return false;
+    return ImageProcessResult.failed;
+  }
+}
+
+/// Clockwise degrees an EXIF orientation implies, for reporting only — the
+/// mirrored values (2/4/5/7) also flip, which [img.bakeOrientation] handles.
+int _degreesForOrientation(int orientation) => switch (orientation) {
+      3 || 4 => 180,
+      5 || 6 => 90,
+      7 || 8 => 270,
+      _ => 0,
+    };
+
+/// A photo that has been downscaled and turned upright, ready to upload.
+class PreparedPhoto {
+  final File file;
+
+  /// True when [file] is a temp file we created; the caller must delete it once
+  /// the bytes are safely elsewhere (durable queue or a completed upload).
+  final bool isTemp;
+
+  /// Null when processing failed and [file] is the untouched original.
+  final ImageProcessResult? result;
+
+  const PreparedPhoto({required this.file, required this.isTemp, this.result});
+}
+
+int _prepSeq = 0;
+
+/// Downscales [photo] and bakes its orientation into the pixels, ready for
+/// upload. Every capture path must go through this — a photo that skips it
+/// reaches the server with sensor-orientation pixels and lands sideways on the
+/// web the moment the server's thumbnailer drops the EXIF tag.
+///
+/// Never throws and never drops a photo: on any failure it returns the original
+/// file with `isTemp: false`.
+Future<PreparedPhoto> prepareForUpload(CapturedPhoto photo) async {
+  Directory tmpDir;
+  try {
+    tmpDir = await getTemporaryDirectory();
+  } catch (_) {
+    return PreparedPhoto(file: photo.file, isTemp: false);
+  }
+
+  try {
+    final dest = '${tmpDir.path}/corex_prep_'
+        '${DateTime.now().microsecondsSinceEpoch}_${_prepSeq++}.jpg';
+    final result = await processImageForUpload(
+      srcPath: photo.file.path,
+      destPath: dest,
+      maxEdge: ImageUploadConfig.maxEdge,
+      quality: ImageUploadConfig.quality,
+      fallbackRotation: photo.sensorRotation,
+    );
+    if (!result.ok) return PreparedPhoto(file: photo.file, isTemp: false);
+
+    if (result.source == PhotoOrientationSource.unknown) {
+      // Same discipline as the server's "left as-is" warning: a device that
+      // writes neither a valid tag nor reaches us through the in-app camera
+      // can still upload sideways, and that must not go unnoticed again.
+      debugPrint(
+        'Image orientation: EXIF tag ${result.exifOrientation ?? 'absent'} is '
+        'not usable and no capture-time sensor reading was available — pixels '
+        'left as-is, photo may upload sideways (${photo.file.path})',
+      );
+    }
+    return PreparedPhoto(file: File(dest), isTemp: true, result: result);
+  } catch (_) {
+    return PreparedPhoto(file: photo.file, isTemp: false);
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../utils/display_text.dart';
 import '../../widgets/ui/content_width.dart';
 import '../../models/branding.dart';
 import '../../theme.dart';
@@ -295,7 +296,8 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
       children: options.map((o) {
         final isSelected = o == selected;
         return ChoiceChip(
-          label: Text(o),
+          // Label is for reading; `o` stays the raw value the filter matches on.
+          label: Text(titleCaseLabel(o)),
           selected: isSelected,
           onSelected: (_) => onSelected(isSelected ? null : o),
           backgroundColor: AppTheme.surface2(context),
@@ -614,7 +616,7 @@ class _PropertyCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   StatusChip(
-                    label: property.status ?? 'N/A',
+                    label: titleCaseLabel(property.status, fallback: 'N/A'),
                     color: _statusColor(property.status),
                     dense: true,
                   ),

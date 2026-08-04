@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../utils/display_text.dart';
 import '../../widgets/ui/status_chip.dart';
 
 const Color kReactionInterested = Color(0xFF22C55E);
@@ -26,11 +27,9 @@ Color statusColor(String? s) {
 }
 
 Widget statusPill(String? status) {
-  final c = statusColor(status);
-  final label = (status == null || status.isEmpty) ? 'active' : status;
   return StatusChip(
-    label: label[0].toUpperCase() + label.substring(1),
-    color: c,
+    label: titleCaseLabel(status, fallback: 'Active'),
+    color: statusColor(status),
     dense: true,
   );
 }

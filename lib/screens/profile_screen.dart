@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../utils/display_text.dart';
 import '../widgets/ui/content_width.dart';
 import '../main.dart';
 import '../models/branding.dart';
@@ -81,7 +82,10 @@ class ProfileScreen extends StatelessWidget {
             _InfoCard(items: [
               _InfoRow(label: 'Name', value: auth.userName),
               _InfoRow(label: 'Email', value: user?['email'] ?? '-'),
-              _InfoRow(label: 'Role', value: user?['role'] ?? '-'),
+              _InfoRow(
+                  label: 'Role',
+                  value: titleCaseLabel(user?['role']?.toString(),
+                      fallback: '-')),
             ]),
             const SizedBox(height: 32),
             _SignOutButton(onPressed: () => logoutAndReset(context)),

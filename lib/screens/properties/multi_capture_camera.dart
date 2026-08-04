@@ -3,16 +3,23 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme.dart';
+import '../../utils/image_processing.dart';
 
 /// Full-screen, in-app camera with multi-capture, native lens switching
 /// (0.6x ultrawide / 1x / 2x / 3x — whichever the device exposes), digital
 /// zoom and flash. Photos accumulate; the user taps Done to review and
 /// confirm before the queue is returned.
+///
+/// Each returned photo carries the sensor orientation reported by the device at
+/// the moment it was taken. That reading is what makes this screen immune to the
+/// OEM firmware bug that ships JPEGs with a missing or invalid (0) EXIF
+/// Orientation tag over sideways pixels — we never have to trust the file's own
+/// metadata to know which way is up.
 class MultiCaptureCamera extends StatefulWidget {
   const MultiCaptureCamera({super.key});
 
-  static Future<List<File>> open(BuildContext context) async {
-    final result = await Navigator.of(context).push<List<File>>(
+  static Future<List<CapturedPhoto>> open(BuildContext context) async {
+    final result = await Navigator.of(context).push<List<CapturedPhoto>>(
       MaterialPageRoute(builder: (_) => const MultiCaptureCamera()),
     );
     return result ?? [];
@@ -43,8 +50,13 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   String? _error;
   bool _capturing = false;
 
-  final List<File> _captured = [];
+  final List<CapturedPhoto> _captured = [];
   bool _reviewing = false;
+
+  /// True while capture is pinned to portraitUp. Only then does the sensor's
+  /// mounting angle equal the rotation needed to stand a photo upright, so this
+  /// gates whether we hand that reading on as an orientation fallback.
+  bool _captureLockedPortrait = false;
 
   // Digital zoom on the active controller.
   double _minZoom = 1.0;
@@ -128,7 +140,26 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
       } else {
         await ctrl.unlockCaptureOrientation();
       }
-    } catch (_) {}
+      _captureLockedPortrait = portrait;
+    } catch (_) {
+      // Couldn't pin the orientation — the sensor reading no longer describes
+      // the capture, so stop offering it as a fallback.
+      _captureLockedPortrait = false;
+    }
+  }
+
+  /// Clockwise degrees needed to stand this device's raw sensor output upright,
+  /// or null when we can't say for certain and must fall back to the file's EXIF.
+  ///
+  /// Android reports `sensorOrientation` as the sensor's mounting angle relative
+  /// to the device's natural (portrait) orientation, so with capture pinned to
+  /// portraitUp it *is* the correction. Restricted to Android because that's
+  /// where the semantics are defined and where the defect lives; iOS writes a
+  /// correct EXIF tag, which the processing step already honours.
+  int? _sensorRotationForCapture(CameraController ctrl) {
+    if (!Platform.isAndroid || !_captureLockedPortrait) return null;
+    final degrees = ctrl.description.sensorOrientation % 360;
+    return degrees < 0 ? degrees + 360 : degrees;
   }
 
   Future<void> _initCamera() async {
@@ -486,7 +517,10 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
       final xFile = await ctrl.takePicture();
       if (!mounted) return;
       setState(() {
-        _captured.add(File(xFile.path));
+        _captured.add(CapturedPhoto(
+          File(xFile.path),
+          sensorRotation: _sensorRotationForCapture(ctrl),
+        ));
         _capturing = false;
       });
     } catch (_) {
@@ -503,7 +537,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   }
 
   void _confirm() => Navigator.of(context).pop(_captured);
-  void _cancel() => Navigator.of(context).pop(<File>[]);
+  void _cancel() => Navigator.of(context).pop(<CapturedPhoto>[]);
 
   @override
   Widget build(BuildContext context) {
@@ -702,7 +736,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                             onTap: () => setState(() => _reviewing = true),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(8),
-                              child: Image.file(_captured.last,
+                              child: Image.file(_captured.last.file,
                                   cacheWidth: 150, fit: BoxFit.cover),
                             ),
                           )
@@ -789,7 +823,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(AppTheme.radius),
-                child: Image.file(_captured[i],
+                child: Image.file(_captured[i].file,
                     cacheWidth: 300, fit: BoxFit.cover),
               ),
               Positioned(

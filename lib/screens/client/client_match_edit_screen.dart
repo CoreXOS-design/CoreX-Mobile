@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../utils/display_text.dart';
 import '../../widgets/ui/content_width.dart';
 
 import '../../models/client_models.dart';
@@ -367,8 +368,9 @@ class _ClientMatchEditScreenState extends State<ClientMatchEditScreen> {
       ),
       items: [
         const DropdownMenuItem<String?>(value: null, child: Text('Any')),
-        ...items
-            .map((e) => DropdownMenuItem<String?>(value: e, child: Text(e))),
+        // Label reads; `e` stays the raw value that gets submitted.
+        ...items.map((e) => DropdownMenuItem<String?>(
+            value: e, child: Text(titleCaseLabel(e)))),
       ],
       onChanged: onChanged,
     );

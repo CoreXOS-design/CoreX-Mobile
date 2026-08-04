@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import '../../models/gallery_tags.dart';
 import '../../services/api_service.dart';
 import '../../services/upload_queue.dart';
@@ -84,7 +83,6 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
 
   /// True while picked photos are being downscaled/orientation-baked.
   bool _preparing = false;
-  int _prepSeq = 0;
 
   final Random _rng = Random();
 
@@ -121,45 +119,24 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     });
   }
 
-  /// Downscale + orientation-bake each picked file, then add it to the durable
+  /// Downscale + orientation-bake each picked photo, then add it to the durable
   /// queue. Processing runs in a background isolate so the UI stays responsive;
   /// if it fails (e.g. an undecodable format) we enqueue the original rather
   /// than drop the photo.
-  Future<void> _enqueueAll(List<File> files) async {
-    if (files.isEmpty) return;
+  ///
+  /// The bake has to happen here, before the photo becomes a queue item: the
+  /// server's thumbnailer drops EXIF without rotating pixels, so anything that
+  /// reaches it leaning on an orientation tag lands sideways on the web.
+  Future<void> _enqueueAll(List<CapturedPhoto> photos) async {
+    if (photos.isEmpty) return;
     if (mounted) setState(() => _preparing = true);
     var skipped = 0;
-    Directory? tmpDir;
-    try {
-      tmpDir = await getTemporaryDirectory();
-    } catch (_) {
-      tmpDir = null;
-    }
-    for (final f in files) {
-      File toEnqueue = f;
-      File? processed;
-      if (tmpDir != null) {
-        try {
-          final dest =
-              '${tmpDir.path}/corex_prep_${DateTime.now().microsecondsSinceEpoch}_${_prepSeq++}.jpg';
-          final ok = await processImageForUpload(
-            srcPath: f.path,
-            destPath: dest,
-            maxEdge: ImageUploadConfig.maxEdge,
-            quality: ImageUploadConfig.quality,
-          );
-          if (ok) {
-            processed = File(dest);
-            toEnqueue = processed;
-          }
-        } catch (_) {
-          // Fall back to the original file.
-        }
-      }
+    for (final photo in photos) {
+      final prepared = await prepareForUpload(photo);
       try {
         final item = await UploadQueue.instance.enqueue(
           propertyId: widget.propertyId,
-          source: toEnqueue,
+          source: prepared.file,
           roomTag: _selectedTag,
         );
         if (mounted) setState(() => _items.add(item));
@@ -170,8 +147,8 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
       } finally {
         // The queue copied it into durable storage; drop the temp file.
         try {
-          if (processed != null && await processed.exists()) {
-            await processed.delete();
+          if (prepared.isTemp && await prepared.file.exists()) {
+            await prepared.file.delete();
           }
         } catch (_) {}
       }
@@ -224,7 +201,8 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
         imageQuality: ImageUploadConfig.quality,
       );
       if (picked.isEmpty || !mounted) return;
-      await _enqueueAll(picked.map((x) => File(x.path)).toList());
+      await _enqueueAll(
+          picked.map((x) => CapturedPhoto(File(x.path))).toList());
     } catch (_) {
       // user cancelled, ignore
     }
@@ -253,7 +231,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           imageQuality: ImageUploadConfig.quality,
         );
         if (shot == null) break;
-        await _enqueueAll([File(shot.path)]);
+        await _enqueueAll([CapturedPhoto(File(shot.path))]);
       }
     } catch (_) {/* user cancelled, ignore */}
   }

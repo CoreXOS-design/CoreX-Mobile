@@ -5,6 +5,7 @@ import '../../widgets/ui/content_width.dart';
 import '../../models/rental_inspections.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
+import '../../utils/image_processing.dart';
 import '../../utils/image_upload.dart';
 import 'camera_info.dart';
 import 'multi_capture_camera.dart';
@@ -173,17 +174,37 @@ class _RentalInspectionsScreenState extends State<RentalInspectionsScreen> {
     // Explain the capture modes once, ever, before the first camera use.
     await maybeShowCameraInfo(context);
     if (!mounted) return;
-    final files = await _pickImages();
-    if (files.isEmpty || !mounted) return;
-    await _mutate(
-      'Uploading ${files.length} photo${files.length == 1 ? '' : 's'}…',
-      () => _api.uploadRentalImages(
-        widget.propertyId,
-        s.type,
-        files,
-        customId: s.customId,
-      ),
-    );
+    final photos = await _pickImages();
+    if (photos.isEmpty || !mounted) return;
+
+    // Downscale + bake orientation into the pixels before upload, exactly as
+    // the property gallery does. Without this a portrait photo reaches the
+    // server as sideways pixels plus a "rotate me" tag the thumbnailer throws
+    // away, and the inspection gallery renders it on its side.
+    final prepared = <PreparedPhoto>[];
+    for (final photo in photos) {
+      prepared.add(await prepareForUpload(photo));
+      if (!mounted) return;
+    }
+
+    try {
+      await _mutate(
+        'Uploading ${prepared.length} photo${prepared.length == 1 ? '' : 's'}…',
+        () => _api.uploadRentalImages(
+          widget.propertyId,
+          s.type,
+          prepared.map((p) => p.file).toList(),
+          customId: s.customId,
+        ),
+      );
+    } finally {
+      for (final p in prepared) {
+        if (!p.isTemp) continue;
+        try {
+          if (await p.file.exists()) await p.file.delete();
+        } catch (_) {}
+      }
+    }
   }
 
   Future<void> _deletePhoto(RentalSection s, int index) async {
@@ -235,8 +256,10 @@ class _RentalInspectionsScreenState extends State<RentalInspectionsScreen> {
   /// Photo picker offering the same three capture modes as the property
   /// gallery upload — Multi Capture (in-app burst), Native (OS camera, one
   /// shot per launch, looped), and Gallery. Returns the selected files
-  /// (possibly empty).
-  Future<List<File>> _pickImages() async {
+  /// (possibly empty). Multi Capture photos carry the capture-time sensor
+  /// orientation; the two `image_picker` modes can't, so they rely on the
+  /// file's own EXIF tag.
+  Future<List<CapturedPhoto>> _pickImages() async {
     final source = await showModalBottomSheet<_PhotoSource>(
       context: context,
       backgroundColor: AppTheme.surface(context),
@@ -281,11 +304,11 @@ class _RentalInspectionsScreenState extends State<RentalInspectionsScreen> {
             maxHeight: ImageUploadConfig.maxHeight,
             imageQuality: ImageUploadConfig.quality,
           );
-          return picked.map((x) => File(x.path)).toList();
+          return picked.map((x) => CapturedPhoto(File(x.path))).toList();
         case _PhotoSource.native:
           // OS camera takes one shot per launch; loop so the user can take
           // several in a row, matching the gallery upload behaviour.
-          final files = <File>[];
+          final files = <CapturedPhoto>[];
           while (mounted) {
             final shot = await _picker.pickImage(
               source: ImageSource.camera,
@@ -295,7 +318,7 @@ class _RentalInspectionsScreenState extends State<RentalInspectionsScreen> {
               imageQuality: ImageUploadConfig.quality,
             );
             if (shot == null) break;
-            files.add(File(shot.path));
+            files.add(CapturedPhoto(File(shot.path)));
           }
           return files;
       }

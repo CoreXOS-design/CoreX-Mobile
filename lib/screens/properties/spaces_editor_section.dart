@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/space.dart';
 import '../../services/api_service.dart';
+import '../../utils/display_text.dart';
 import '../../theme.dart';
 import '../../widgets/ai/ai_suggestions_section.dart';
 
@@ -242,7 +243,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              space.type,
+                              titleCaseLabel(space.type),
                               style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w700,
@@ -325,7 +326,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                                       final selected =
                                           currentList().contains(f);
                                       return FilterChip(
-                                        label: Text(f),
+                                        label: Text(titleCaseLabel(f)),
                                         selected: selected,
                                         onSelected: (_) => toggle(f),
                                         backgroundColor: AppTheme.surface2(context),
@@ -552,7 +553,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                         Icon(_iconForType(t), size: 18, color: AppTheme.brand),
                         const SizedBox(width: 8),
                         Text(
-                          t,
+                          titleCaseLabel(t),
                           style:
                               TextStyle(color: AppTheme.textPrimary(context)),
                         ),
@@ -595,7 +596,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      space.type,
+                      titleCaseLabel(space.type),
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -694,7 +695,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                 final list = _features[key] ?? <String>[];
                 final selected = list.contains(f);
                 return FilterChip(
-                  label: Text(f),
+                  label: Text(titleCaseLabel(f)),
                   selected: selected,
                   onSelected: (_) {
                     setState(() {

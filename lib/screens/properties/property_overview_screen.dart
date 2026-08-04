@@ -3,13 +3,18 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../utils/external_launch.dart';
 import '../../widgets/ui/content_width.dart';
+import '../../widgets/ui/tabbed_detail_scaffold.dart';
 import '../../config/env.dart';
 import '../../models/property_compliance.dart';
+import '../../models/property_drive.dart';
 import '../../models/property_overview.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
+import '../../utils/app_time.dart';
+import '../../utils/display_text.dart';
 import 'add_contact_sheet.dart';
+import 'property_drive_card.dart';
 import 'property_edit_screen.dart';
 import 'rental_inspections_screen.dart';
 
@@ -32,6 +37,9 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
   PropertyOverview? _data;
   PropertyCompliance? _compliance;
   List<PropertyContact>? _contacts;
+  PropertyDriveData? _drive;
+  bool _driveLoading = true;
+  String? _driveError;
   bool _loading = true;
   bool _sending = false;
   String? _error;
@@ -92,6 +100,11 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
           (v) => v, onError: (_) => null),
       _api.getPropertyContacts(widget.propertyId).then<Object?>(
           (v) => v, onError: (_) => null),
+      // Drive is supplementary: a failure here must leave the rest of the
+      // screen intact. Keep the error rather than dropping it — the section
+      // still renders and offers a Retry.
+      _api.getPropertyDocuments(widget.propertyId).then<Object?>(
+          (v) => v, onError: (e) => e),
     ]);
     if (!mounted) return;
     setState(() {
@@ -101,7 +114,49 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
       if (results[1] is List<PropertyContact>) {
         _contacts = results[1] as List<PropertyContact>;
       }
+      _driveLoading = false;
+      final drive = results[2];
+      if (drive is PropertyDriveData) {
+        _drive = drive;
+        _driveError = null;
+      } else {
+        _driveError =
+            drive is ApiException ? drive.message : "Couldn't load files.";
+      }
     });
+  }
+
+  /// Re-fetch just the Drive payload — behind the card's Retry, and when a
+  /// download 404s, proving the list we're showing is stale.
+  Future<void> _refreshDrive() async {
+    if (mounted) {
+      setState(() {
+        _driveLoading = _drive == null;
+        _driveError = null;
+      });
+    }
+    try {
+      final d = await _api.getPropertyDocuments(widget.propertyId);
+      if (!mounted) return;
+      setState(() {
+        _drive = d;
+        _driveLoading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _driveLoading = false;
+        // Keep the last good list if we have one; only surface the error when
+        // there's nothing to show.
+        if (_drive == null) _driveError = e.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _driveLoading = false;
+        if (_drive == null) _driveError = "Couldn't load files.";
+      });
+    }
   }
 
   Future<void> _refreshCompliance() async {
@@ -199,116 +254,168 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Overview'),
-        actions: [
-          IconButton(
-            tooltip: 'Edit',
-            icon: const Icon(Icons.edit_outlined),
-            onPressed: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) =>
-                      PropertyEditScreen(propertyId: widget.propertyId),
-                ),
-              );
-              if (mounted) _load(forceRefresh: true);
-            },
+    final editAction = IconButton(
+      tooltip: 'Edit',
+      icon: const Icon(Icons.edit_outlined),
+      onPressed: () async {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PropertyEditScreen(propertyId: widget.propertyId),
           ),
-        ],
-      ),
-      body: ContentSafeArea(
-        top: false,
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-                ? _ErrorState(message: _error!, onRetry: () => _load(forceRefresh: true))
-                : RefreshIndicator(
-                    onRefresh: () => _load(forceRefresh: true),
-                    child: _buildBody(_data!),
-                  ),
+        );
+        if (mounted) _load(forceRefresh: true);
+      },
+    );
+
+    if (_loading || _error != null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Overview'),
+          actions: _error != null ? null : [editAction],
+        ),
+        body: ContentSafeArea(
+          top: false,
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _ErrorState(
+                  message: _error!,
+                  onRetry: () => _load(forceRefresh: true)),
+        ),
+      );
+    }
+
+    final p = _data!;
+    return Scaffold(
+      body: TabbedDetailScaffold(
+        title: p.title ?? 'Overview',
+        actions: [editAction],
+        hero: _hero(p),
+        onRefresh: () => _load(forceRefresh: true),
+        tabs: _tabs(p),
       ),
     );
   }
 
-  Widget _buildBody(PropertyOverview p) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      children: [
-        _hero(p),
-        const SizedBox(height: 16),
-        _atAGlance(p),
-        const SizedBox(height: 16),
-        if (_compliance != null) ...[
-          _sectionTitle('Compliance'),
-          const SizedBox(height: 8),
-          _complianceCard(_compliance!),
-          const SizedBox(height: 16),
-        ],
-        // Rental inspection galleries — live rentals only. Gate strictly on
-        // the server flag; never derive eligibility here.
-        if (p.rentalInspectionsAvailable) ...[
-          _sectionTitle('Inspections'),
-          const SizedBox(height: 8),
-          _inspectionsCard(p),
-          const SizedBox(height: 16),
-        ],
-        _sectionTitle('Contacts'),
-        const SizedBox(height: 8),
-        _contactsCard(),
-        const SizedBox(height: 16),
-        if ((p.description ?? '').isNotEmpty) ...[
-          _sectionTitle('Description'),
-          _description(p.description!),
-          const SizedBox(height: 16),
-        ],
-        if ((p.livePreviewUrl ?? '').isNotEmpty) ...[
-          SizedBox(
-            width: double.infinity,
-            height: 44,
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.open_in_new, size: 16),
-              label: const Text('Open Live Preview'),
-              onPressed: () => _open(p.livePreviewUrl),
-            ),
+  /// Tab grouping mirrors the web property page's own tabs (`info`,
+  /// `contacts`, `drive`, `rental-images` in `show.blade.php`), so an agent
+  /// moving between web and mobile finds the same things in the same places.
+  List<DetailTab> _tabs(PropertyOverview p) {
+    return [
+      DetailTab(label: 'Info', children: _infoTab(p)),
+      DetailTab(label: 'Compliance', children: _complianceTab()),
+      DetailTab(
+        label: 'Contacts',
+        count: _contactsTabCount(p),
+        children: _contactsTab(p),
+      ),
+      DetailTab(
+        label: 'Drive',
+        count: _drive?.documents.length,
+        children: [
+          PropertyDriveCard(
+            data: _drive,
+            api: _api,
+            propertyId: widget.propertyId,
+            loading: _driveLoading,
+            error: _driveError,
+            onRetry: _refreshDrive,
+            onStale: _refreshDrive,
           ),
-          const SizedBox(height: 16),
         ],
-        _sectionTitle('Where this listing is published'),
-        const SizedBox(height: 8),
-        _portalLinksBlock(p.portalLinks),
+      ),
+      // Rental inspection galleries — live rentals only. Gate strictly on the
+      // server flag; never derive eligibility here.
+      if (p.rentalInspectionsAvailable)
+        DetailTab(label: 'Inspections', children: [_inspectionsCard(p)]),
+    ];
+  }
+
+  int? _contactsTabCount(PropertyOverview p) {
+    final linked = _contacts;
+    if (linked == null) return null;
+    var n = linked.length;
+    if (p.agent != null) n++;
+    if (p.secondAgent != null) n++;
+    if (p.owner != null) n++;
+    return n;
+  }
+
+  List<Widget> _infoTab(PropertyOverview p) {
+    return [
+      _atAGlance(p),
+      const SizedBox(height: 16),
+      if ((p.description ?? '').isNotEmpty) ...[
+        _sectionTitle('Description'),
+        _description(p.description!),
         const SizedBox(height: 16),
-        if (p.agent != null || p.secondAgent != null) ...[
-          _sectionTitle(p.secondAgent != null ? 'Listing Agents' : 'Listing Agent'),
-          const SizedBox(height: 8),
-          if (p.agent != null)
-            _contactCard(p.agent!,
-                roleLabel: p.secondAgent != null ? 'Lead agent' : null),
-          if (p.secondAgent != null) ...[
-            if (p.agent != null) const SizedBox(height: 8),
-            _contactCard(p.secondAgent!, roleLabel: 'Co-agent'),
-          ],
-          const SizedBox(height: 16),
-        ],
-        if (p.owner != null) ...[
-          _sectionTitle('Owner'),
-          const SizedBox(height: 8),
-          _contactCard(p.owner!, onTap: p.owner!.id != null ? () {} : null),
-          const SizedBox(height: 16),
-        ],
-        if ((p.virtualTourUrl ?? '').isNotEmpty) ...[
-          _sectionTitle('Virtual Tour'),
-          const SizedBox(height: 8),
-          _virtualTourCard(p.virtualTourUrl!),
-          const SizedBox(height: 16),
-        ],
-        _sectionTitle('Key dates'),
-        const SizedBox(height: 8),
-        _keyDatesGrid(p.keyDates),
       ],
-    );
+      if ((p.livePreviewUrl ?? '').isNotEmpty) ...[
+        SizedBox(
+          width: double.infinity,
+          height: 44,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: const Text('Open Live Preview'),
+            onPressed: () => _open(p.livePreviewUrl),
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
+      _sectionTitle('Where this listing is published'),
+      const SizedBox(height: 8),
+      _portalLinksBlock(p.portalLinks),
+      const SizedBox(height: 16),
+      if ((p.virtualTourUrl ?? '').isNotEmpty) ...[
+        _sectionTitle('Virtual Tour'),
+        const SizedBox(height: 8),
+        _virtualTourCard(p.virtualTourUrl!),
+        const SizedBox(height: 16),
+      ],
+      _sectionTitle('Key dates'),
+      const SizedBox(height: 8),
+      _keyDatesGrid(p.keyDates),
+    ];
+  }
+
+  List<Widget> _complianceTab() {
+    final c = _compliance;
+    if (c == null) {
+      return [
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      ];
+    }
+    return [_complianceCard(c)];
+  }
+
+  /// Everyone attached to the listing in one place — linked contacts plus the
+  /// agents and owner, which used to be three separate sections all rendering
+  /// the same kind of card.
+  List<Widget> _contactsTab(PropertyOverview p) {
+    return [
+      _contactsCard(),
+      if (p.agent != null || p.secondAgent != null) ...[
+        const SizedBox(height: 16),
+        _sectionTitle(
+            p.secondAgent != null ? 'Listing Agents' : 'Listing Agent'),
+        const SizedBox(height: 8),
+        if (p.agent != null)
+          _contactCard(p.agent!,
+              roleLabel: p.secondAgent != null ? 'Lead agent' : null),
+        if (p.secondAgent != null) ...[
+          if (p.agent != null) const SizedBox(height: 8),
+          _contactCard(p.secondAgent!, roleLabel: 'Co-agent'),
+        ],
+      ],
+      if (p.owner != null) ...[
+        const SizedBox(height: 16),
+        _sectionTitle('Owner'),
+        const SizedBox(height: 8),
+        _contactCard(p.owner!, onTap: p.owner!.id != null ? () {} : null),
+      ],
+    ];
   }
 
   Widget _hero(PropertyOverview p) {
@@ -409,35 +516,86 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
     );
   }
 
+  /// The listing's specs as a grid of tiles — value on top, label under it.
+  ///
+  /// These used to be one horizontally-scrolling line of "4 Beds · 2 Baths · …",
+  /// which hid everything past the third item behind a sideways scroll nobody
+  /// discovers. Four to a row, wrapping, so every spec is visible at once.
   Widget _atAGlance(PropertyOverview p) {
-    final items = <String>[];
-    if (p.beds != null) items.add('${p.beds} Beds');
-    if (p.baths != null) items.add('${p.baths} Baths');
-    if (p.garages != null) items.add('${p.garages} Garages');
-    if ((p.sizeM2 ?? '').isNotEmpty) items.add('${p.sizeM2} m² floor');
-    if ((p.erfSizeM2 ?? '').isNotEmpty) items.add('${p.erfSizeM2} m² erf');
-    if (p.photosCount != null) items.add('${p.photosCount} Photos');
-    if ((p.mandateType ?? '').isNotEmpty) items.add('${p.mandateType} mandate');
+    final items = <({String value, String label})>[
+      if (p.beds != null) (value: '${p.beds}', label: 'Beds'),
+      if (p.baths != null) (value: '${p.baths}', label: 'Baths'),
+      if (p.garages != null) (value: '${p.garages}', label: 'Garages'),
+      if ((p.sizeM2 ?? '').isNotEmpty)
+        (value: p.sizeM2!, label: 'Floor m²'),
+      if ((p.erfSizeM2 ?? '').isNotEmpty)
+        (value: p.erfSizeM2!, label: 'Erf m²'),
+      if (p.photosCount != null)
+        (value: '${p.photosCount}', label: 'Photos'),
+      if ((p.mandateType ?? '').isNotEmpty)
+        (value: p.mandateType!, label: 'Mandate'),
+    ];
 
     if (items.isEmpty) return const SizedBox.shrink();
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          for (var i = 0; i < items.length; i++) ...[
-            Text(items[i],
-                style: TextStyle(
-                  color: AppTheme.textSecondary(context),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                )),
-            if (i < items.length - 1)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text('·',
-                    style: TextStyle(color: AppTheme.textMuted(context))),
+
+    const spacing = 8.0;
+    const perRow = 4;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width =
+            (constraints.maxWidth - spacing * (perRow - 1)) / perRow;
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: [
+            for (final it in items)
+              SizedBox(
+                width: width,
+                child: _specTile(it.value, it.label),
               ),
           ],
+        );
+      },
+    );
+  }
+
+  Widget _specTile(String value, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.surface2(context),
+        borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Values vary in length — "4" next to "1 200" next to "Sole" — so
+          // shrink to fit rather than overflow a fixed-width tile.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                height: 1.1,
+                color: AppTheme.textPrimary(context),
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 10.5,
+              height: 1.1,
+              color: AppTheme.textSecondary(context),
+            ),
+          ),
         ],
       ),
     );
@@ -900,18 +1058,11 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
     );
   }
 
+  /// Shared with the Drive section — see [relativeTime]. Keeps this screen's
+  /// long-standing behaviour of echoing an unparseable value back verbatim.
   String? _relative(String? iso) {
     if (iso == null || iso.isEmpty) return null;
-    final dt = DateTime.tryParse(iso);
-    if (dt == null) return iso;
-    final diff = DateTime.now().difference(dt);
-    if (diff.inSeconds < 60) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    if (diff.inDays < 7) return '${diff.inDays}d ago';
-    if (diff.inDays < 30) return '${(diff.inDays / 7).floor()}w ago';
-    if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}mo ago';
-    return '${(diff.inDays / 365).floor()}y ago';
+    return relativeTime(iso) ?? iso;
   }
 
   String _fmtDate(String? iso) {
@@ -955,10 +1106,12 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
       final l = a.label.toLowerCase();
       if (gateKey == 'photos' && l.contains('photo')) return a;
       if (gateKey == 'fica_sellers' && l.contains('fica')) return a;
+      // Deliberately not a bare 'market' match: that also catches "Send
+      // Marketing Pack", which is its own action and would be swallowed by
+      // this gate instead of being offered. Every real authority/mandate label
+      // carries one of these two words.
       if (gateKey == 'authority_to_market' &&
-          (l.contains('authority') ||
-              l.contains('mandate') ||
-              l.contains('market'))) {
+          (l.contains('authority') || l.contains('mandate'))) {
         return a;
       }
       if (gateKey == 'details_complete' &&
@@ -973,8 +1126,8 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
   Widget _ficaBadge(String? status, bool passed) {
     final color = passed ? Colors.green : Colors.orange;
     final text = passed
-        ? 'FICA approved'
-        : 'FICA ${(status ?? 'pending').replaceAll('_', ' ')}';
+        ? 'FICA Approved'
+        : 'FICA ${titleCaseLabel(status, fallback: 'Pending')}';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -995,7 +1148,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
         color: AppTheme.brand.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(role,
+      child: Text(titleCaseLabel(role),
           style: TextStyle(
               color: AppTheme.brand,
               fontSize: 11,
@@ -1204,14 +1357,18 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
     );
   }
 
-  /// Next-action buttons the server returned that aren't already surfaced
-  /// inline on a specific failing gate (e.g. "Send Marketing Pack"). Each
-  /// deep-links via its `action_url`.
+  /// Next-action buttons the server returned that don't belong to a checklist
+  /// gate at all (e.g. "Send Marketing Pack"). Each deep-links via its
+  /// `action_url`.
+  ///
+  /// Every gate consumes its action, **passed or not**. A failing gate already
+  /// renders the action inline on its own row, and a passed gate's action is
+  /// done — surfacing it here is what put a live "Send mandate for signature"
+  /// button under the sellers on a fully-compliant property.
   List<Widget> _extraActions(PropertyCompliance c) {
     if (c.nextActions.isEmpty) return const [];
     final consumed = <ComplianceNextAction>{};
     for (final gate in c.checklist) {
-      if (gate.passed) continue;
       final a = _actionFor(c, gate.key);
       if (a != null) consumed.add(a);
     }
@@ -1345,7 +1502,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimary(context))),
                 if ((s.role ?? '').isNotEmpty)
-                  Text(s.role!,
+                  Text(titleCaseLabel(s.role),
                       style: TextStyle(
                           fontSize: 12,
                           color: AppTheme.textSecondary(context))),

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../utils/display_text.dart';
 import '../../widgets/ui/content_width.dart';
 import '../../models/contact.dart';
 import '../../models/visibility.dart';
@@ -225,7 +226,10 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (c.contactTypeName != null && c.contactTypeName!.isNotEmpty) ...[
-            StatusChip(label: c.contactTypeName!, color: brand.button, dense: true),
+            StatusChip(
+                label: titleCaseLabel(c.contactTypeName),
+                color: brand.button,
+                dense: true),
             const SizedBox(width: 6),
           ],
           if (c.whatsappCount > 0)

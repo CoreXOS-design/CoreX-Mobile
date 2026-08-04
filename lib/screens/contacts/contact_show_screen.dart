@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../utils/display_text.dart';
 import '../../widgets/ui/content_width.dart';
+import '../../widgets/ui/tabbed_detail_scaffold.dart';
 import '../../models/contact.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
@@ -15,7 +17,12 @@ const Color _kSuccess = Color(0xFF22C55E);
 
 class ContactShowScreen extends StatefulWidget {
   final int contactId;
-  const ContactShowScreen({super.key, required this.contactId});
+
+  /// Injectable for tests, matching [PropertyOverviewScreen]. Production
+  /// callers leave it null and get the default client.
+  final ApiService? api;
+
+  const ContactShowScreen({super.key, required this.contactId, this.api});
 
   @override
   State<ContactShowScreen> createState() => _ContactShowScreenState();
@@ -24,7 +31,7 @@ class ContactShowScreen extends StatefulWidget {
 typedef ContactDetailScreen = ContactShowScreen;
 
 class _ContactShowScreenState extends State<ContactShowScreen> {
-  final ApiService _api = ApiService();
+  late final ApiService _api = widget.api ?? ApiService();
   Contact? _contact;
   bool _loading = true;
   String? _error;
@@ -125,79 +132,144 @@ class _ContactShowScreenState extends State<ContactShowScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_contact?.fullName ?? 'Contact'),
-        actions: _contact == null
-            ? null
-            : [
-                IconButton(
-                  tooltip: 'Edit',
-                  icon: const Icon(Icons.edit_outlined),
-                  onPressed: _openEdit,
-                ),
-              ],
-      ),
-      body: ContentSafeArea(
-        top: false,
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-                ? _ErrorState(message: _error!, onRetry: _load)
-                : RefreshIndicator(
-                    color: AppTheme.brand,
-                    backgroundColor: AppTheme.surface(context),
-                    onRefresh: _load,
-                    child: _buildBody(),
-                  ),
-      ),
-    );
-  }
+    if (_loading || _error != null) {
+      return Scaffold(
+        appBar: AppBar(title: Text(_contact?.fullName ?? 'Contact')),
+        body: ContentSafeArea(
+          top: false,
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _ErrorState(message: _error!, onRetry: _load),
+        ),
+      );
+    }
 
-  Widget _buildBody() {
     final c = _contact!;
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      children: [
-        _header(c),
-        const SizedBox(height: 16),
-        _primaryAction(),
-        const SizedBox(height: 8),
-        _secondaryActions(),
-        const SizedBox(height: 24),
-        _complianceTile(),
-        const SizedBox(height: 24),
-        _sectionTitle('Matches'),
-        const SizedBox(height: 8),
-        if (c.matches.isEmpty)
-          _emptySection(
-            icon: Icons.search_rounded,
-            heading: 'No matches yet',
-            body: 'Tap + Match to capture buyer or tenant criteria.',
-          )
-        else
-          ...c.matches.map(_matchTile),
-        const SizedBox(height: 24),
-        _sectionTitle('Linked Properties'),
-        const SizedBox(height: 8),
-        if (c.linkedProperties.isEmpty)
-          _emptySection(
-            icon: Icons.home_work_rounded,
-            heading: 'No linked listings',
-            body: 'Tap + Listing to create a property tied to this contact.',
-          )
-        else
-          ...c.linkedProperties.map(_linkedTile),
-      ],
+    return Scaffold(
+      body: TabbedDetailScaffold(
+        title: c.fullName,
+        actions: [
+          IconButton(
+            tooltip: 'Edit',
+            icon: const Icon(Icons.edit_outlined),
+            onPressed: _openEdit,
+          ),
+        ],
+        hero: _hero(c),
+        heroHeight: 108,
+        onRefresh: _load,
+        tabs: [
+          DetailTab(label: 'Details', children: _detailsTab(c)),
+          DetailTab(
+            label: 'Matches',
+            count: c.matches.length,
+            children: [
+              if (c.matches.isEmpty)
+                _emptySection(
+                  icon: Icons.search_rounded,
+                  heading: 'No matches yet',
+                  body: 'Tap + Match to capture buyer or tenant criteria.',
+                )
+              else
+                ...c.matches.map(_matchTile),
+            ],
+          ),
+          DetailTab(
+            label: 'Properties',
+            count: c.linkedProperties.length,
+            children: [
+              if (c.linkedProperties.isEmpty)
+                _emptySection(
+                  icon: Icons.home_work_rounded,
+                  heading: 'No linked listings',
+                  body:
+                      'Tap + Listing to create a property tied to this contact.',
+                )
+              else
+                ...c.linkedProperties.map(_linkedTile),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _header(Contact c) {
+  List<Widget> _detailsTab(Contact c) {
+    return [
+      _primaryAction(),
+      const SizedBox(height: 8),
+      _secondaryActions(),
+      const SizedBox(height: 20),
+      _detailsCard(c),
+      const SizedBox(height: 20),
+      _complianceTile(),
+    ];
+  }
+
+  /// Collapsing header.
+  ///
+  /// Deliberately does NOT repeat the name — the app bar already carries it,
+  /// and it's the one thing that must survive the hero collapsing. This shows
+  /// what the name alone doesn't: who they are to us, and the fastest way to
+  /// reach them.
+  Widget _hero(Contact c) {
+    final reach = [c.phone, c.email]
+        .where((s) => s != null && s.isNotEmpty)
+        .join('  ·  ');
+    return Align(
+      alignment: Alignment.bottomLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 26,
+              backgroundColor: AppTheme.brandDark,
+              child: Text(
+                _initials(c.fullName),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 17,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (c.contactTypeName != null &&
+                      c.contactTypeName!.isNotEmpty)
+                    _pill(titleCaseLabel(c.contactTypeName), AppTheme.brand),
+                  if (reach.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      reach,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppTheme.textSecondary(context),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detailsCard(Contact c) {
     final hasDetails = (c.phone != null && c.phone!.isNotEmpty) ||
         (c.email != null && c.email!.isNotEmpty) ||
         (c.idNumber != null && c.idNumber!.isNotEmpty);
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.surface(context),
@@ -207,46 +279,12 @@ class _ContactShowScreenState extends State<ContactShowScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: AppTheme.brandDark,
-                child: Text(
-                  _initials(c.fullName),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      c.fullName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textPrimary(context),
-                      ),
-                    ),
-                    if (c.contactTypeName != null &&
-                        c.contactTypeName!.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      _pill(c.contactTypeName!, AppTheme.brand),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (hasDetails) const SizedBox(height: 12),
+          if (!hasDetails && c.whatsappCount == 0)
+            Text(
+              'No phone, email or ID captured yet. Tap Edit to add them.',
+              style: TextStyle(
+                  fontSize: 13, color: AppTheme.textSecondary(context)),
+            ),
           if (c.phone != null && c.phone!.isNotEmpty)
             _kv(Icons.phone_rounded, c.phone!),
           if (c.email != null && c.email!.isNotEmpty)
@@ -354,15 +392,6 @@ class _ContactShowScreenState extends State<ContactShowScreen> {
     );
   }
 
-  Widget _sectionTitle(String text) => Text(
-        text,
-        style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          color: AppTheme.textPrimary(context),
-        ),
-      );
-
   Widget _emptySection({
     required IconData icon,
     required String heading,
@@ -445,7 +474,7 @@ class _ContactShowScreenState extends State<ContactShowScreen> {
               ),
               if (m.status != null && m.status!.isNotEmpty) ...[
                 const SizedBox(width: 8),
-                _pill(m.status!, AppTheme.brand),
+                _pill(titleCaseLabel(m.status), AppTheme.brand),
               ],
             ],
           ),

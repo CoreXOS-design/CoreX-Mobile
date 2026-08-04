@@ -18,6 +18,7 @@ import '../models/portal_lead.dart';
 import '../models/p24_location.dart';
 import '../models/property.dart';
 import '../models/property_compliance.dart';
+import '../models/property_drive.dart';
 import '../models/property_options.dart';
 import '../models/property_overview.dart';
 import '../models/rental_inspections.dart';
@@ -37,6 +38,11 @@ class ApiService {
   /// than [_timeout]'s 15s. Uploads are compressed client-side, but we still
   /// allow generous headroom so a slow connection doesn't drop the upload.
   static const Duration _uploadTimeout = Duration(minutes: 5);
+
+  /// Document downloads stream whole files (a scanned mandate can be tens of
+  /// MB) and aren't retried, so they need far more room than [_timeout] without
+  /// going as wide as an upload.
+  static const Duration _downloadTimeout = Duration(minutes: 2);
 
   /// Per-request timeout for a single property photo. Downscaled photos are
   /// 1-3MB, so 60s is generous even on a rural link; the gallery upload retries
@@ -2144,7 +2150,11 @@ class ApiService {
 
   /// Pulls the server `message` out of a 403 body, defaulting to the
   /// agreed "Not your contact." copy when the agent doesn't own the contact.
-  String _forbiddenMessage(String body) {
+  ///
+  /// [fallback] overrides that default for endpoints where it doesn't fit, and
+  /// carries the load when the body isn't JSON at all (see
+  /// [downloadPropertyDocument], which can't ask for a JSON error body).
+  String _forbiddenMessage(String body, {String fallback = 'Not your contact.'}) {
     try {
       final json = jsonDecode(body);
       if (json is Map && json['message'] is String) {
@@ -2152,7 +2162,24 @@ class ApiService {
         if (m.isNotEmpty) return m;
       }
     } catch (_) {}
-    return 'Not your contact.';
+    return fallback;
+  }
+
+  /// Best-effort filename from a `Content-Disposition` header, falling back to
+  /// [fallback] when it's missing, unparseable, or percent-decoding fails.
+  String _fileNameFromDisposition(String? disposition, String fallback) {
+    if (disposition == null) return fallback;
+    final m = RegExp(r'filename\*?=(?:UTF-8'
+            "''"
+            r')?\"?([^\";]+)\"?')
+        .firstMatch(disposition);
+    if (m == null) return fallback;
+    try {
+      final name = Uri.decodeComponent(m.group(1)!.trim());
+      return name.isEmpty ? fallback : name;
+    } catch (_) {
+      return fallback;
+    }
   }
 
   Future<ContactConsentData> getContactConsent(int id) async {
@@ -2313,18 +2340,10 @@ class ApiService {
             headers: await _headers())
         .timeout(_timeout);
     if (response.statusCode == 200) {
-      var name = fallbackName;
-      final cd = response.headers['content-disposition'];
-      if (cd != null) {
-        final m = RegExp(r'filename\*?=(?:UTF-8'
-                "''"
-                r')?\"?([^\";]+)\"?')
-            .firstMatch(cd);
-        if (m != null) name = Uri.decodeComponent(m.group(1)!.trim());
-      }
       return DownloadedFile(
         bytes: response.bodyBytes,
-        fileName: name,
+        fileName: _fileNameFromDisposition(
+            response.headers['content-disposition'], fallbackName),
         mimeType: response.headers['content-type'],
       );
     }
@@ -2345,6 +2364,87 @@ class ApiService {
     }
     throw ApiException(response.statusCode,
         _serverErrorMessage(response.body, 'delete document'));
+  }
+
+  // --- Property Drive (documents filed against a listing) ---
+
+  /// Every file filed against a property on the web Drive tab — mandates, FICA
+  /// docs, e-signed offers, compliance PDFs. Read-only from mobile: uploading,
+  /// tagging and deleting stay web-only.
+  ///
+  /// Returns the full flat document list (newest first) plus the folder counts;
+  /// folder filtering happens client-side off this one payload.
+  Future<PropertyDriveData> getPropertyDocuments(int propertyId) async {
+    final response = await http
+        .get(Uri.parse('$baseUrl/v1/mobile/properties/$propertyId/documents'),
+            headers: await _headers())
+        .timeout(_timeout);
+    await _handleUnauthorized(response.statusCode);
+    if (response.statusCode == 200) {
+      return PropertyDriveData.fromJson(
+          Map<String, dynamic>.from(jsonDecode(response.body) as Map));
+    }
+    if (response.statusCode == 403) {
+      throw ApiException(
+          403,
+          _forbiddenMessage(response.body,
+              fallback: "You don't have access to this property."));
+    }
+    throw ApiException(response.statusCode, 'Failed to load documents');
+  }
+
+  /// Downloads one property document, returning its bytes + a best-effort
+  /// filename for the share sheet.
+  ///
+  /// [downloadUrl] is the absolute URL from the list payload. It already points
+  /// at the right endpoint, but it is NOT a public link — the bearer token still
+  /// goes on the request. Falls back to building the path when the server
+  /// omits it.
+  ///
+  /// Unlike every other call here this one does NOT ask for
+  /// `Accept: application/json`: the response is a streamed file, and requesting
+  /// JSON risks the server negotiating a JSON body instead of the bytes. The
+  /// cost is that error bodies may come back as HTML rather than
+  /// `{"message": ...}`, so the fallback copy below has to stand on its own.
+  Future<DownloadedFile> downloadPropertyDocument(
+    int propertyId,
+    int documentId,
+    String fallbackName, {
+    String? downloadUrl,
+  }) async {
+    final token = await getToken();
+    final url = (downloadUrl != null && downloadUrl.isNotEmpty)
+        ? downloadUrl
+        : '$baseUrl/v1/mobile/properties/$propertyId/documents/$documentId/download';
+    final response = await http.get(
+      Uri.parse(url),
+      headers: {
+        'Accept': '*/*',
+        if (token != null) 'Authorization': 'Bearer $token',
+      },
+    ).timeout(_downloadTimeout);
+    await _handleUnauthorized(response.statusCode);
+    if (response.statusCode == 200) {
+      return DownloadedFile(
+        bytes: response.bodyBytes,
+        fileName: _fileNameFromDisposition(
+            response.headers['content-disposition'], fallbackName),
+        mimeType: response.headers['content-type'],
+      );
+    }
+    if (response.statusCode == 403) {
+      // Either no access to the property, or an assistant account with
+      // downloads switched off. Not retryable either way.
+      throw ApiException(
+          403,
+          _forbiddenMessage(response.body,
+              fallback: "You don't have permission to download this file."));
+    }
+    if (response.statusCode == 404) {
+      // The list is stale — the document isn't on this property any more.
+      throw ApiException(404, 'That file is no longer on this property.');
+    }
+    throw ApiException(response.statusCode, 'Failed to download document');
   }
 
   Future<ContactFicaData> getContactFica(int id) async {

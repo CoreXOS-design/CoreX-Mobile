@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/display_text.dart';
 import 'ui/status_chip.dart';
 
 class PriorityBadge extends StatelessWidget {
@@ -23,9 +24,7 @@ class PriorityBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StatusChip(
-      label: priority.isEmpty
-          ? priority
-          : priority[0].toUpperCase() + priority.substring(1),
+      label: titleCaseLabel(priority),
       color: _color,
       dense: dense,
     );

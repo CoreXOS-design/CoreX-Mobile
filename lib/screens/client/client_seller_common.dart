@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../utils/display_text.dart';
 import '../../widgets/ui/status_chip.dart';
 
 const Color _kSellerActive = Color(0xFF22C55E);
@@ -34,15 +35,8 @@ Color sellerStatusColor(String? s) {
 /// Status pill for a listing. Title-cases the raw status and normalises
 /// underscores so "under_offer" reads "Under Offer".
 Widget sellerStatusPill(String? status) {
-  final raw = (status == null || status.isEmpty) ? 'active' : status;
-  final label = raw
-      .replaceAll('_', ' ')
-      .split(' ')
-      .where((w) => w.isNotEmpty)
-      .map((w) => w[0].toUpperCase() + w.substring(1))
-      .join(' ');
   return StatusChip(
-    label: label,
+    label: titleCaseLabel(status, fallback: 'Active'),
     color: sellerStatusColor(status),
     dense: true,
   );

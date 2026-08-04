@@ -10,6 +10,7 @@ import '../../services/client_auth_service.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../widgets/corex/corex_card.dart';
+import '../../utils/display_text.dart';
 import '../../widgets/corex/corex_scaffold.dart';
 import '../auth/client/client_agency_picker_screen.dart';
 
@@ -267,9 +268,7 @@ class _ClientConsentScreenState extends State<ClientConsentScreen> {
     ];
   }
 
-  static String _titleCase(String s) => s.isEmpty
-      ? s
-      : s[0].toUpperCase() + s.substring(1).replaceAll('_', ' ');
+  static String _titleCase(String s) => titleCaseLabel(s);
 }
 
 class _ConsentRow extends StatelessWidget {
