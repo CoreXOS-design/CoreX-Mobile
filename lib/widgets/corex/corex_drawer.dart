@@ -6,7 +6,6 @@ import '../../main.dart';
 import '../../providers/auth_provider.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
-import '../../screens/profile_screen.dart';
 import '../../screens/settings_screen.dart';
 import '../../screens/notifications/notifications_screen.dart';
 
@@ -82,11 +81,6 @@ class CorexDrawer extends StatelessWidget {
             ),
             const Divider(color: Color(0x14FFFFFF), height: 1),
             const SizedBox(height: 8),
-            _Item(
-              icon: TablerIcons.user,
-              label: 'Profile',
-              onTap: () => _push(context, const ProfileScreen()),
-            ),
             _Item(
               icon: TablerIcons.bell,
               label: 'Notifications',

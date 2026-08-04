@@ -40,10 +40,15 @@ PageRouteBuilder<T> corexTabRoute<T>(Widget page) {
 
 void corexNavigateTo(BuildContext context, CorexNavTab tab, CorexNavTab from) {
   if (tab == from) return;
+  final nav = Navigator.of(context);
+  // Me is pushed on top of the current tab (see below) rather than replacing
+  // it, so leaving it pops that overlay first — otherwise the profile route
+  // would linger underneath the new tab and Back would land back on it.
+  if (from == CorexNavTab.me && nav.canPop()) nav.pop();
   Widget target;
   switch (tab) {
     case CorexNavTab.home:
-      Navigator.of(context).pushAndRemoveUntil(
+      nav.pushAndRemoveUntil(
         corexTabRoute(const HomeScreen()),
         (route) => false,
       );
@@ -58,15 +63,15 @@ void corexNavigateTo(BuildContext context, CorexNavTab tab, CorexNavTab from) {
       target = const EllieScreen();
       break;
     case CorexNavTab.me:
-      // Profile has no bottom nav of its own, so open it as a pushed page
-      // on top of the current screen — same behaviour as the home-screen
-      // avatar — instead of replacing the tab and stranding the user.
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const ProfileScreen()),
+      // Pushed on top of the current screen instead of replacing it, so
+      // sign-out still has a live route underneath to fall back to. It carries
+      // the bottom nav itself (showNav) so the bar never disappears.
+      nav.push(
+        corexTabRoute(const ProfileScreen(showNav: true)),
       );
       return;
   }
-  Navigator.of(context).pushReplacement(corexTabRoute(target));
+  nav.pushReplacement(corexTabRoute(target));
 }
 
 class CorexBottomNav extends StatelessWidget {

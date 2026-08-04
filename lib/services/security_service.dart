@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
@@ -63,7 +64,11 @@ class SecurityService {
           IOSAuthMessages(cancelButton: 'Use password'),
         ],
       );
-    } on PlatformException {
+    } on PlatformException catch (e) {
+      // Swallowed so the caller can fall back to the password, but logged:
+      // a prompt that silently never appears (no enrolment, activity not
+      // resumed yet, plugin busy) is otherwise invisible on a real device.
+      debugPrint('[biometrics] authenticate failed: ${e.code} ${e.message}');
       return false;
     } finally {
       // Keep the suppression alive briefly past the prompt dismissal so the
@@ -80,17 +85,17 @@ class SecurityService {
     }
   }
 
-  Future<void> saveCredentials(String email, String password) async {
+  /// Remembers the email only. The password is deliberately never persisted:
+  /// biometric unlock re-uses the existing session token, so nothing needs a
+  /// stored password, and a vault that holds one is a vault worth attacking.
+  /// The legacy password key is deleted on every save so installs that
+  /// predate this behaviour get scrubbed on their next sign-in.
+  Future<void> saveEmail(String email) async {
     await _vault.write(key: _kEmail, value: email);
-    await _vault.write(key: _kPassword, value: password);
+    await _vault.delete(key: _kPassword);
   }
 
-  Future<({String? email, String? password})> readCredentials() async {
-    return (
-      email: await _vault.read(key: _kEmail),
-      password: await _vault.read(key: _kPassword),
-    );
-  }
+  Future<String?> readEmail() => _vault.read(key: _kEmail);
 
   Future<void> clearCredentials() async {
     await _vault.delete(key: _kEmail);

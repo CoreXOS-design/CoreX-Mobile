@@ -766,11 +766,24 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                   ),
                   SizedBox(
                     width: 56,
+                    height: 56,
                     child: _captured.isNotEmpty
                         ? TextButton(
                             onPressed: () =>
                                 setState(() => _reviewing = true),
+                            // Zero padding + shrink-wrapped tap target: the
+                            // default TextButton padding leaves under 32px of
+                            // text width in this 56px slot, which wraps "Done"
+                            // onto two lines.
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                              minimumSize: const Size(56, 56),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
                             child: Text('Done',
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.visible,
                                 style: TextStyle(
                                     color: AppTheme.brand,
                                     fontWeight: FontWeight.w700,

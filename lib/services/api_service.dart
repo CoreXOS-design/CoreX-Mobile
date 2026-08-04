@@ -54,7 +54,33 @@ class ApiService {
   static const String _spacesCatalogTsKey = 'spaces_catalog_v1_ts';
   static const Duration _spacesCatalogTtl = Duration(hours: 24);
 
-  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
+  /// Primary vault: EncryptedSharedPreferences — the configuration
+  /// [SecurityService] has always used, and the only one measured to work.
+  ///
+  /// The plugin's *default* Android configuration silently drops writes on
+  /// some devices: on an API 36 emulator, `write` reports success and every
+  /// subsequent `read` returns null, forever. The auth token lived in that
+  /// vault, so it was never persisted — every cold start looked signed out,
+  /// which is what sent agents back to the password form on each launch (and
+  /// left biometrics with no session to unlock). Measured, not theorised:
+  /// both configurations were probed side by side on the device.
+  ///
+  /// Every access is time-boxed by [_vaultTimeout], because this
+  /// configuration is in turn the one that can hang on first read on some
+  /// Android builds (see the warning in [ClientAuthService]). A hang costs a
+  /// few seconds and falls through to [_legacySecureStorage], not a launch.
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
+
+  /// The plugin defaults, kept only as a fallback: it still holds tokens
+  /// written by older builds on devices where that path does work, and it
+  /// costs nothing to keep writing.
+  static const FlutterSecureStorage _legacySecureStorage =
+      FlutterSecureStorage();
+
+  static const Duration _vaultTimeout = Duration(seconds: 3);
 
   /// In-memory copy of the auth token for the lifetime of the app process.
   /// This is the source of truth during a session: secure storage on some
@@ -64,36 +90,61 @@ class ApiService {
   /// Persistence to secure storage is best-effort, for cold-start restore.
   static String? _inMemoryToken;
 
-  /// Reads the auth token. Prefers the in-memory copy, then secure storage,
-  /// then the legacy plaintext SharedPreferences key (migrated forward once).
-  /// All storage access is fault-tolerant so a failing keystore can't throw
-  /// the request path off the rails.
+  /// Reads the auth token. Prefers the in-memory copy, then each secure vault
+  /// in turn, then the legacy plaintext SharedPreferences key (migrated
+  /// forward once). All storage access is fault-tolerant and time-boxed so a
+  /// failing — or hanging — keystore can't throw the request path off the
+  /// rails or stall the launch.
   Future<String?> getToken() async {
     if (_inMemoryToken != null) return _inMemoryToken;
 
-    try {
-      final secure = await _secureStorage.read(key: _tokenKey);
-      if (secure != null) {
-        _inMemoryToken = secure;
-        return secure;
+    for (final (name, vault) in [
+      ('encrypted', _secureStorage),
+      ('legacy', _legacySecureStorage),
+    ]) {
+      try {
+        final value =
+            await vault.read(key: _tokenKey).timeout(_vaultTimeout);
+        if (value != null) {
+          _inMemoryToken = value;
+          // Heal whichever vault lost it, so the next launch has both.
+          unawaited(_writeTokenToVaults(value));
+          return value;
+        }
+      } catch (e) {
+        debugPrint('[auth] $name storage read failed: $e');
       }
-    } catch (e) {
-      debugPrint('[auth] secure storage read failed: $e');
     }
 
     final prefs = await SharedPreferences.getInstance();
     final legacy = prefs.getString(_tokenKey);
     if (legacy != null) {
       _inMemoryToken = legacy;
-      try {
-        await _secureStorage.write(key: _tokenKey, value: legacy);
-        await prefs.remove(_tokenKey);
-      } catch (e) {
-        debugPrint('[auth] legacy token migration failed: $e');
-      }
+      await _writeTokenToVaults(legacy);
+      await prefs.remove(_tokenKey);
       return legacy;
     }
+    debugPrint('[auth] no stored token found — cold start is signed out');
     return null;
+  }
+
+  /// Best-effort write to both vaults. Never throws; a vault that fails or
+  /// hangs is logged and skipped.
+  Future<void> _writeTokenToVaults(String token) async {
+    try {
+      await _secureStorage
+          .write(key: _tokenKey, value: token)
+          .timeout(_vaultTimeout);
+    } catch (e) {
+      debugPrint('[auth] secure storage write failed: $e');
+    }
+    try {
+      await _legacySecureStorage
+          .write(key: _tokenKey, value: token)
+          .timeout(_vaultTimeout);
+    } catch (e) {
+      debugPrint('[auth] legacy storage write failed: $e');
+    }
   }
 
   Future<void> saveToken(String token) async {
@@ -101,19 +152,35 @@ class ApiService {
     // Fresh session — clear any stale 401 streak from a previous session.
     _consecutive401s = 0;
     _last401At = null;
+    await _writeTokenToVaults(token);
+    // Read straight back: a write that reports success but stores nothing is
+    // the exact failure that loses the session at the next cold start, and it
+    // is otherwise completely silent.
     try {
-      await _secureStorage.write(key: _tokenKey, value: token);
+      final a = await _secureStorage.read(key: _tokenKey).timeout(_vaultTimeout);
+      final b = await _legacySecureStorage
+          .read(key: _tokenKey)
+          .timeout(_vaultTimeout);
+      if (a != token && b != token) {
+        debugPrint('[auth] neither vault round-tripped the token — '
+            'this session will not survive an app restart');
+      }
     } catch (e) {
-      debugPrint('[auth] secure storage write failed: $e');
+      debugPrint('[auth] token round-trip check failed: $e');
     }
   }
 
   Future<void> clearToken() async {
     _inMemoryToken = null;
     try {
-      await _secureStorage.delete(key: _tokenKey);
+      await _secureStorage.delete(key: _tokenKey).timeout(_vaultTimeout);
     } catch (e) {
       debugPrint('[auth] secure storage delete failed: $e');
+    }
+    try {
+      await _legacySecureStorage.delete(key: _tokenKey).timeout(_vaultTimeout);
+    } catch (e) {
+      debugPrint('[auth] legacy storage delete failed: $e');
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);

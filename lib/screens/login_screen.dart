@@ -39,12 +39,12 @@ class _LoginScreenState extends State<LoginScreen> {
     final auth = context.read<AuthProvider>();
     unawaited(context.read<BrandingProvider>().loadBySlug(Env.agencySlug));
     unawaited(_checkDemoStatus());
-    final saved = await auth.readSavedCredentials();
+    final savedEmail = await auth.readSavedEmail();
     final supported = await SecurityService.instance.canUseBiometrics();
     if (!mounted) return;
     setState(() {
-      _emailController.text = saved.email;
-      _passwordController.text = saved.password;
+      _emailController.text = savedEmail;
+      // The password is never stored, so there is nothing to prefill.
       _biometricSupported = supported;
     });
 
@@ -196,19 +196,13 @@ class _LoginScreenState extends State<LoginScreen> {
     await auth.consumeBiometricSetupPrompt(enable: enable);
   }
 
+  /// Biometrics unlock an existing (locked) session only. With no stored
+  /// password there is nothing to replay against the login endpoint, so a
+  /// signed-out user has to type it.
   Future<void> _handleBiometric() async {
     final auth = context.read<AuthProvider>();
-    if (auth.isLocked) {
-      await auth.unlockWithBiometrics();
-      return;
-    }
-    final ok = await SecurityService.instance.authenticate(
-      reason: 'Sign in to CoreX',
-    );
-    if (!ok) return;
-    final saved = await auth.readSavedCredentials();
-    if (saved.email.isEmpty || saved.password.isEmpty) return;
-    await auth.login(saved.email, saved.password);
+    if (!auth.isLocked) return;
+    await auth.unlockWithBiometrics();
   }
 
   @override

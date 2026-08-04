@@ -7,11 +7,17 @@ import '../main.dart';
 import '../models/branding.dart';
 import '../theme.dart';
 import '../providers/auth_provider.dart';
+import '../widgets/corex/corex_bottom_nav.dart';
 import '../widgets/ui/section_header.dart';
 import '../widgets/ui/status_chip.dart';
 
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key});
+  /// True when opened from the "Me" tab, which keeps the bottom nav visible so
+  /// the user can hop straight to another tab. Pushes from the drawer or the
+  /// home avatar leave it off and rely on the back button.
+  final bool showNav;
+
+  const ProfileScreen({super.key, this.showNav = false});
 
   @override
   Widget build(BuildContext context) {
@@ -21,6 +27,12 @@ class ProfileScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
+      bottomNavigationBar: showNav
+          ? CorexBottomNav(
+              active: CorexNavTab.me,
+              onTap: (tab) => corexNavigateTo(context, tab, CorexNavTab.me),
+            )
+          : null,
       body: ContentSafeArea(
         top: false,
         child: SingleChildScrollView(

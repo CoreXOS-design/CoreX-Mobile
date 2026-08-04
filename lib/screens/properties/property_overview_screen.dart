@@ -491,7 +491,9 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        status,
+        // The API hands these back in storage form (`active`, `under_offer`),
+        // so the pill read "active" next to properly-cased copy.
+        titleCaseLabel(status),
         style: const TextStyle(
           color: Colors.white,
           fontSize: 11,

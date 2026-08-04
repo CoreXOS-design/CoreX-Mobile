@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
@@ -20,18 +21,69 @@ class ClientAuthService {
   static String get _baseUrl => Env.apiBaseUrl; // ends in /api
   static const Duration _timeout = Duration(seconds: 15);
 
-  // NOTE: do NOT enable `encryptedSharedPreferences: true` — on several Android
-  // builds the KeyStore-backed EncryptedSharedPreferences init hangs forever
-  // on first read, bricking cold-start. Default storage is still encrypted via
-  // KeyStore, just without that wrapper.
-  static const FlutterSecureStorage _storage = FlutterSecureStorage();
+  /// The earlier note here said to avoid `encryptedSharedPreferences: true`
+  /// because it can hang on first read on some Android builds. That risk is
+  /// real but it is now handled by [_storageTimeout] rather than by avoiding
+  /// the option — because the alternative turned out to be worse: on an API 36
+  /// emulator the *default* configuration silently drops every write (the
+  /// write succeeds, every later read returns null), so a signed-in client was
+  /// signed out again on the next launch. Measured with both configurations
+  /// side by side on the device. [ApiService] carries the same pair.
+  static const FlutterSecureStorage _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
+
+  /// Plugin defaults — read as a fallback so a token written by an older
+  /// build (on a device where that path works) still signs the user in.
+  static const FlutterSecureStorage _legacyStorage = FlutterSecureStorage();
+
+  static const Duration _storageTimeout = Duration(seconds: 3);
 
   // -------------------- Token helpers --------------------
 
-  Future<String?> getToken() => _storage.read(key: _tokenKey);
-  Future<void> saveToken(String token) =>
-      _storage.write(key: _tokenKey, value: token);
-  Future<void> clearToken() => _storage.delete(key: _tokenKey);
+  /// Reads from the primary vault, falling back to the legacy one. Both are
+  /// time-boxed: a hanging keystore costs a few seconds, never the launch.
+  Future<String?> getToken() async {
+    for (final (name, vault) in [
+      ('encrypted', _storage),
+      ('legacy', _legacyStorage),
+    ]) {
+      try {
+        final v =
+            await vault.read(key: _tokenKey).timeout(_storageTimeout);
+        if (v != null) return v;
+      } catch (e) {
+        debugPrint('[client-auth] $name storage read failed: $e');
+      }
+    }
+    return null;
+  }
+
+  Future<void> saveToken(String token) async {
+    for (final (name, vault) in [
+      ('encrypted', _storage),
+      ('legacy', _legacyStorage),
+    ]) {
+      try {
+        await vault
+            .write(key: _tokenKey, value: token)
+            .timeout(_storageTimeout);
+      } catch (e) {
+        debugPrint('[client-auth] $name storage write failed: $e');
+      }
+    }
+  }
+
+  Future<void> clearToken() async {
+    for (final vault in [_storage, _legacyStorage]) {
+      try {
+        await vault.delete(key: _tokenKey).timeout(_storageTimeout);
+      } catch (e) {
+        debugPrint('[client-auth] storage delete failed: $e');
+      }
+    }
+  }
 
   Future<String?> getLastPath() => _storage.read(key: _lastPathKey);
   Future<void> setLastPath(String path) =>

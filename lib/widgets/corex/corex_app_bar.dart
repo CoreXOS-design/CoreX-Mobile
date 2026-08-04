@@ -5,7 +5,9 @@ import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 
 class CorexAppBar extends StatelessWidget implements PreferredSizeWidget {
-  final String userInitials;
+  /// Null hides the avatar entirely — surfaces that reach the profile some
+  /// other way (a "Me" tab, say) don't need an identity badge up here.
+  final String? userInitials;
   final int unreadBadge;
   final VoidCallback? onMenuTap;
   final VoidCallback? onBellTap;
@@ -14,7 +16,7 @@ class CorexAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   const CorexAppBar({
     super.key,
-    required this.userInitials,
+    this.userInitials,
     this.unreadBadge = 0,
     this.onMenuTap,
     this.onBellTap,
@@ -77,28 +79,30 @@ class CorexAppBar extends StatelessWidget implements PreferredSizeWidget {
                       ),
                   ],
                 ),
-              const SizedBox(width: 4),
-              GestureDetector(
-                onTap: onAvatarTap,
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: t.accentSoft,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: t.accentBorder),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    userInitials,
-                    style: TextStyle(
-                      color: t.accent,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
+              if (userInitials != null) ...[
+                const SizedBox(width: 4),
+                GestureDetector(
+                  onTap: onAvatarTap,
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: t.accentSoft,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: t.accentBorder),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      userInitials!,
+                      style: TextStyle(
+                        color: t.accent,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         ),

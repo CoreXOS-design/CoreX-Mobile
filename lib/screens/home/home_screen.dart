@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -21,7 +23,6 @@ import '../notifications/notifications_screen.dart';
 import '../core_matches/core_matches_list_screen.dart';
 import '../my_agent_qr_screen.dart';
 import '../portal_leads/portal_leads_screen.dart';
-import '../profile_screen.dart';
 import '../properties/property_list_screen.dart';
 import '../real_estate_hub_screen.dart';
 
@@ -32,7 +33,6 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final firstName = _firstName(auth.userName);
-    final initials = _initials(auth.userName);
     final agencyName = _agencyName(auth.user);
     final unread = context.watch<NotificationsProvider>().unread;
 
@@ -49,60 +49,73 @@ class HomeScreen extends StatelessWidget {
               children: [
                 Builder(
                   builder: (ctx) => CorexAppBar(
-                    userInitials: initials,
+                    // No avatar badge — the account lives on the "Me" tab.
                     unreadBadge: unread,
                     onMenuTap: () => Scaffold.of(ctx).openDrawer(),
                     onBellTap: () => _push(ctx, const NotificationsScreen()),
-                    onAvatarTap: () => _push(ctx, const ProfileScreen()),
                     onQrTap: () => _push(ctx, const MyAgentQrScreen()),
                   ),
                 ),
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (agencyName != null) ...[
-                          Text(
-                            agencyName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: CorexTokens.textTertiary(context),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.2,
+                  child: LayoutBuilder(
+                    builder: (context, box) {
+                      // The page is sized to fit rather than scrolled: gaps
+                      // tighten on shorter devices and the module grid absorbs
+                      // whatever slack is left. 640 is roughly the body height
+                      // of a 6.1" phone once the app bar and bottom nav are
+                      // taken out, so anything at or above that keeps the full
+                      // spacing.
+                      final density = (box.maxHeight / 640).clamp(0.65, 1.0);
+                      double gap(double v) => v * density;
+
+                      return Padding(
+                        padding: EdgeInsets.fromLTRB(16, gap(4), 16, gap(12)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (agencyName != null) ...[
+                              Text(
+                                agencyName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: CorexTokens.textTertiary(context),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                              SizedBox(height: gap(6)),
+                            ],
+                            Text(
+                              'Good ${_timeOfDay()}, $firstName.',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: CorexTokens.textPrimary(context),
+                                fontSize: 24,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.4,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 6),
-                        ],
-                        Text(
-                          'Good ${_timeOfDay()}, $firstName.',
-                          style: TextStyle(
-                            color: CorexTokens.textPrimary(context),
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.4,
-                          ),
+                            SizedBox(height: gap(18)),
+                            CorexEllieCard(
+                              onTap: () => _push(context, const EllieScreen()),
+                            ),
+                            SizedBox(height: gap(16)),
+                            const CorexNextAppointment(),
+                            SizedBox(height: gap(22)),
+                            _sectionHeader(
+                              'Workspace',
+                              onAll: () =>
+                                  _push(context, const RealEstateHubScreen()),
+                            ),
+                            SizedBox(height: gap(12)),
+                            Expanded(child: _moduleGrid(context)),
+                          ],
                         ),
-                        const SizedBox(height: 18),
-                        CorexEllieCard(
-                          onTap: () => _push(context, const EllieScreen()),
-                        ),
-                        const SizedBox(height: 16),
-                        const CorexNextAppointment(),
-                        const SizedBox(height: 22),
-                        _sectionHeader(
-                          'Workspace',
-                          onAll: () =>
-                              _push(context, const RealEstateHubScreen()),
-                        ),
-                        const SizedBox(height: 12),
-                        _moduleGrid(context),
-                        const SizedBox(height: 12),
-                      ],
-                    ),
+                      );
+                    },
                   ),
                 ),
                 CorexBottomNav(
@@ -182,22 +195,42 @@ class HomeScreen extends StatelessWidget {
       ),
     ];
 
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 3,
-      crossAxisSpacing: 10,
-      mainAxisSpacing: 10,
-      childAspectRatio: 1.0,
-      children: [
-        for (final m in modules)
-          CorexModuleTile(
-            icon: m.icon,
-            label: m.label,
-            dot: m.dot,
-            onTap: () => _push(context, m.builder()),
-          ),
-      ],
+    const spacing = 10.0;
+    const columns = 3;
+    // Tallest a tile may get (square) and the shortest it can be before the
+    // icon + label stack stops fitting.
+    const idealTileHeight = 94.0;
+
+    return LayoutBuilder(
+      builder: (context, box) {
+        final rows = (modules.length / columns).ceil();
+        final tileWidth = (box.maxWidth - spacing * (columns - 1)) / columns;
+        final maxTileHeight = tileWidth;
+        final minTileHeight = math.min(idealTileHeight, maxTileHeight);
+        final free = box.maxHeight - spacing * (rows - 1);
+        final tileHeight =
+            (free / rows).clamp(minTileHeight, maxTileHeight);
+
+        return GridView.count(
+          padding: EdgeInsets.zero,
+          // Squeezed below the floor only on unusually short screens — the
+          // grid scrolls on its own there rather than overflowing the page.
+          physics: const ClampingScrollPhysics(),
+          crossAxisCount: columns,
+          crossAxisSpacing: spacing,
+          mainAxisSpacing: spacing,
+          childAspectRatio: tileWidth / tileHeight,
+          children: [
+            for (final m in modules)
+              CorexModuleTile(
+                icon: m.icon,
+                label: m.label,
+                dot: m.dot,
+                onTap: () => _push(context, m.builder()),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -213,13 +246,6 @@ class HomeScreen extends StatelessWidget {
     final s = full.trim();
     if (s.isEmpty) return 'there';
     return s.split(RegExp(r'\s+')).first;
-  }
-
-  static String _initials(String full) {
-    final parts = full.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty || parts.first.isEmpty) return '·';
-    if (parts.length == 1) return parts.first[0].toUpperCase();
-    return (parts.first[0] + parts.last[0]).toUpperCase();
   }
 
   static String? _agencyName(Map<String, dynamic>? user) {

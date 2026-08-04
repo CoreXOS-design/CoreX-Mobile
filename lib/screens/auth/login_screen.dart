@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
+import '../../config/app_version.dart';
+import '../../main.dart' show rootNavigatorKey;
 import '../../providers/auth_provider.dart';
 import '../../providers/client_session_provider.dart';
 import '../../services/api_service.dart' show ApiException;
@@ -50,18 +52,61 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscure = true;
   String? _error;
   String? _activationEmail;
+  bool _autoUnlockTried = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      final saved =
-          await context.read<AuthProvider>().readSavedCredentials();
-      if (!mounted) return;
-      if (_emailCtl.text.isEmpty) _emailCtl.text = saved.email;
-      if (_passwordCtl.text.isEmpty) _passwordCtl.text = saved.password;
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+  }
+
+  Future<void> _bootstrap() async {
+    if (!mounted) return;
+    final auth = context.read<AuthProvider>();
+    // The email is a convenience and gets prefilled; the password never is —
+    // it isn't stored anywhere on the device. See [SecurityService.saveEmail].
+    final email = await auth.readSavedEmail();
+    if (!mounted) return;
+    if (_emailCtl.text.isEmpty) setState(() => _emailCtl.text = email);
+    // Small beat before the system sheet: local_auth needs a resumed activity,
+    // and firing it in the same frame the splash hands over can have the
+    // platform reject the call outright.
+    await Future.delayed(const Duration(milliseconds: 300));
+    await _tryBiometricUnlock(auto: true);
+  }
+
+  /// Biometrics enabled + a token still on the device → offer the system
+  /// prompt. Runs once automatically when the screen opens (this is the
+  /// "app reopened" sign-in), and the on-screen button re-runs it after a
+  /// cancel. Anything short of success leaves the password form in charge.
+  Future<void> _tryBiometricUnlock({bool auto = false}) async {
+    if (!mounted) return;
+    final auth = context.read<AuthProvider>();
+    // Gated on the opt-in alone, not on a fresh capability probe: the user
+    // already passed a system check to enable this, and `authenticate` falls
+    // back to the device credential by itself. A probe that answers "no"
+    // (unenrolled fingerprint, OEM quirk) would silently hide the whole
+    // feature instead of letting the prompt speak for itself.
+    if (!auth.canUnlockWithBiometrics) return;
+    if (auto) {
+      if (_autoUnlockTried) return;
+      _autoUnlockTried = true;
+    }
+    final result = await auth.unlockWithBiometrics();
+    if (!mounted || result == BiometricUnlock.success) return;
+    switch (result) {
+      case BiometricUnlock.sessionExpired:
+        setState(() =>
+            _error = 'Your session has expired. Sign in with your password.');
+      case BiometricUnlock.cancelled:
+        if (!auto) {
+          setState(
+              () => _error = 'Biometric check failed. Enter your password.');
+        }
+      case BiometricUnlock.success:
+      case BiometricUnlock.unavailable:
+        break;
+    }
   }
 
   @override
@@ -88,7 +133,11 @@ class _LoginScreenState extends State<LoginScreen> {
     final ok = await auth.login(email, password);
     if (!mounted) return;
     if (ok) {
-      // AuthGate handles the swap to HomeScreen.
+      // First sign-in on this device — offer biometric unlock for next time.
+      // AuthGate handles the swap to HomeScreen underneath.
+      if (auth.needsBiometricSetupPrompt) {
+        await _askEnableBiometrics(auth);
+      }
       return;
     }
     // 401 = the email is a known user, password was wrong. Don't leak into the
@@ -194,6 +243,66 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  /// One-time offer, right after the first successful sign-in on this device.
+  /// Shown on the root navigator because AuthGate is already swapping this
+  /// screen out for the home shell underneath the dialog.
+  ///
+  /// Declining is remembered too — [AuthProvider.consumeBiometricSetupPrompt]
+  /// marks the prompt as shown either way, so it never nags. Settings has the
+  /// toggle for anyone who changes their mind.
+  Future<void> _askEnableBiometrics(AuthProvider auth) async {
+    final dialogContext = rootNavigatorKey.currentContext;
+    if (dialogContext == null) {
+      await auth.consumeBiometricSetupPrompt(enable: false);
+      return;
+    }
+    final enable = await showDialog<bool>(
+          context: dialogContext,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            icon: Icon(
+              TablerIcons.fingerprint,
+              size: 40,
+              color: CorexAccentTheme.of(ctx).accent,
+            ),
+            title: const Text('Use biometrics to sign in?'),
+            content: const Text(
+              'CoreX never saves your password on this device. Turn on '
+              'biometric sign-in and your fingerprint or face unlocks the app '
+              'next time — otherwise you’ll type your password each time.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Not now'),
+              ),
+              TextButton.icon(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                icon: const Icon(TablerIcons.fingerprint, size: 18),
+                label: const Text('Enable'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    final enabled = await auth.consumeBiometricSetupPrompt(enable: enable);
+    // Confirming can still fail (platform refusal, no enrolment, a cancel on
+    // the system sheet). Say so rather than leaving them expecting a prompt
+    // on the next launch that never arrives.
+    if (enable && !enabled) {
+      final messenger = ScaffoldMessenger.maybeOf(
+        rootNavigatorKey.currentContext ?? dialogContext,
+      );
+      messenger?.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Biometric sign-in wasn’t enabled. You can turn it on in Settings.',
+          ),
+        ),
+      );
+    }
+  }
+
   void _scanQr() {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const ClientAgentQrScannerScreen()),
@@ -203,6 +312,8 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final t = CorexAccentTheme.of(context);
+    final auth = context.watch<AuthProvider>();
+    final canUnlock = auth.canUnlockWithBiometrics;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
@@ -243,7 +354,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           hint: 'Email',
                           icon: TablerIcons.mail,
                           keyboardType: TextInputType.emailAddress,
-                          autofillHints: const [AutofillHints.email],
                           textInputAction: TextInputAction.next,
                           validator: (v) {
                             if (v == null || v.trim().isEmpty) {
@@ -261,7 +371,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           hint: 'Password',
                           icon: TablerIcons.lock,
                           obscure: _obscure,
-                          autofillHints: const [AutofillHints.password],
                           textInputAction: TextInputAction.done,
                           onSubmitted: (_) => _submit(),
                           suffix: IconButton(
@@ -327,6 +436,15 @@ class _LoginScreenState extends State<LoginScreen> {
                           loading: _busy,
                           onPressed: _busy ? null : _submit,
                         ),
+                        if (canUnlock) ...[
+                          const SizedBox(height: 12),
+                          CorexSecondaryButton(
+                            label: 'Unlock with biometrics',
+                            leading: TablerIcons.fingerprint,
+                            onPressed:
+                                _busy ? null : () => _tryBiometricUnlock(),
+                          ),
+                        ],
                         const SizedBox(height: 12),
                         CorexSecondaryButton(
                           label: 'Scan agent QR',
@@ -335,7 +453,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 32),
                         Text(
-                          'v1.0.0',
+                          'v$kAppVersion',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: CorexTokens.textMuted(context),
@@ -363,7 +481,6 @@ class _LoginScreenState extends State<LoginScreen> {
     required IconData icon,
     bool obscure = false,
     TextInputType? keyboardType,
-    Iterable<String>? autofillHints,
     TextInputAction? textInputAction,
     ValueChanged<String>? onSubmitted,
     Widget? suffix,
@@ -373,7 +490,13 @@ class _LoginScreenState extends State<LoginScreen> {
       controller: controller,
       obscureText: obscure,
       keyboardType: keyboardType,
-      autofillHints: autofillHints,
+      // Autofill is opted out of on purpose: an empty hint list stops the OS
+      // password manager offering to fill or save these credentials, and the
+      // app never calls TextInput.finishAutofillContext, so no "save
+      // password?" sheet is triggered on submit either.
+      autofillHints: const [],
+      autocorrect: false,
+      enableSuggestions: false,
       textInputAction: textInputAction,
       onFieldSubmitted: onSubmitted,
       validator: validator,

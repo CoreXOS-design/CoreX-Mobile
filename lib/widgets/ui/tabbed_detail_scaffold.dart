@@ -95,7 +95,15 @@ class TabbedDetailScaffold extends StatelessWidget {
                 flexibleSpace: hero == null
                     ? null
                     : FlexibleSpaceBar(
-                        collapseMode: CollapseMode.parallax,
+                        // Pinned, not parallax. The background is always laid
+                        // out at the *expanded* height and clipped to whatever
+                        // the header currently is, so a parallax offset drags
+                        // the hero up into the tab strip's band mid-collapse
+                        // and the labels end up sitting on the photo. Pinning
+                        // anchors the hero's bottom to the header's bottom, so
+                        // the padding below keeps it clear of the tabs at every
+                        // scroll position.
+                        collapseMode: CollapseMode.pin,
                         background: Padding(
                           // Clear the app bar row above and the tab bar below,
                           // so the hero never renders under either.
@@ -111,28 +119,40 @@ class TabbedDetailScaffold extends StatelessWidget {
                       ),
                 bottom: PreferredSize(
                   preferredSize: const Size.fromHeight(_tabBarHeight),
-                  child: TabBar(
-                    isScrollable: tabs.length > 3,
-                    tabAlignment: tabs.length > 3
-                        ? TabAlignment.start
-                        : TabAlignment.fill,
-                    indicatorColor: AppTheme.brand,
-                    indicatorWeight: 2.5,
-                    labelColor: AppTheme.brand,
-                    unselectedLabelColor: AppTheme.textSecondary(context),
-                    labelStyle: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w700),
-                    unselectedLabelStyle: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w600),
-                    tabs: [
-                      for (final t in tabs)
-                        Tab(
-                          height: _tabBarHeight - 4,
-                          text: t.count == null
-                              ? t.label
-                              : '${t.label} · ${t.count}',
-                        ),
-                    ],
+                  // Opaque strip: the tab bar is drawn on top of the flexible
+                  // space, so without its own background the labels compete
+                  // with whatever the hero is showing behind them.
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).appBarTheme.backgroundColor ??
+                          Theme.of(context).scaffoldBackgroundColor,
+                      border: Border(
+                        bottom: BorderSide(color: AppTheme.borderColor(context)),
+                      ),
+                    ),
+                    child: TabBar(
+                      isScrollable: tabs.length > 3,
+                      tabAlignment: tabs.length > 3
+                          ? TabAlignment.start
+                          : TabAlignment.fill,
+                      indicatorColor: AppTheme.brand,
+                      indicatorWeight: 2.5,
+                      labelColor: AppTheme.brand,
+                      unselectedLabelColor: AppTheme.textSecondary(context),
+                      labelStyle: const TextStyle(
+                          fontSize: 13.5, fontWeight: FontWeight.w700),
+                      unselectedLabelStyle: const TextStyle(
+                          fontSize: 13.5, fontWeight: FontWeight.w600),
+                      tabs: [
+                        for (final t in tabs)
+                          Tab(
+                            height: _tabBarHeight - 4,
+                            text: t.count == null
+                                ? t.label
+                                : '${t.label} · ${t.count}',
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),

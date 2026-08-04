@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../config/app_version.dart';
 import '../widgets/ui/content_width.dart';
 import '../models/branding.dart';
 import '../models/notification_models.dart';
@@ -177,7 +178,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 tint: brand.icon,
                 label: 'Version',
                 trailing: Text(
-                  '1.0.0',
+                  kAppVersionFull,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,

@@ -16,6 +16,24 @@ import 'property_create_screen.dart';
 import 'property_edit_screen.dart';
 import 'property_overview_screen.dart';
 
+/// Active listings first, everything else after, each group keeping the order
+/// the server sent.
+///
+/// A partition rather than a `sort`: Dart doesn't guarantee `List.sort` is
+/// stable, and the server's ordering within a group (recently updated first)
+/// is worth keeping. Applied after filtering too, so narrowing the list by
+/// suburb or price doesn't bury the live stock behind sold and draft ones.
+List<Property> activeFirst(List<Property> input) {
+  final active = <Property>[];
+  final rest = <Property>[];
+  for (final p in input) {
+    (_isActive(p) ? active : rest).add(p);
+  }
+  return [...active, ...rest];
+}
+
+bool _isActive(Property p) => (p.status ?? '').trim().toLowerCase() == 'active';
+
 class PropertyListScreen extends StatefulWidget {
   const PropertyListScreen({super.key});
 
@@ -74,7 +92,7 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
 
   List<Property> _applyFilters(List<Property> input) {
     final q = _search.trim().toLowerCase();
-    return input.where((p) {
+    final matched = input.where((p) {
       if (q.isNotEmpty && !p.address.toLowerCase().contains(q)) {
         return false;
       }
@@ -95,6 +113,7 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
       }
       return true;
     }).toList();
+    return activeFirst(matched);
   }
 
   /// Unique, sorted non-null values of [selector] across the currently-loaded
