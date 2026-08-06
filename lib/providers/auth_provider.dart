@@ -148,7 +148,9 @@ class AuthProvider extends ChangeNotifier {
       // biometrics. UI consumes [needsBiometricSetupPrompt] once and clears
       // it via [consumeBiometricSetupPrompt].
       if (!await _security.hasPromptedBiometric()) {
-        if (await _security.canUseBiometrics()) {
+        // Fingerprint-capable devices only — Face ID iPhones are excluded by
+        // product decision, see [SecurityService.canUseFingerprint].
+        if (await _security.canUseFingerprint()) {
           _needsBiometricSetupPrompt = true;
         } else {
           await _security.markBiometricPrompted();
@@ -270,7 +272,7 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> setBiometricEnabled(bool enable) async {
     if (enable) {
-      if (!await _security.canUseBiometrics()) return;
+      if (!await _security.canUseFingerprint()) return;
       final ok = await _security.authenticate(
         reason: 'Confirm biometrics to enable quick sign-in',
       );

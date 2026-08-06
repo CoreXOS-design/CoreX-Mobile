@@ -67,21 +67,49 @@ class EllieVoiceRecorder {
     return MicPermission.denied;
   }
 
+  /// Whether the OS will actually let us record, asked of the recorder itself.
+  ///
+  /// This is the authoritative check. `record` calls the platform API directly
+  /// (AVCaptureDevice on iOS/macOS, ActivityCompat on Android) with no
+  /// build-time feature flags, so it cannot be silently disabled the way
+  /// permission_handler's iOS strategies can — those compile to empty stubs
+  /// unless the matching PERMISSION_* macro is set in the Podfile.
+  ///
+  /// Prompts, and returns the user's answer, when access is still undetermined.
+  Future<bool> _recorderHasPermission() async {
+    try {
+      return await _recorder.hasPermission();
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Current microphone access. Never shows a system prompt — safe to call on
   /// screen build / app resume.
+  ///
+  /// Advisory only: used to decide what the button should say. Never gate
+  /// recording on this — gate on [ensurePermission] / [start].
   Future<MicPermission> permissionStatus() async =>
       _map(await Permission.microphone.status);
 
-  /// Shows the system microphone prompt if it hasn't been answered yet.
+  /// Resolves microphone access, showing the system prompt if it hasn't been
+  /// answered yet.
   ///
   /// This is deliberately NOT part of [start]: the system alert cancels
   /// whatever touch triggered it, so a press-and-hold that also asks for
   /// permission can never produce a recording. Resolve access first, record on
   /// the next press.
   Future<MicPermission> ensurePermission() async {
-    final current = await permissionStatus();
-    if (current != MicPermission.denied) return current;
-    return _map(await Permission.microphone.request());
+    // Ask the recorder first — this is the call that reliably surfaces the
+    // system alert and its Info.plist purpose string.
+    if (await _recorderHasPermission()) return MicPermission.granted;
+
+    // Declined. permission_handler is consulted only to tell "declined just
+    // now" apart from "blocked in Settings", so we don't send the user to
+    // Settings when a plain retry would do. If it disagrees and claims we're
+    // granted, trust the recorder and report a simple denial.
+    final status = await permissionStatus();
+    return status == MicPermission.granted ? MicPermission.denied : status;
   }
 
   /// Opens the OS settings page for this app so access can be re-enabled.
@@ -90,10 +118,10 @@ class EllieVoiceRecorder {
   /// Starts recording. Returns `false` if the microphone isn't granted (call
   /// [ensurePermission] first) or if the audio session refused to start.
   Future<bool> start({VoidCallback? onAutoStop}) async {
-    // Single source of truth. Asking `record` for permission as well would
-    // fire a second, independent request against the same OS permission and
-    // can spuriously report "denied" while the first one is still settling.
-    if (await permissionStatus() != MicPermission.granted) return false;
+    // Gate on the recorder, not permission_handler. By the time we get here
+    // access is already determined (the screen resolves it as its own step),
+    // so this returns immediately without prompting.
+    if (!await _recorderHasPermission()) return false;
 
     final dir = await getTemporaryDirectory();
     final path =

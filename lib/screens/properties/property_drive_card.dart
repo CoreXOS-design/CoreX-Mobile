@@ -1,17 +1,19 @@
-import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../models/property_drive.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
 import '../../utils/app_time.dart';
+import '../../utils/file_download.dart';
 
 /// The two things a Drive row can do with a file. Both fetch the same bytes
 /// from the same gated endpoint and differ only in where they hand them off.
 enum DriveRowAction {
-  /// Native "save to…" dialog — Android's ACTION_CREATE_DOCUMENT, iOS's
-  /// document-picker export. The agent chooses the destination folder.
+  /// Straight download: bytes go to the device's Downloads folder (Files ›
+  /// CoreX OS on iOS) with no picker in the way. Tapping download should
+  /// download — an agent who wanted to choose a folder would have used Share.
   save,
 
   /// OS share sheet — WhatsApp, email, Drive, and so on.
@@ -99,10 +101,15 @@ class _PropertyDriveCardState extends State<PropertyDriveCard> {
           .where((d) => !_dropped.contains(d.id))
           .toList();
 
-  void _snack(String message) {
+  void _snack(String message, {SnackBarAction? action}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+        .showSnackBar(SnackBar(content: Text(message), action: action));
+  }
+
+  static String? _bareMime(String? contentType) {
+    final type = contentType?.split(';').first.trim();
+    return (type == null || type.isEmpty) ? null : type;
   }
 
   /// Anchor rect for the iOS/iPad share popover — omitting it makes the share
@@ -149,23 +156,23 @@ class _PropertyDriveCardState extends State<PropertyDriveCard> {
         return;
       }
 
-      final parts = splitFileName(file.fileName);
-      final saved = await FileSaver.instance.saveAs(
-        name: parts.base,
+      final saved = await saveDownloadedFile(
         bytes: file.bytes,
-        fileExtension: parts.ext,
-        includeExtension: parts.ext.isNotEmpty,
-        // Drive holds any file type, so pass the server's own content type
-        // through rather than guessing from a fixed enum.
-        mimeType: MimeType.custom,
-        customMimeType: file.mimeType ?? 'application/octet-stream',
+        fileName: file.fileName,
       );
       if (!mounted) return;
-      // Null/empty means the agent backed out of the save dialog — not an
-      // error, and not worth a message.
-      if (saved != null && saved.isNotEmpty) {
-        _snack('Saved ${file.fileName}');
-      }
+      // The file is already on disk, so the snackbar reports rather than asks —
+      // Open is a shortcut, not the step that completes the download.
+      _snack(
+        'Saved to ${saved.locationLabel}',
+        action: SnackBarAction(
+          label: 'Open',
+          // Content-Type can carry parameters (`application/pdf; charset=…`),
+          // which Android's intent matcher won't accept — hand over the bare
+          // type and let the plugin sniff from the extension if it's absent.
+          onPressed: () => OpenFilex.open(saved.path, type: _bareMime(file.mimeType)),
+        ),
+      );
     } on ApiException catch (e) {
       if (!mounted) return;
       _snack(e.message);
@@ -174,6 +181,11 @@ class _PropertyDriveCardState extends State<PropertyDriveCard> {
         setState(() => _dropped.add(doc.id));
         await widget.onStale?.call();
       }
+    } on FileSaveException catch (e) {
+      // Fetched fine, but nowhere to put it — say so rather than blaming the
+      // connection.
+      if (!mounted) return;
+      _snack(e.message);
     } catch (_) {
       if (!mounted) return;
       _snack("Couldn't download that file. Check your connection.");
@@ -407,7 +419,7 @@ class _PropertyDriveCardState extends State<PropertyDriveCard> {
           doc,
           DriveRowAction.save,
           icon: Icons.download_rounded,
-          tooltip: 'Save to device',
+          tooltip: 'Download',
         ),
         _actionButton(
           doc,

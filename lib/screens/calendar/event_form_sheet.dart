@@ -160,9 +160,12 @@ class _EventFormSheetState extends State<_EventFormSheet> {
         final wanted = widget.existing?.category;
         _class = _resolveClass(opts, wanted);
         // Keep priority within the offered set.
-        if (!opts.priorities.contains(_priority)) {
-          _priority =
-              opts.priorities.contains('normal') ? 'normal' : opts.priorities.first;
+        if (opts.priorities.isNotEmpty && !opts.priorities.contains(_priority)) {
+          // `.first` would throw on an empty list — the isNotEmpty guard above
+          // keeps a server that returns no priorities from taking down the form.
+          _priority = opts.priorities.contains('normal')
+              ? 'normal'
+              : opts.priorities.first;
         }
         _enforceSinglePropertyCap();
       });

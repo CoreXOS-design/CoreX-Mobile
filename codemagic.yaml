@@ -24,6 +24,36 @@ workflows:
         script: flutter pub get
       - name: Install CocoaPods dependencies
         script: find . -name "Podfile" -execdir pod install \;
+      - name: Verify permission macros reached the Pods project
+        script: |
+          # permission_handler_apple compiles each permission behind a macro
+          # that defaults to 0, so a missing macro produces an app where iOS
+          # silently never shows the permission alert — it builds and ships
+          # clean, and only App Review finds it. Two rejections came from
+          # exactly this. Fail the build here instead.
+          PBXPROJ=ios/Pods/Pods.xcodeproj/project.pbxproj
+          if [ ! -f "$PBXPROJ" ]; then
+            echo "ERROR: $PBXPROJ not found — did pod install run?"
+            exit 1
+          fi
+          MISSING=0
+          for MACRO in PERMISSION_MICROPHONE PERMISSION_CAMERA \
+                       PERMISSION_NOTIFICATIONS PERMISSION_PHOTOS \
+                       PERMISSION_PHOTOS_ADD_ONLY; do
+            if grep -q "${MACRO}=1" "$PBXPROJ"; then
+              echo "  ok      ${MACRO}=1"
+            else
+              echo "  MISSING ${MACRO}=1"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -ne 0 ]; then
+            echo
+            echo "ERROR: permission macros absent from the generated Pods project."
+            echo "Check the post_install block in ios/Podfile."
+            exit 1
+          fi
+          echo "All permission macros present."
       - name: Set up code signing (fetch or create cert + profile)
         script: |
           keychain initialize

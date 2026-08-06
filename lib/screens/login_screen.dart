@@ -40,7 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
     unawaited(context.read<BrandingProvider>().loadBySlug(Env.agencySlug));
     unawaited(_checkDemoStatus());
     final savedEmail = await auth.readSavedEmail();
-    final supported = await SecurityService.instance.canUseBiometrics();
+    final supported = await SecurityService.instance.canUseFingerprint();
     if (!mounted) return;
     setState(() {
       _emailController.text = savedEmail;

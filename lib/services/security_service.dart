@@ -34,13 +34,29 @@ class SecurityService {
   static const _kBiometricEnabled = 'sec_biometric_enabled';
   static const _kBiometricPrompted = 'sec_biometric_prompted';
 
-  Future<bool> canUseBiometrics() async {
+  /// Gate for offering quick sign-in. Product decision: fingerprint only —
+  /// face recognition is deliberately not offered as a sign-in method.
+  ///
+  /// Enforceable exactly on iOS, where the platform names the sensor: a Face
+  /// ID device reports [BiometricType.face] and gets no offer at all, a Touch
+  /// ID device reports [BiometricType.fingerprint] and does.
+  ///
+  /// Android can't be filtered the same way — its plugin only ever reports
+  /// STRONG/WEAK, never which sensor is behind them, and `BiometricPrompt` is
+  /// asked for `BIOMETRIC_WEAK | BIOMETRIC_STRONG`. So on a phone with face
+  /// unlock enrolled the OS may still choose it. There is no API in
+  /// local_auth to demand a specific modality; the alternative would be
+  /// dropping biometric sign-in on Android entirely.
+  Future<bool> canUseFingerprint() async {
     try {
-      final supported = await _auth.isDeviceSupported();
-      final canCheck = await _auth.canCheckBiometrics;
-      if (!supported || !canCheck) return false;
+      if (!await _auth.isDeviceSupported()) return false;
+      if (!await _auth.canCheckBiometrics) return false;
       final available = await _auth.getAvailableBiometrics();
-      return available.isNotEmpty;
+      if (available.isEmpty) return false;
+      // Face-only enrolment (i.e. an iPhone with Face ID) — not offered.
+      final faceOnly = available.contains(BiometricType.face) &&
+          available.length == 1;
+      return !faceOnly;
     } on PlatformException {
       return false;
     }
@@ -53,7 +69,10 @@ class SecurityService {
       return await _auth.authenticate(
         localizedReason: reason,
         options: const AuthenticationOptions(
-          biometricOnly: false,
+          // Biometric only: quick sign-in is a fingerprint, not a device PIN.
+          // Cancelling drops the user on the password form, which the OS
+          // password manager can fill.
+          biometricOnly: true,
           stickyAuth: true,
         ),
         authMessages: const [

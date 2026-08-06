@@ -42,6 +42,25 @@ post_install do |installer|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+
+      # permission_handler_apple compiles each permission behind a macro that
+      # defaults to 0 (see PermissionHandlerEnums.h). Without these, the
+      # matching strategy class compiles to an empty stub: the plugin never
+      # calls AVFoundation, so iOS never shows the permission alert and the
+      # Info.plist purpose string is never displayed. Opting in is mandatory,
+      # not an optimisation — this is what the plugin's own example Podfile
+      # does. Only list what the app actually asks for; every unlisted
+      # permission stays compiled out.
+      defs = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)']
+      defs = [defs] if defs.is_a?(String)
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = defs | [
+        '$(inherited)',
+        'PERMISSION_MICROPHONE=1',
+        'PERMISSION_CAMERA=1',
+        'PERMISSION_NOTIFICATIONS=1',
+        'PERMISSION_PHOTOS=1',
+        'PERMISSION_PHOTOS_ADD_ONLY=1',
+      ]
     end
   end
 end

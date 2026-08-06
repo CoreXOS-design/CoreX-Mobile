@@ -27,7 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    SecurityService.instance.canUseBiometrics().then((v) {
+    SecurityService.instance.canUseFingerprint().then((v) {
       if (mounted) setState(() => _biometricSupported = v);
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -155,8 +155,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.fingerprint_rounded,
                 tint: brand.icon,
                 label: _biometricSupported
-                    ? 'Biometric sign-in'
-                    : 'Biometrics not available',
+                    ? 'Fingerprint sign-in'
+                    : 'Fingerprint not available',
                 trailing: Switch.adaptive(
                   value: auth.biometricEnabled,
                   activeTrackColor: brand.button,

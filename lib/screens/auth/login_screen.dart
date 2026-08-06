@@ -9,6 +9,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/client_session_provider.dart';
 import '../../services/api_service.dart' show ApiException;
 import '../../services/client_auth_service.dart';
+import '../../services/security_service.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../widgets/corex/corex_monogram.dart';
@@ -54,6 +55,11 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _activationEmail;
   bool _autoUnlockTried = false;
 
+  /// False on devices where fingerprint sign-in isn't offered — notably Face
+  /// ID iPhones, which are excluded by product decision. Starts false so the
+  /// unlock button can't flash up before the check answers.
+  bool _fingerprintAvailable = false;
+
   @override
   void initState() {
     super.initState();
@@ -63,11 +69,15 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _bootstrap() async {
     if (!mounted) return;
     final auth = context.read<AuthProvider>();
-    // The email is a convenience and gets prefilled; the password never is —
-    // it isn't stored anywhere on the device. See [SecurityService.saveEmail].
+    // The email is prefilled from our own store; the password is left to the
+    // OS password manager via autofill — the app never keeps a copy.
     final email = await auth.readSavedEmail();
+    final fingerprint = await SecurityService.instance.canUseFingerprint();
     if (!mounted) return;
-    if (_emailCtl.text.isEmpty) setState(() => _emailCtl.text = email);
+    setState(() {
+      if (_emailCtl.text.isEmpty) _emailCtl.text = email;
+      _fingerprintAvailable = fingerprint;
+    });
     // Small beat before the system sheet: local_auth needs a resumed activity,
     // and firing it in the same frame the splash hands over can have the
     // platform reject the call outright.
@@ -82,12 +92,9 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _tryBiometricUnlock({bool auto = false}) async {
     if (!mounted) return;
     final auth = context.read<AuthProvider>();
-    // Gated on the opt-in alone, not on a fresh capability probe: the user
-    // already passed a system check to enable this, and `authenticate` falls
-    // back to the device credential by itself. A probe that answers "no"
-    // (unenrolled fingerprint, OEM quirk) would silently hide the whole
-    // feature instead of letting the prompt speak for itself.
-    if (!auth.canUnlockWithBiometrics) return;
+    // Opt-in plus a device that offers fingerprint. The capability check is
+    // what keeps Face ID iPhones out of this path entirely.
+    if (!auth.canUnlockWithBiometrics || !_fingerprintAvailable) return;
     if (auto) {
       if (_autoUnlockTried) return;
       _autoUnlockTried = true;
@@ -116,6 +123,13 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  /// Closes the autofill context so the OS password manager offers to save
+  /// what was just typed. Only called after the credentials are known-good —
+  /// firing it on a failed attempt would offer to save a wrong password.
+  void _offerToSaveCredentials() {
+    TextInput.finishAutofillContext();
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
@@ -133,7 +147,8 @@ class _LoginScreenState extends State<LoginScreen> {
     final ok = await auth.login(email, password);
     if (!mounted) return;
     if (ok) {
-      // First sign-in on this device — offer biometric unlock for next time.
+      _offerToSaveCredentials();
+      // First sign-in on this device — offer fingerprint unlock for next time.
       // AuthGate handles the swap to HomeScreen underneath.
       if (auth.needsBiometricSetupPrompt) {
         await _askEnableBiometrics(auth);
@@ -206,6 +221,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       await _clientApi.saveToken(resp.token);
       if (!mounted) return;
+      _offerToSaveCredentials();
 
       final session = context.read<ClientSessionProvider>();
       session.applyLogin(resp);
@@ -265,11 +281,10 @@ class _LoginScreenState extends State<LoginScreen> {
               size: 40,
               color: CorexAccentTheme.of(ctx).accent,
             ),
-            title: const Text('Use biometrics to sign in?'),
+            title: const Text('Use your fingerprint to sign in?'),
             content: const Text(
-              'CoreX never saves your password on this device. Turn on '
-              'biometric sign-in and your fingerprint or face unlocks the app '
-              'next time — otherwise you’ll type your password each time.',
+              'Unlock CoreX with your fingerprint next time instead of typing '
+              'your password.',
             ),
             actions: [
               TextButton(
@@ -313,7 +328,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final t = CorexAccentTheme.of(context);
     final auth = context.watch<AuthProvider>();
-    final canUnlock = auth.canUnlockWithBiometrics;
+    final canUnlock = auth.canUnlockWithBiometrics && _fingerprintAvailable;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
@@ -328,7 +343,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   constraints: const BoxConstraints(maxWidth: 380),
                   child: Form(
                     key: _formKey,
-                    child: Column(
+                    // Groups the two fields into one autofill context so the
+                    // OS password manager treats them as a single credential
+                    // — required for the "save password?" prompt fired from
+                    // [_submit] to carry both.
+                    child: AutofillGroup(
+                      child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -354,6 +374,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           hint: 'Email',
                           icon: TablerIcons.mail,
                           keyboardType: TextInputType.emailAddress,
+                          autofillHints: const [
+                            AutofillHints.username,
+                            AutofillHints.email,
+                          ],
                           textInputAction: TextInputAction.next,
                           validator: (v) {
                             if (v == null || v.trim().isEmpty) {
@@ -371,6 +395,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           hint: 'Password',
                           icon: TablerIcons.lock,
                           obscure: _obscure,
+                          autofillHints: const [AutofillHints.password],
                           textInputAction: TextInputAction.done,
                           onSubmitted: (_) => _submit(),
                           suffix: IconButton(
@@ -439,7 +464,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         if (canUnlock) ...[
                           const SizedBox(height: 12),
                           CorexSecondaryButton(
-                            label: 'Unlock with biometrics',
+                            label: 'Unlock with fingerprint',
                             leading: TablerIcons.fingerprint,
                             onPressed:
                                 _busy ? null : () => _tryBiometricUnlock(),
@@ -464,6 +489,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 8),
                       ],
+                      ),
                     ),
                   ),
                 ),
@@ -481,6 +507,7 @@ class _LoginScreenState extends State<LoginScreen> {
     required IconData icon,
     bool obscure = false,
     TextInputType? keyboardType,
+    Iterable<String>? autofillHints,
     TextInputAction? textInputAction,
     ValueChanged<String>? onSubmitted,
     Widget? suffix,
@@ -490,11 +517,10 @@ class _LoginScreenState extends State<LoginScreen> {
       controller: controller,
       obscureText: obscure,
       keyboardType: keyboardType,
-      // Autofill is opted out of on purpose: an empty hint list stops the OS
-      // password manager offering to fill or save these credentials, and the
-      // app never calls TextInput.finishAutofillContext, so no "save
-      // password?" sheet is triggered on submit either.
-      autofillHints: const [],
+      // The OS password manager (Google Password Manager / iCloud Keychain)
+      // owns saving and filling these. CoreX itself still never writes the
+      // password to its own storage.
+      autofillHints: autofillHints,
       autocorrect: false,
       enableSuggestions: false,
       textInputAction: textInputAction,

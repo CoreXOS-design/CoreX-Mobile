@@ -77,8 +77,16 @@ class UploadQueue {
   bool _loaded = false;
   int _seq = 0;
 
+  /// Application Support, not Documents.
+  ///
+  /// Info.plist sets `UIFileSharingEnabled` so downloaded files show up under
+  /// Files › On My iPhone › CoreX OS. That exposes the *whole* Documents tree,
+  /// and this queue is internal plumbing: agents would see an `upload_queue`
+  /// folder of raw property photos and could delete one mid-flight. Application
+  /// Support is excluded from file sharing, so the queue stays private while
+  /// downloads stay visible.
   Future<Directory> _dir() async {
-    final base = await getApplicationDocumentsDirectory();
+    final base = await getApplicationSupportDirectory();
     final dir = Directory('${base.path}/$_dirName');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
