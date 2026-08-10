@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../models/property_drive.dart';
@@ -107,9 +106,35 @@ class _PropertyDriveCardState extends State<PropertyDriveCard> {
         .showSnackBar(SnackBar(content: Text(message), action: action));
   }
 
-  static String? _bareMime(String? contentType) {
-    final type = contentType?.split(';').first.trim();
-    return (type == null || type.isEmpty) ? null : type;
+  /// Confirms the download and offers to open it, for as long as the agent
+  /// needs to decide.
+  Future<void> _offerToOpen(SavedFile saved, String? mimeType) async {
+    final open = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Download complete'),
+            content: Text('${saved.fileName}\nSaved to ${saved.locationLabel}.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Done'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Open'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!open) return;
+
+    final opened = await openSavedFile(saved, mimeType: mimeType);
+    // Nothing on the device handles the type — say so rather than looking like
+    // the tap did nothing at all.
+    if (!opened) {
+      _snack('No app on this device can open ${saved.fileName}.');
+    }
   }
 
   /// Anchor rect for the iOS/iPad share popover — omitting it makes the share
@@ -159,20 +184,13 @@ class _PropertyDriveCardState extends State<PropertyDriveCard> {
       final saved = await saveDownloadedFile(
         bytes: file.bytes,
         fileName: file.fileName,
+        mimeType: file.mimeType,
       );
       if (!mounted) return;
-      // The file is already on disk, so the snackbar reports rather than asks —
-      // Open is a shortcut, not the step that completes the download.
-      _snack(
-        'Saved to ${saved.locationLabel}',
-        action: SnackBarAction(
-          label: 'Open',
-          // Content-Type can carry parameters (`application/pdf; charset=…`),
-          // which Android's intent matcher won't accept — hand over the bare
-          // type and let the plugin sniff from the extension if it's absent.
-          onPressed: () => OpenFilex.open(saved.path, type: _bareMime(file.mimeType)),
-        ),
-      );
+      // A dialog rather than a snackbar action: the snackbar took the only way
+      // to open the file away again after a few seconds, so a download the
+      // agent didn't tap in time was effectively unreachable.
+      await _offerToOpen(saved, file.mimeType);
     } on ApiException catch (e) {
       if (!mounted) return;
       _snack(e.message);

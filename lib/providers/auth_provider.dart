@@ -150,10 +150,16 @@ class AuthProvider extends ChangeNotifier {
       if (!await _security.hasPromptedBiometric()) {
         // Fingerprint-capable devices only — Face ID iPhones are excluded by
         // product decision, see [SecurityService.canUseFingerprint].
+        //
+        // A "no" here is deliberately NOT marked as prompted. The check answers
+        // no whenever nothing is *enrolled* yet, which is the normal state of a
+        // brand-new device — marking it would burn the one-time offer before
+        // the user ever had a fingerprint to offer, and enrolling one later
+        // would never bring it back. Same reasoning as the failed-confirmation
+        // path in [consumeBiometricSetupPrompt]. Re-probing on each sign-in is
+        // a cheap capability call with no UI.
         if (await _security.canUseFingerprint()) {
           _needsBiometricSetupPrompt = true;
-        } else {
-          await _security.markBiometricPrompted();
         }
       }
 

@@ -75,6 +75,18 @@ flutter {
     source = "../.."
 }
 
+// mobile_scanner 5.2.3 pins com.google.mlkit:barcode-scanning:17.2.0, whose
+// libbarhopper_v3.so is built with 4 KB ELF segment alignment. Google Play
+// rejects that under the 16 KB memory page size requirement — every other
+// native library we ship is already 16 KB or better. Forcing the newer ML Kit
+// build fixes the alignment without the breaking API changes of mobile_scanner
+// 7.x. Drop this once mobile_scanner is upgraded past it.
+configurations.all {
+    resolutionStrategy {
+        force("com.google.mlkit:barcode-scanning:17.3.0")
+    }
+}
+
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

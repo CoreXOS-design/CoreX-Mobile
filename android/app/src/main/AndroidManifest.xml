@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
@@ -9,6 +10,21 @@
          Android 9 and older. Android 10+ writes there under scoped storage
          with no permission at all, hence the maxSdkVersion. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
+
+    <!-- open_filex blanket-declares all three READ_MEDIA_* permissions in its own
+         manifest, which trips Google Play's Photo and Video Permissions policy.
+         We never read the shared media store: files are opened through the
+         plugin's FileProvider, which grants read access per-intent via
+         FLAG_GRANT_READ_URI_PERMISSION and needs no permission at all.
+         Removing them here keeps them out of the merged manifest.
+
+         The plugin does gate on these before it reaches that code, but only for
+         paths outside the app sandbox — so `saveDownloadedFile` keeps media out
+         of public Downloads. See lib/utils/file_download.dart. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove"/>
+
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
         android:label="CoreX OS"

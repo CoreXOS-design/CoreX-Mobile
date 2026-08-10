@@ -145,16 +145,24 @@ class _LoginScreenState extends State<LoginScreen> {
     // Step 1: user app login.
     final auth = context.read<AuthProvider>();
     final ok = await auth.login(email, password);
-    if (!mounted) return;
     if (ok) {
       _offerToSaveCredentials();
       // First sign-in on this device — offer fingerprint unlock for next time.
       // AuthGate handles the swap to HomeScreen underneath.
+      //
+      // Deliberately not gated on `mounted`: that swap disposes this State as
+      // soon as login succeeds, so checking it here would drop the one-time
+      // offer whenever the rebuild wins the race. Nothing below touches this
+      // widget — the dialog is shown on the root navigator precisely so it can
+      // outlive the screen that triggered it.
       if (auth.needsBiometricSetupPrompt) {
         await _askEnableBiometrics(auth);
       }
       return;
     }
+    // Every path from here on calls setState, so the guard belongs here rather
+    // than above.
+    if (!mounted) return;
     // 401 = the email is a known user, password was wrong. Don't leak into the
     // client lookup flow — show a clear password error and stop here.
     if (auth.lastLoginStatus == 401) {

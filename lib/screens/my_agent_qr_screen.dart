@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import '../widgets/ui/content_width.dart';
 
 import '../services/api_service.dart';
 import '../theme.dart';
+import '../utils/file_download.dart';
 
 // Persistent cache. The agent's slug never changes, so once fetched we
 // keep both the JSON payload AND the rendered PNG bytes across launches.
@@ -181,9 +183,39 @@ class _MyAgentQrScreenState extends State<MyAgentQrScreen> {
 
   Future<void> _save() async {
     final png = _png;
-    if (png == null) return;
+    if (png == null) {
+      // Was a silent return, which is indistinguishable from a dead button.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('The QR image hasn’t finished loading yet.')),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
+      final format = imageFormatOf(png);
+
+      // Android: straight to the phone's Download folder, deliberately not the
+      // gallery. Two OEM behaviours defeated the gallery route on real devices
+      // — Honor's Gallery ignores images at the root of Pictures/, and putting
+      // them in a Pictures/CoreX album didn't surface them either. Downloads is
+      // somewhere the agent can always find, and the same MediaStore write the
+      // document downloads already use.
+      if (Platform.isAndroid) {
+        final saved = await saveDownloadedFile(
+          bytes: png,
+          fileName: 'corex-agent-qr.${format.ext}',
+          mimeType: format.mime,
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${saved.fileName} saved to ${saved.locationLabel}')),
+        );
+        return;
+      }
+
+      // iOS has no shared Downloads folder, so the photo library remains the
+      // right home there — and gal is only asked to store bytes we've already
+      // identified, never to guess a format.
       final hasAccess = await Gal.hasAccess();
       if (!hasAccess) {
         final granted = await Gal.requestAccess();
@@ -200,10 +232,22 @@ class _MyAgentQrScreenState extends State<MyAgentQrScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Saved to Photos')),
       );
-    } catch (_) {
+    } on GalException catch (e) {
+      debugPrint('[qr] gal save failed: ${e.type} ${e.platformException}');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not save image')),
+        SnackBar(content: Text('Could not save image: ${e.type.message}')),
+      );
+    } on FileSaveException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    } catch (e) {
+      debugPrint('[qr] save failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save image: $e')),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
