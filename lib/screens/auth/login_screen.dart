@@ -184,7 +184,7 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() {
           _busy = false;
           _error = 'We couldn’t find that email. Ask your agency to add you, '
-              'or scan your agent’s QR code to get started.';
+              'or create your account by scanning your agent’s QR code.';
         });
         return;
       }
@@ -478,11 +478,26 @@ class _LoginScreenState extends State<LoginScreen> {
                                 _busy ? null : () => _tryBiometricUnlock(),
                           ),
                         ],
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 20),
+                        // Spelled out as account creation, not as a second way
+                        // in. App Review read a bare "Scan agent QR" button
+                        // sitting next to Sign In as an unlock mechanism
+                        // (guideline 3.1.1); it only ever opened a signup form.
                         CorexSecondaryButton(
-                          label: 'Scan agent QR',
+                          label: 'Create your account',
                           leading: TablerIcons.qrcode,
                           onPressed: _busy ? null : _scanQr,
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'New client? Create your account by scanning '
+                          "your agent's QR.",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: CorexTokens.textSecondary(context),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                         const SizedBox(height: 32),
                         Text(

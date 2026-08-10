@@ -147,7 +147,8 @@ class _ClientAgentQrScannerScreenState
                         ),
                       ),
                     const Text(
-                      'Point at the agent\'s QR code',
+                      'Point at your agent\'s QR code to create your account',
+                      textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.white, fontSize: 14),
                     ),
                   ],
