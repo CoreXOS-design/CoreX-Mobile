@@ -5,8 +5,8 @@
 /// (`$(FLUTTER_BUILD_NAME)`) actually stamp onto a build, so drifting here
 /// means the About screen and the device-registration payload lie about which
 /// build a user is on.
-const String kAppVersion = '1.0.5';
-const int kAppBuildNumber = 6;
+const String kAppVersion = '1.0.9';
+const int kAppBuildNumber = 11;
 
-/// e.g. `1.0.5 (6)` — for surfaces that want the build number too.
+/// e.g. `1.0.9 (11)` — for surfaces that want the build number too.
 const String kAppVersionFull = '$kAppVersion ($kAppBuildNumber)';
