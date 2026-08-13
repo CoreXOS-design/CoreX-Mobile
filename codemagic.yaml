@@ -74,25 +74,58 @@ workflows:
           # MessagingService swallows it, and no device token is ever recorded.
           # Same class of invisible failure as the permission macros above, so
           # it gets the same treatment: fail the build here instead.
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          COUNT=0
+          MATCHED=0
           FOUND=0
-          for P in "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
+          echo "Profiles in $PROFILE_DIR:"
+          for P in "$PROFILE_DIR"/*.mobileprovision; do
             [ -f "$P" ] || continue
-            if security cms -D -i "$P" 2>/dev/null | grep -q "aps-environment"; then
-              FOUND=1
-              break
-            fi
+            COUNT=$((COUNT + 1))
+            PLIST=$(security cms -D -i "$P" 2>/dev/null)
+            NAME=$(printf '%s' "$PLIST" | plutil -extract Name raw -o - - 2>/dev/null)
+            APPID=$(printf '%s' "$PLIST" | plutil -extract Entitlements.application-identifier raw -o - - 2>/dev/null)
+            APS=$(printf '%s' "$PLIST" | plutil -extract Entitlements.aps-environment raw -o - - 2>/dev/null)
+            echo "  - ${NAME:-<unnamed>}"
+            echo "      application-identifier: ${APPID:-<none>}"
+            echo "      aps-environment:        ${APS:-<ABSENT>}"
+            # Only a profile for OUR bundle id counts. A stray profile for some
+            # other app carrying the entitlement must not green-light the build.
+            case "$APPID" in
+              *".$BUNDLE_ID")
+                MATCHED=$((MATCHED + 1))
+                [ -n "$APS" ] && FOUND=1
+                ;;
+            esac
           done
+          echo
+          if [ "$COUNT" -eq 0 ]; then
+            echo "ERROR: no provisioning profiles were placed in $PROFILE_DIR at all."
+            echo "This is NOT the push capability — code signing setup itself did not"
+            echo "produce a profile. Check the 'Set up code signing' step above and the"
+            echo "App Store Connect integration / CERTIFICATE_PRIVATE_KEY variable."
+            exit 1
+          fi
+          if [ "$MATCHED" -eq 0 ]; then
+            echo "ERROR: $COUNT profile(s) present but NONE match bundle id $BUNDLE_ID."
+            echo "Codemagic is signing a different app than codemagic.yaml declares."
+            exit 1
+          fi
           if [ "$FOUND" -ne 1 ]; then
-            echo "ERROR: no fetched provisioning profile contains aps-environment."
+            echo "ERROR: the profile for $BUNDLE_ID does not carry aps-environment."
             echo
             echo "Fix: Apple Developer portal -> Certificates, Identifiers & Profiles"
             echo "  1. Identifiers -> $BUNDLE_ID -> tick Push Notifications -> Save."
-            echo "  2. Profiles -> delete the existing App Store profile for"
-            echo "     $BUNDLE_ID (a capability change marks it Invalid; Codemagic"
-            echo "     will re-create it on the next build)."
+            echo "     (Edit the EXISTING identifier; do not register a new one.)"
+            echo "  2. Profiles -> delete the App Store profile for $BUNDLE_ID."
+            echo "     Ticking the capability marks it Invalid but does NOT update it,"
+            echo "     and fetch-signing-files reuses whatever profile already exists —"
+            echo "     so without deleting it, this step fails again unchanged."
+            echo
+            echo "Both steps are required. Doing (1) alone leaves this failing."
             exit 1
           fi
-          echo "aps-environment present in the provisioning profile."
+          echo "OK: profile for $BUNDLE_ID carries aps-environment."
       - name: Flutter build ipa
         script: |
           flutter build ipa --release \
