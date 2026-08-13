@@ -46,8 +46,21 @@ class MessagingService {
   final FlutterLocalNotificationsPlugin _local =
       FlutterLocalNotificationsPlugin();
 
-  static const _testChannelId = 'corex_test';
-  static const _testChannelName = 'CoreX test notifications';
+  // One high-importance channel for everything CoreX posts, so the user sees a
+  // single honest entry in the OS notification settings and the "send test
+  // notification" button exercises the exact channel real pushes use.
+  //
+  // `_pushChannelId` is referenced in three places that must stay in sync:
+  //   - AndroidManifest `default_notification_channel_id` (background/killed
+  //     pushes, rendered by the Firebase SDK)
+  //   - the backend's AndroidConfig `channel_id` (App\Services\Push\FcmService)
+  //   - `_showLocal` below (foreground pushes, rendered by us)
+  // Importance.high is what earns the heads-up banner; IMPORTANCE_DEFAULT only
+  // lands in the shade.
+  static const _pushChannelId = 'corex_push';
+  static const _pushChannelName = 'CoreX notifications';
+  static const _pushChannelDescription =
+      'New leads, appointment reminders and other CoreX alerts.';
 
   // --- Foreground storm guard ---------------------------------------------
   // A backend misfire (e.g. a job re-sending the same push in a tight loop)
@@ -111,12 +124,15 @@ class MessagingService {
     // any messages arrive; the handler runs in its own isolate.
     FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
 
-    // iOS / web foreground presentation — show the system banner instead of
-    // suppressing it.
+    // iOS / web foreground presentation — suppress the OS's automatic banner.
+    // We post the notification ourselves in [_onForegroundMessage] so that the
+    // user's push toggle and quiet-hours window are honoured on iOS exactly as
+    // they are on Android; letting iOS auto-present would bypass both gates and
+    // double up with the notification we post.
     await _fcm.setForegroundNotificationPresentationOptions(
-      alert: true,
+      alert: false,
       badge: true,
-      sound: true,
+      sound: false,
     );
 
     // Permission prompt on iOS (no-op on Android < 13; handled by
@@ -128,8 +144,8 @@ class MessagingService {
     // Auto-register if the OS rotates the token.
     _fcm.onTokenRefresh.listen(_registerWithServer);
 
-    // Foreground delivery — show a snackbar instead of a system banner so the
-    // user notices without an OS interruption.
+    // Foreground delivery — FCM never renders anything itself while the app is
+    // open, so we post the notification.
     FirebaseMessaging.onMessage.listen(_onForegroundMessage);
 
     // Tap on a notification while app is backgrounded.
@@ -261,50 +277,65 @@ class MessagingService {
       } catch (_) {}
     }
 
-    final messenger = ScaffoldMessenger.of(ctx);
+    // Post a real OS notification rather than an in-app banner.
+    //
+    // This used to show a MaterialBanner, on the reasoning that an agent who
+    // already has the app open shouldn't be interrupted by the OS. In practice
+    // that made a foreground lead *invisible*: the banner vanished after 5s and
+    // left nothing behind, so an agent who was on another screen — or simply
+    // not looking — had no shade entry and no badge to come back to, and
+    // reported the push as never delivered. A real notification peeks, persists
+    // in the shade, and survives being missed.
+    unawaited(_showLocal(
+      id: fingerprint.hashCode & 0x7fffffff,
+      title: title,
+      body: body,
+      payload: action,
+    ));
+  }
 
-    // Show a banner pinned to the top of the screen (instead of a bottom
-    // snackbar) with an explicit X to dismiss. Auto-dismiss after 5s to match
-    // the previous behaviour.
-    messenger.clearMaterialBanners();
-    final controller = messenger.showMaterialBanner(
-      MaterialBanner(
-        content: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (title != null)
-              Text(title,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-            if (body != null) Text(body, style: const TextStyle(fontSize: 12)),
-          ],
-        ),
-        leading: const Icon(Icons.notifications),
-        actions: [
-          if (action != null)
-            TextButton(
-              onPressed: () {
-                messenger.hideCurrentMaterialBanner();
-                DeepLinkRouter.open(ctx, action);
-              },
-              child: const Text('View'),
-            ),
-          IconButton(
-            icon: const Icon(Icons.close),
-            tooltip: 'Dismiss',
-            onPressed: messenger.hideCurrentMaterialBanner,
+  /// Posts a notification through [_pushChannelId] and returns once the OS has
+  /// accepted it. Tapping it routes through [_onLocalNotificationTap].
+  Future<void> _showLocal({
+    required int id,
+    String? title,
+    String? body,
+    String? payload,
+  }) async {
+    try {
+      await _local.show(
+        id,
+        title,
+        body,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _pushChannelId,
+            _pushChannelName,
+            channelDescription: _pushChannelDescription,
+            importance: Importance.high,
+            priority: Priority.high,
+            // Lead bodies carry a name plus a property reference and routinely
+            // overflow one line; collapsed they truncate to uselessness.
+            styleInformation:
+                body == null ? null : BigTextStyleInformation(body),
           ),
-        ],
-      ),
-    );
+          iOS: const DarwinNotificationDetails(),
+        ),
+        payload: payload,
+      );
+    } catch (e) {
+      debugPrint('[messaging] local notification failed: $e');
+    }
+  }
 
-    // Auto-dismiss after 5 seconds if this banner is still showing. Cancel the
-    // timer the moment the banner closes by any other means (the X, the View
-    // action, or a replacing banner) — otherwise `controller.close()` runs
-    // against an already-removed banner and throws "Bad state: No element",
-    // crashing the app.
-    final autoDismiss = Timer(const Duration(seconds: 5), controller.close);
-    controller.closed.then((_) => autoDismiss.cancel());
+  /// Tap handler for notifications *we* posted (foreground deliveries). Pushes
+  /// rendered by the OS while backgrounded come back through
+  /// [FirebaseMessaging.onMessageOpenedApp] instead.
+  void _onLocalNotificationTap(NotificationResponse response) {
+    final ctx = navigatorKey?.currentContext;
+    final payload = response.payload;
+    if (ctx == null || payload == null || payload.isEmpty) return;
+    DeepLinkRouter.open(ctx, payload);
   }
 
   void _onMessageTap(RemoteMessage msg) {
@@ -339,33 +370,36 @@ class MessagingService {
     const ios = DarwinInitializationSettings();
     await _local.initialize(
       const InitializationSettings(android: android, iOS: ios),
+      onDidReceiveNotificationResponse: _onLocalNotificationTap,
     );
+    // Create the channel up front rather than lazily on first notification:
+    // the Firebase SDK renders background pushes without going through Dart at
+    // all, so if this channel doesn't already exist by then Android silently
+    // substitutes its own default-importance fallback and the heads-up banner
+    // is lost. Creating an existing channel is a no-op, and note that a
+    // channel's importance is immutable once created — raising it later
+    // requires a new id.
     await _local
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(const AndroidNotificationChannel(
-          _testChannelId,
-          _testChannelName,
+          _pushChannelId,
+          _pushChannelName,
+          description: _pushChannelDescription,
           importance: Importance.high,
         ));
   }
 
   /// Fires a local system-tray notification so the user can verify that
-  /// notifications surface correctly on their device.
+  /// notifications surface correctly on their device. Deliberately posted
+  /// through the same channel as real pushes — a test on its own channel can
+  /// pass while every real notification is muted or silenced.
   Future<void> sendTestNotification() async {
-    await _local.show(
-      DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      'CoreX test notification',
-      'If you can see this in your notification bar, push delivery is working.',
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          _testChannelId,
-          _testChannelName,
-          importance: Importance.high,
-          priority: Priority.high,
-        ),
-        iOS: DarwinNotificationDetails(),
-      ),
+    await _showLocal(
+      id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
+      title: 'CoreX test notification',
+      body:
+          'If you can see this in your notification bar, push delivery is working.',
     );
   }
 

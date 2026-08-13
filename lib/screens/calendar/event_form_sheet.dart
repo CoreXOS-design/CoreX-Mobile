@@ -32,8 +32,9 @@ Future<bool> showCreateEventSheet(
 }
 
 /// Fetch an event's full detail and, if editable, open the edit sheet
-/// pre-filled. Returns `true` if the event was updated. Honours the
-/// server's `is_editable` flag (source-driven events aren't user-editable).
+/// pre-filled. Returns `true` if the event was updated. Gated on
+/// [EventFormData.canEdit] — only genuinely source-driven events (and other
+/// people's private ones) are locked; an event's `status` never locks it.
 Future<bool> openEventForEdit(BuildContext context, int eventId) async {
   // Lightweight blocking loader while we fetch detail.
   showDialog(
@@ -59,9 +60,14 @@ Future<bool> openEventForEdit(BuildContext context, int eventId) async {
   if (!context.mounted) return false;
   Navigator.of(context).pop(); // dismiss loader
 
-  if (!data.isEditable) {
+  if (!data.canEdit) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('This event can\'t be edited.')),
+      SnackBar(
+        content: Text(data.isPrivate
+            ? 'This is someone else\'s private event.'
+            : 'This event comes from another record and is kept in sync with '
+                'it — change it at the source.'),
+      ),
     );
     return false;
   }

@@ -316,6 +316,31 @@ class ClientAuthService {
     throw _toException(res, 'Could not change password');
   }
 
+  /// Deletes the client's login (App Store guideline 5.1.1(v)). The server
+  /// revokes every token on the account, so the caller must drop the local
+  /// token regardless of what it does next.
+  ///
+  /// [password] is required *except* when the client is in the forced
+  /// password-change state — pass null there and the key is omitted from the
+  /// body entirely, which is not the same as sending an empty string.
+  ///
+  /// A 422 means the password was wrong and **nothing was deleted**: the
+  /// session is still valid and the caller should let them retry or cancel.
+  Future<void> deleteAccount({String? password, String? bearer}) async {
+    final res = await http
+        .delete(
+          Uri.parse('$_baseUrl/v1/client-auth/account'),
+          headers: await _authHeaders(bearer),
+          body: jsonEncode({
+            if (password != null) 'password': password,
+          }),
+        )
+        .timeout(_timeout);
+
+    if (res.statusCode == 200 || res.statusCode == 204) return;
+    throw _toException(res, 'Could not delete your account');
+  }
+
   Future<({ClientProfile client, List<ClientAgency> agencies})> selectAgency({
     required int agencyId,
     required bool lock,

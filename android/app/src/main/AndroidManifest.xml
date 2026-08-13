@@ -52,6 +52,24 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Pushes that arrive while the app is backgrounded or killed are
+             rendered by the Firebase SDK, not by our Dart code. With no channel
+             named here (and none in the FCM payload) Android 8+ drops them into
+             the SDK's auto-created fallback channel at IMPORTANCE_DEFAULT: the
+             notification lands silently in the shade with no heads-up banner,
+             which reads to the agent as "the push never arrived". Point the SDK
+             at the high-importance channel MessagingService creates — the id
+             must stay in sync with `_pushChannelId` there and with the
+             `channel_id` the backend sends in AndroidConfig. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="corex_push" />
+        <!-- Without this the status-bar icon falls back to the full-colour
+             launcher icon, which Android silhouettes into a white square. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_launcher_monochrome" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

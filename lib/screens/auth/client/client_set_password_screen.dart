@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../providers/client_session_provider.dart';
 import '../../../services/api_service.dart' show ApiException;
 import '../../../services/client_auth_service.dart';
+import '../../client/client_delete_account_screen.dart';
 import '../../../widgets/ui/auth_scaffold.dart';
 import '../../../widgets/ui/glow_button.dart';
 import 'client_auth_shared.dart';
@@ -133,6 +134,24 @@ class _ClientSetPasswordScreenState extends State<ClientSetPasswordScreen> {
               loading: _busy,
               child: const Text('Create password & sign in'),
             ),
+            // Forced rotation blocks every other action on this screen, but a
+            // client must always be able to leave — never be trapped into
+            // setting a password they no longer want. App Store 5.1.1(v).
+            if (!widget.isFromActivation) ...[
+              const SizedBox(height: 20),
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () => startClientAccountDeletion(
+                          context,
+                          bearerToken: widget.bearerToken,
+                        ),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFEF4444),
+                ),
+                child: const Text('Delete account'),
+              ),
+            ],
           ],
         ),
       ),

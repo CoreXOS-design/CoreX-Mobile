@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Without this entitlement iOS refuses to register with APNs, so
+	     FirebaseMessaging.getToken() fails, MessagingService._obtainToken
+	     swallows the error, and no device token is ever POSTed to
+	     /api/device-tokens. The failure is completely silent: the app builds,
+	     ships, and simply never receives a push.
+
+	     "development" is correct here even for App Store builds. aps-environment
+	     is a profile-derived entitlement — xcodebuild's export step rewrites it
+	     to "production" when re-signing with the distribution provisioning
+	     profile. Hardcoding "production" instead breaks debug builds on a real
+	     device, which sign against a development profile. -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

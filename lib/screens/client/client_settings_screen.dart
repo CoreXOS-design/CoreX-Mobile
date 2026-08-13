@@ -13,6 +13,7 @@ import '../../theme/corex_tokens.dart';
 import '../../widgets/corex/corex_card.dart';
 import '../../widgets/corex/corex_scaffold.dart';
 import '../auth/client/client_agency_picker_screen.dart';
+import 'client_delete_account_screen.dart';
 
 const Color _kDanger = Color(0xFFEF4444);
 
@@ -116,6 +117,38 @@ class ClientSettingsScreen extends StatelessWidget {
                   Navigator.of(context).popUntil((r) => r.isFirst);
                 }
               },
+            ),
+            const SizedBox(height: 28),
+            Divider(
+              height: 1,
+              color: CorexTokens.textTertiary(context).withValues(alpha: 0.18),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'DANGER ZONE',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.1,
+                color: CorexTokens.textTertiary(context),
+              ),
+            ),
+            const SizedBox(height: 10),
+            _SettingsRow(
+              icon: TablerIcons.trash,
+              label: 'Delete account',
+              tint: _kDanger,
+              onTap: () => startClientAccountDeletion(context),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Deletes your login and signs you out everywhere. Your dealings '
+              'with the agency are kept as a business record.',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: CorexTokens.textTertiary(context),
+              ),
             ),
           ],
         ),

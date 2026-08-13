@@ -65,6 +65,34 @@ workflows:
             --create
           keychain add-certificates
           xcode-project use-profiles
+      - name: Verify the provisioning profile carries aps-environment
+        script: |
+          # aps-environment is a PROFILE-DERIVED entitlement: it only reaches the
+          # binary if Push Notifications is enabled on the App ID in the Apple
+          # Developer portal. If it isn't, the build still succeeds and ships an
+          # app that silently cannot register with APNs — getToken() fails,
+          # MessagingService swallows it, and no device token is ever recorded.
+          # Same class of invisible failure as the permission macros above, so
+          # it gets the same treatment: fail the build here instead.
+          FOUND=0
+          for P in "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
+            [ -f "$P" ] || continue
+            if security cms -D -i "$P" 2>/dev/null | grep -q "aps-environment"; then
+              FOUND=1
+              break
+            fi
+          done
+          if [ "$FOUND" -ne 1 ]; then
+            echo "ERROR: no fetched provisioning profile contains aps-environment."
+            echo
+            echo "Fix: Apple Developer portal -> Certificates, Identifiers & Profiles"
+            echo "  1. Identifiers -> $BUNDLE_ID -> tick Push Notifications -> Save."
+            echo "  2. Profiles -> delete the existing App Store profile for"
+            echo "     $BUNDLE_ID (a capability change marks it Invalid; Codemagic"
+            echo "     will re-create it on the next build)."
+            exit 1
+          fi
+          echo "aps-environment present in the provisioning profile."
       - name: Flutter build ipa
         script: |
           flutter build ipa --release \

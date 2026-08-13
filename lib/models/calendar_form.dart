@@ -313,6 +313,8 @@ class EventFormData {
   final String status;
   final bool sendReminder;
   final bool isEditable;
+  final String? sourceType;
+  final bool isPrivate;
   final int? dealId;
   final List<SelectedProperty> linkedProperties;
   final List<SelectedAttendee> attendees;
@@ -329,10 +331,34 @@ class EventFormData {
     this.status = 'pending',
     this.sendReminder = true,
     this.isEditable = true,
+    this.sourceType,
+    this.isPrivate = false,
     this.dealId,
     this.linkedProperties = const [],
     this.attendees = const [],
   });
+
+  /// Whether this event may be opened in the edit sheet.
+  ///
+  /// The server's `is_editable` is authoritative when true. The fallback below
+  /// exists because that flag is computed as
+  /// `in_array(source_type, ['manual', 'manual:demo'])`, which is **false for a
+  /// NULL source_type** — so a plain user-created event whose creation path
+  /// never stamped the column (voice scheduling, older rows) came back
+  /// read-only even though `PUT .../calendar/{id}` accepts the edit. Nothing
+  /// here keys off `status`: a completed event is as editable as a pending one.
+  ///
+  /// A blank source_type means "not generated from another record", so it's
+  /// manual. Genuinely source-driven events (a deal step, a portal expiry) stay
+  /// locked — their fields are recomputed from the source and an edit here
+  /// would just be overwritten. A private event redacted for a non-creator
+  /// carries `is_private: true` and is never editable.
+  bool get canEdit {
+    if (isEditable) return true;
+    if (isPrivate) return false;
+    final s = (sourceType ?? '').trim();
+    return s.isEmpty || s == 'manual' || s == 'manual:demo';
+  }
 
   factory EventFormData.fromJson(Map<String, dynamic> json) {
     // Linked properties: prefer the explicit array; fall back to the single
@@ -407,6 +433,8 @@ class EventFormData {
           json['send_reminder'] == null ? true : _asBool(json['send_reminder']),
       isEditable:
           json['is_editable'] == null ? true : _asBool(json['is_editable']),
+      sourceType: json['source_type']?.toString(),
+      isPrivate: _asBool(json['is_private']),
       dealId: _asInt(json['deal_id']),
       linkedProperties: linked,
       attendees: attendees,
