@@ -74,12 +74,20 @@ workflows:
           # MessagingService swallows it, and no device token is ever recorded.
           # Same class of invisible failure as the permission macros above, so
           # it gets the same treatment: fail the build here instead.
-          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          # Do NOT hardcode the profile directory. Xcode 16 moved it from
+          #   ~/Library/MobileDevice/Provisioning Profiles
+          # to
+          #   ~/Library/Developer/Xcode/UserData/Provisioning Profiles
+          # and the Codemagic CLI writes to whichever the installed Xcode
+          # expects — so with `xcode: latest` the path is not ours to assume.
+          # Search for the files instead; the location is printed below so a
+          # future move is obvious rather than silent.
+          find "$HOME" -maxdepth 8 -name "*.mobileprovision" 2>/dev/null > /tmp/profiles.txt
           COUNT=0
           MATCHED=0
           FOUND=0
-          echo "Profiles in $PROFILE_DIR:"
-          for P in "$PROFILE_DIR"/*.mobileprovision; do
+          echo "Provisioning profiles found under $HOME:"
+          while IFS= read -r P; do
             [ -f "$P" ] || continue
             COUNT=$((COUNT + 1))
             PLIST=$(security cms -D -i "$P" 2>/dev/null)
@@ -87,6 +95,7 @@ workflows:
             APPID=$(printf '%s' "$PLIST" | plutil -extract Entitlements.application-identifier raw -o - - 2>/dev/null)
             APS=$(printf '%s' "$PLIST" | plutil -extract Entitlements.aps-environment raw -o - - 2>/dev/null)
             echo "  - ${NAME:-<unnamed>}"
+            echo "      path:                   $P"
             echo "      application-identifier: ${APPID:-<none>}"
             echo "      aps-environment:        ${APS:-<ABSENT>}"
             # Only a profile for OUR bundle id counts. A stray profile for some
@@ -97,13 +106,13 @@ workflows:
                 [ -n "$APS" ] && FOUND=1
                 ;;
             esac
-          done
+          done < /tmp/profiles.txt
           echo
           if [ "$COUNT" -eq 0 ]; then
-            echo "ERROR: no provisioning profiles were placed in $PROFILE_DIR at all."
-            echo "This is NOT the push capability — code signing setup itself did not"
-            echo "produce a profile. Check the 'Set up code signing' step above and the"
-            echo "App Store Connect integration / CERTIFICATE_PRIVATE_KEY variable."
+            echo "ERROR: no provisioning profiles exist anywhere under $HOME."
+            echo "This is NOT the push capability — code signing setup itself produced"
+            echo "no profile. Check the 'Set up code signing' step above, the App Store"
+            echo "Connect integration, and the CERTIFICATE_PRIVATE_KEY variable."
             exit 1
           fi
           if [ "$MATCHED" -eq 0 ]; then
