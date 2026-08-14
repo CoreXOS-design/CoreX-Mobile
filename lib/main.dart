@@ -22,8 +22,10 @@ import 'screens/auth/client/client_agency_picker_screen.dart';
 import 'screens/auth/client/client_set_password_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/client/client_home_screen.dart';
+import 'screens/force_update_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/splash_screen.dart';
+import 'services/app_update_service.dart';
 import 'services/client_auth_service.dart';
 import 'services/messaging_service.dart';
 import 'utils/app_time.dart';
@@ -138,12 +140,50 @@ class AppBootstrap extends StatefulWidget {
   State<AppBootstrap> createState() => _AppBootstrapState();
 }
 
-class _AppBootstrapState extends State<AppBootstrap> {
+class _AppBootstrapState extends State<AppBootstrap> with WidgetsBindingObserver {
   bool _splashDone = false;
   bool _brandingPulled = false;
 
+  /// Null until the first version check answers. The gate is only ever applied
+  /// on a definite "you are below the minimum" — see [AppUpdateService], which
+  /// fails open on every error path.
+  AppUpdateStatus? _update;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkForUpdate();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Re-check on resume so raising the cutoff catches agents who keep the app
+    // open for days, rather than only those who happen to cold-start after it.
+    if (state == AppLifecycleState.resumed) _checkForUpdate();
+  }
+
+  Future<void> _checkForUpdate() async {
+    final status = await AppUpdateService.check();
+    if (!mounted) return;
+    // Only ever latch ON. A check that comes back clean must not clear a gate
+    // already in force: the app is unusable at that point, and flickering back
+    // into it because one request failed would be worse than staying blocked.
+    if (status.updateRequired) setState(() => _update = status);
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Ahead of everything else, including auth — a build old enough to be
+    // gated may not be able to log in at all.
+    if (_update != null) return ForceUpdateScreen(status: _update!);
+
     final auth = context.watch<AuthProvider>();
     final clientSession = context.watch<ClientSessionProvider>();
     // Splash stays up until the animation finishes AND we have a definitive

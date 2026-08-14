@@ -1,7 +1,46 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../../config/env.dart';
 import 'client_agent_qr_signup_screen.dart';
+
+final RegExp _slugRe = RegExp(r'^[a-z0-9]{6,16}$');
+
+/// Hosts whose QR codes we accept. Production is always allowed; the host of
+/// the configured API base URL is added so a staging build still scans QRs
+/// minted by staging.
+Set<String> _allowedHosts() {
+  final hosts = <String>{'corexos.co.za', 'www.corexos.co.za'};
+  final apiHost = Uri.tryParse(Env.apiBaseUrl)?.host.toLowerCase();
+  if (apiHost != null && apiHost.isNotEmpty) hosts.add(apiHost);
+  return hosts;
+}
+
+/// Returns the agent slug for a scanned payload, or null when it isn't a
+/// CoreX agent QR. Validation is purely host + path shape — no API call.
+///
+/// Accepted:
+///   https://corexos.co.za/corex/agents/{name-slug}/{slug}  (current)
+///   https://corexos.co.za/r/a/{slug}                       (legacy redirect)
+///
+/// {name-slug} is cosmetic and deliberately not validated.
+String? extractAgentQrSlug(String raw) {
+  final uri = Uri.tryParse(raw.trim());
+  if (uri == null) return null;
+  if (uri.scheme != 'http' && uri.scheme != 'https') return null;
+  if (!_allowedHosts().contains(uri.host.toLowerCase())) return null;
+
+  final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+  final bool isCurrent = segments.length == 4 &&
+      segments[0] == 'corex' &&
+      segments[1] == 'agents';
+  final bool isLegacy =
+      segments.length == 3 && segments[0] == 'r' && segments[1] == 'a';
+  if (!isCurrent && !isLegacy) return null;
+
+  final slug = segments.last.toLowerCase();
+  return _slugRe.hasMatch(slug) ? slug : null;
+}
 
 class ClientAgentQrScannerScreen extends StatefulWidget {
   const ClientAgentQrScannerScreen({super.key});
@@ -21,34 +60,15 @@ class _ClientAgentQrScannerScreenState
   bool _handled = false;
   String? _errorBanner;
 
-  static final RegExp _slugRe = RegExp(r'^[a-z0-9]{6,16}$');
-
-  String? _extractSlug(String raw) {
-    final value = raw.trim();
-    Uri? uri;
-    try {
-      uri = Uri.parse(value);
-    } catch (_) {
-      return null;
-    }
-    if (uri.scheme != 'http' && uri.scheme != 'https') return null;
-    final segments = uri.pathSegments;
-    // Expect path like /r/a/{slug}
-    if (segments.length < 3) return null;
-    if (segments[segments.length - 3] != 'r') return null;
-    if (segments[segments.length - 2] != 'a') return null;
-    final slug = segments.last.toLowerCase();
-    if (!_slugRe.hasMatch(slug)) return null;
-    return slug;
-  }
-
   void _onDetect(BarcodeCapture capture) {
     if (!mounted) return;
     if (_handled) return;
+    var sawPayload = false;
     for (final b in capture.barcodes) {
       final raw = b.rawValue;
       if (raw == null) continue;
-      final slug = _extractSlug(raw);
+      sawPayload = true;
+      final slug = extractAgentQrSlug(raw);
       if (slug != null) {
         _handled = true;
         _controller.stop();
@@ -58,10 +78,11 @@ class _ClientAgentQrScannerScreenState
           ),
         );
         return;
-      } else {
-        setState(() => _errorBanner = 'Not a CoreX agent QR code');
-        return;
       }
+    }
+    // Nothing in this frame was a CoreX agent QR — stay on the scanner.
+    if (sawPayload && _errorBanner == null) {
+      setState(() => _errorBanner = 'Not a CoreX agent QR code');
     }
   }
 
