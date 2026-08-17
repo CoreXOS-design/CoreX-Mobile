@@ -13,11 +13,18 @@ import '../../widgets/ui/glow_button.dart';
 
 /// Account deletion — App Store guideline 5.1.1(v).
 ///
-/// Wording rule for everything in this file: this removes the client's *login*
-/// only. Their record with the agency (deal history, FICA documents) is kept as
-/// a normal business record and is untouched, so the copy only ever talks about
-/// the "account" / "app access" / being signed out everywhere. Never "your
-/// data".
+/// Wording rule for everything in this file: the copy must state plainly that
+/// the *account is deleted*, permanently and irreversibly. An earlier version
+/// hedged ("removes your login", "signs you out everywhere", "you will need to
+/// sign up again") to stay accurate about the agency's retained business
+/// record — App Review read that as deactivation and rejected the build under
+/// 5.1.1(v). So: say deleted, say permanent, say it cannot be undone.
+///
+/// What is still true and must not be contradicted: the deletion removes the
+/// person's CoreX account. Their record with the agency (deal history, FICA
+/// documents) is retained by the agency as a business record under South
+/// African law. Never claim in this flow that *all* their data is erased — just
+/// don't dress the account deletion up as anything less than a deletion.
 const Color _kDanger = Color(0xFFEF4444);
 
 /// Entry point for the whole flow: confirm → (password step | straight to the
@@ -53,8 +60,8 @@ Future<void> startClientAccountDeletion(
 /// gets the system red — this dialog is the one the reviewer will look at.
 Future<bool> _confirmDelete(BuildContext context) async {
   const title = 'Delete your account?';
-  const body = 'You will be signed out of every device and will need to sign '
-      'up again to use the app. This cannot be undone.';
+  const body = 'Your account will be permanently deleted and you will be '
+      'signed out of every device. This cannot be undone.';
 
   final platform = Theme.of(context).platform;
   final isApple =
@@ -232,9 +239,9 @@ class _ClientDeleteAccountScreenState extends State<ClientDeleteAccountScreen> {
   Widget build(BuildContext context) {
     return AuthScaffold(
       title: 'Delete account',
-      subtitle: 'Confirm your password to delete your account. You will be '
-          'signed out of every device and will need to sign up again to use '
-          'the app.',
+      subtitle: 'Confirm your password to permanently delete your account. '
+          'Your account will be deleted immediately and you will be signed out '
+          'of every device. This cannot be undone.',
       child: Form(
         key: _formKey,
         child: Column(

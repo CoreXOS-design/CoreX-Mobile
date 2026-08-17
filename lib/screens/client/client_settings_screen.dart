@@ -142,8 +142,8 @@ class ClientSettingsScreen extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Deletes your login and signs you out everywhere. Your dealings '
-              'with the agency are kept as a business record.',
+              'Permanently deletes your CoreX account and signs you out of '
+              'every device. This cannot be undone.',
               style: TextStyle(
                 fontSize: 12,
                 height: 1.4,

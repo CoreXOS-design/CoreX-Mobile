@@ -116,15 +116,22 @@ matches, so no data setup or sample files are required.
   creates the diary entry, with an undo action.
 - **Notifications** — the bell icon; the **notification** permission prompt appears here
   and in Settings → Notifications.
-- **Account deletion** — Settings (profile icon) → Delete account.
 
 **Signed in as the client:** Home → Matches → tap a property → react, or "Not for me" to
 decline it with a reason; My listing → progress and insights; Testimonials → leave one.
 
-**Note on account deletion:** deleting the account removes the person's *login and app
-access* and signs them out everywhere. Their record with the agency (deal history,
-regulatory FICA documents) is retained by the agency as a business record, as required by
-South African financial-intelligence law.
+**Account deletion — sign in with the CLIENT account.** Client accounts are the only
+accounts the app can create, and they are the ones that can be deleted in the app:
+Profile / Settings (person icon) → Danger zone → **Delete account** → confirm → re-enter
+the password → Delete account. The account is deleted on the server immediately, all
+sessions are revoked and the app signs out; the same email can no longer sign in. It is a
+deletion, not a deactivation, and needs no email or phone call to complete.
+
+Staff (agent) accounts cannot be created in the app — an agency administrator provisions
+them on our web system — so the staff side has no sign-up and no in-app delete option.
+The agency's record of the person (deal history, regulatory FICA documents) is a separate
+business record kept by the agency under South African financial-intelligence law; the
+account deletion above does not depend on it.
 
 ## 5. External services, tools and platforms used
 
