@@ -23,7 +23,25 @@ workflows:
       - name: Get Flutter packages
         script: flutter pub get
       - name: Install CocoaPods dependencies
-        script: find . -name "Podfile" -execdir pod install \;
+        script: |
+          set -e
+          # Was `find . -name "Podfile" -execdir pod install \;`, which reports
+          # *find's* exit code: a failed pod install passed this step green and
+          # surfaced two steps later as "Pods.xcodeproj not found", hiding the
+          # real error. Run it directly so it fails here, with its own log.
+          #
+          # The Podfile raises if ios/Flutter/Generated.xcconfig is missing
+          # (written by `flutter pub get`), so check that first — it is the most
+          # common cause and its message is clearer than CocoaPods' backtrace.
+          if [ ! -f ios/Flutter/Generated.xcconfig ]; then
+            echo "ERROR: ios/Flutter/Generated.xcconfig missing — 'flutter pub get' did not complete."
+            exit 1
+          fi
+          cd ios
+          # --repo-update: the build image's spec mirror can lag behind a newly
+          # bumped plugin (Firebase especially), and without it pod install dies
+          # on "none of your spec sources contain a spec satisfying the dependency".
+          pod install --repo-update
       - name: Verify permission macros reached the Pods project
         script: |
           # permission_handler_apple compiles each permission behind a macro
