@@ -923,6 +923,59 @@ workflows:
           codesign -dv "$APP" 2>&1 | sed -n 's/^/  /p' || true
 
           echo
+          echo "Debug symbols:"
+          # Apple's 2.1(a) rejection came with a crash report we could not act
+          # on. If it recurs, the report is only useful symbolicated, and that
+          # needs the dSYM whose UUID matches the shipped binary. Release
+          # already builds dwarf-with-dsym and nothing passes
+          # --split-debug-info, but nothing kept the dSYMs either — they lived
+          # in the archive and died with the runner. Verify, print the UUIDs
+          # (so they survive in the log even after artifacts expire), and keep
+          # them as an artifact.
+          #
+          # App.framework.dSYM is the one that matters most here: Dart code
+          # compiles into App.framework, so a crash in our own code symbolicates
+          # through that, not Runner.app.dSYM.
+          DSYM_ZIP=/tmp/smoke/dSYMs-$(sed -n 's/^version: //p' pubspec.yaml | tr '+' '-').zip
+          DSYMS=$(find build/ios -type d -name "*.dSYM" 2>/dev/null)
+          if [ -z "$DSYMS" ]; then
+            echo "  ERROR: no .dSYM produced. A future crash report cannot be"
+            echo "  symbolicated. Check DEBUG_INFORMATION_FORMAT=dwarf-with-dsym"
+            echo "  on the Release configuration."
+            FAIL=1
+          else
+            printf '%s\n' "$DSYMS" | sed 's|^|  found   |'
+            # A dSYM only symbolicates a binary with the same UUID. Comparing
+            # them is what turns "a dSYM exists" into "this dSYM works".
+            BIN_UUID=$(dwarfdump --uuid "$APP/Runner" 2>/dev/null | awk '{print $2}' | head -1)
+            RUNNER_DSYM=$(printf '%s\n' "$DSYMS" | grep "Runner.app.dSYM" | head -1)
+            if [ -n "$RUNNER_DSYM" ]; then
+              DSYM_UUID=$(dwarfdump --uuid "$RUNNER_DSYM" 2>/dev/null | awk '{print $2}' | head -1)
+              echo "  binary  Runner        UUID ${BIN_UUID:-<unreadable>}"
+              echo "  dSYM    Runner.app    UUID ${DSYM_UUID:-<unreadable>}"
+              if [ -n "$BIN_UUID" ] && [ "$BIN_UUID" != "$DSYM_UUID" ]; then
+                echo "  ERROR: dSYM UUID does not match the shipped binary;"
+                echo "  it cannot symbolicate this build."
+                FAIL=1
+              fi
+            else
+              echo "  ERROR: Runner.app.dSYM not among the dSYMs found."
+              FAIL=1
+            fi
+            if printf '%s\n' "$DSYMS" | grep -q "App.framework.dSYM"; then
+              APP_DSYM=$(printf '%s\n' "$DSYMS" | grep "App.framework.dSYM" | head -1)
+              echo "  dSYM    App.framework UUID $(dwarfdump --uuid "$APP_DSYM" 2>/dev/null | awk '{print $2}' | head -1)"
+            else
+              echo "  WARNING: no App.framework.dSYM — a crash inside Dart code"
+              echo "  would stay unsymbolicated even with Runner.app.dSYM."
+            fi
+            # shellcheck disable=SC2086
+            (cd build/ios && zip -qr "$DSYM_ZIP" $(printf '%s\n' "$DSYMS" | sed 's|^build/ios/||') ) \
+              && echo "  archived $DSYM_ZIP" \
+              || echo "  WARNING: could not archive the dSYMs"
+          fi
+
+          echo
           if [ "$FAIL" -ne 0 ]; then
             echo "ERROR: the IPA failed inspection — see the lines above."
             exit 1
@@ -978,6 +1031,10 @@ workflows:
       - /tmp/smoke/*.log
       - /tmp/smoke/*.png
       - /tmp/smoke/*.ips
+      # dSYMs for the shipped build. Keep these: a crash report from App
+      # Review or a user is only actionable symbolicated, and the matching
+      # dSYM is otherwise lost with the runner.
+      - /tmp/smoke/dSYMs-*.zip
     publishing:
       app_store_connect:
         auth: integration

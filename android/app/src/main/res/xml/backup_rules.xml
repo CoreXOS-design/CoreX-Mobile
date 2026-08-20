@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11 and older (android:fullBackupContent).
+
+  FlutterSecureStorage.xml holds the auth token and the biometric opt-in flag,
+  both encrypted under a master key that lives in the Android Keystore. Keystore
+  keys are non-exportable, so they are never part of a backup: restoring this
+  file onto another device (or onto a reinstall) brings back ciphertext that can
+  never be decrypted again.
+
+  Left in the backup set, that produced the lockout this file exists to prevent —
+  the restored vault said "biometrics are on" while the token it was supposed to
+  unlock was unrecoverable, so the app showed an enabled toggle that could never
+  raise a prompt, and the password is deliberately never stored as a fallback.
+  Excluding it means a restored device starts from a clean signed-out state.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
+</full-backup-content>

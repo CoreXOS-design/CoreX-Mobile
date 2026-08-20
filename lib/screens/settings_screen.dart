@@ -22,13 +22,20 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _biometricSupported = false;
+  /// [FingerprintSupport.unknown] leaves the toggle enabled on purpose — an
+  /// inconclusive probe (activity resuming, sensor locked out) is transient,
+  /// and greying the row out on one bad answer is how the option appeared to
+  /// vanish. Turning it on still runs a real confirmation prompt, which
+  /// reports the real error if the sensor genuinely isn't there.
+  FingerprintSupport _fingerprint = FingerprintSupport.notOffered;
+
+  bool get _biometricSupported => _fingerprint != FingerprintSupport.notOffered;
 
   @override
   void initState() {
     super.initState();
-    SecurityService.instance.canUseFingerprint().then((v) {
-      if (mounted) setState(() => _biometricSupported = v);
+    SecurityService.instance.probeFingerprint().then((v) {
+      if (mounted) setState(() => _fingerprint = v);
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) context.read<NotificationsProvider>().loadPreferences();

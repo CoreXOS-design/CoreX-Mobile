@@ -5,8 +5,24 @@ import '../services/messaging_service.dart';
 import '../services/security_service.dart';
 
 /// Outcome of a biometric unlock attempt. The caller shows different copy for
-/// "you cancelled" and "your session is gone", which a bool can't carry.
-enum BiometricUnlock { success, cancelled, sessionExpired, unavailable }
+/// "you cancelled", "your session is gone" and "we couldn't reach the server",
+/// which a bool can't carry.
+enum BiometricUnlock {
+  success,
+  cancelled,
+
+  /// The server rejected the token (401/403). A password sign-in is the only
+  /// way back in.
+  sessionExpired,
+
+  /// The fingerprint was accepted but the profile call didn't come back. The
+  /// token is untouched and still good — retrying is worthwhile, and telling
+  /// the user their session expired would be a lie that sends them hunting for
+  /// a password they may not know.
+  unreachable,
+
+  unavailable,
+}
 
 class AuthProvider extends ChangeNotifier {
   final ApiService _api = ApiService();
@@ -68,6 +84,18 @@ class AuthProvider extends ChangeNotifier {
   /// be sent to the password form despite having enabled biometrics —
   /// [unlockWithBiometrics] completes the sign-in in that case.
   bool get canUnlockWithBiometrics => _biometricEnabled && _hasStoredToken;
+
+  /// Opted in, but there is no session left on this device to unlock.
+  ///
+  /// This is the state users got stranded in: the toggle read ON while the
+  /// login screen quietly never prompted, and since the password is never
+  /// stored there was nothing else to try. The opt-in is deliberately kept —
+  /// one password sign-in restores the token and biometrics resume without
+  /// re-running setup — but the UI must *say* that rather than show a dead
+  /// toggle. See [SecurityService.isBiometricEnabled].
+  bool get biometricNeedsPasswordSignIn =>
+      _biometricEnabled && !_hasStoredToken;
+
   bool get needsBiometricSetupPrompt => _needsBiometricSetupPrompt;
   String? get error => _error;
   Map<String, dynamic>? get user => _user;
@@ -85,9 +113,13 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> checkAuth() async {
-    _biometricEnabled = await _security.isBiometricEnabled();
     final token = await _api.getToken();
     _hasStoredToken = token != null;
+    // Must run before the flag is read: it decides whether a legacy (or
+    // restored) plaintext opt-in is allowed to become the vault-backed one,
+    // and that decision depends on whether a token actually survived.
+    await _security.migrateLegacyBiometricFlags(hasToken: _hasStoredToken);
+    _biometricEnabled = await _security.isBiometricEnabled();
     debugPrint('[auth] cold start: storedToken=$_hasStoredToken '
         'biometricEnabled=$_biometricEnabled');
     if (token != null) {
@@ -240,8 +272,18 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       unawaited(_messaging.onLogin());
       return BiometricUnlock.success;
-    } catch (_) {
-      // Token is dead or unreachable — the password is the only way back in.
+    } catch (e) {
+      // Same rule as [checkAuth]: only a genuine auth rejection invalidates the
+      // token. This used to swallow *everything*, so a slow network or a flaky
+      // connection retired biometric unlock for the rest of the session — the
+      // user had passed the fingerprint check and still landed on a password
+      // form, with a token that was in fact perfectly good.
+      final rejected =
+          e is ApiException && (e.statusCode == 401 || e.statusCode == 403);
+      debugPrint('[auth] biometric unlock profile fetch failed ($e) — '
+          '${rejected ? 'session is gone' : 'keeping the token'}');
+      if (!rejected) return BiometricUnlock.unreachable;
+      await _api.clearToken();
       _hasStoredToken = false;
       notifyListeners();
       return BiometricUnlock.sessionExpired;
@@ -278,7 +320,14 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> setBiometricEnabled(bool enable) async {
     if (enable) {
-      if (!await _security.canUseFingerprint()) return;
+      // Only a confirmed "this device doesn't offer it" bails out early. An
+      // inconclusive probe falls through to the confirmation prompt, which is
+      // the authoritative test anyway — bailing on it made the Settings switch
+      // snap back with nothing said, the same silent failure as the vanishing
+      // unlock button.
+      if (await _security.probeFingerprint() == FingerprintSupport.notOffered) {
+        return;
+      }
       final ok = await _security.authenticate(
         reason: 'Confirm biometrics to enable quick sign-in',
       );
@@ -293,6 +342,11 @@ class AuthProvider extends ChangeNotifier {
     await _messaging.onLogout();
     await _api.clearToken();
     await _security.setBiometricEnabled(false);
+    // Signing out disables biometrics, so the one-time setup offer has to be
+    // re-armed with it. Without this the "already prompted" mark outlived the
+    // opt-in it belonged to: the next sign-in never offered biometrics again,
+    // and the feature just quietly stopped existing for that user.
+    await _security.clearBiometricPrompted();
     // Wipe the saved email/password so the next user's login screen doesn't
     // prefill (and biometric unlock can't reuse) the previous user's creds.
     await _security.clearCredentials();

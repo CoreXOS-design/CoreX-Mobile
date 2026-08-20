@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (android:dataExtractionRules). Same reasoning as backup_rules.xml:
+  the vault is encrypted under a non-exportable Android Keystore key, so it is
+  meaningless anywhere but the device that wrote it.
+
+  Excluded from device-transfer as well as cloud-backup — a direct D2D transfer
+  copies the file but still cannot copy the keystore key behind it.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
+    </device-transfer>
+</data-extraction-rules>

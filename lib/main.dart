@@ -34,6 +34,7 @@ import 'services/app_update_service.dart';
 import 'services/client_auth_service.dart';
 import 'services/messaging_service.dart';
 import 'utils/app_time.dart';
+import 'widgets/update_available_dialog.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -253,6 +254,16 @@ class _AppBootstrapState extends State<AppBootstrap> with WidgetsBindingObserver
   /// fails open on every error path.
   AppUpdateStatus? _update;
 
+  /// Latest optional-update answer, and a once-per-session latch for the
+  /// dialog it drives.
+  ///
+  /// The latch matters because [_checkForUpdate] also runs on every resume:
+  /// without it, every trip to another app and back would re-raise the prompt.
+  /// Dismissal is remembered across launches too — see
+  /// [AppUpdateService.snooze] — so this only guards the within-session case.
+  AppUpdateStatus? _softUpdate;
+  bool _updatePromptShown = false;
+
   @override
   void initState() {
     super.initState();
@@ -279,7 +290,29 @@ class _AppBootstrapState extends State<AppBootstrap> with WidgetsBindingObserver
     // Only ever latch ON. A check that comes back clean must not clear a gate
     // already in force: the app is unusable at that point, and flickering back
     // into it because one request failed would be worse than staying blocked.
-    if (status.updateRequired) setState(() => _update = status);
+    if (status.updateRequired) {
+      setState(() => _update = status);
+    } else if (status.updateAvailable && _softUpdate == null) {
+      // Held until the user is actually inside the app — see the build method.
+      setState(() => _softUpdate = status);
+    }
+  }
+
+  /// Raises the optional update dialog once the user is past auth.
+  ///
+  /// Deliberately not shown on the login screen. That screen fires the
+  /// biometric prompt on open, and a dialog racing the system sheet would
+  /// either swallow it or bury it. Someone stuck on an old build who cannot
+  /// sign in at all is what the forced gate is for.
+  void _maybePromptForUpdate() {
+    if (_updatePromptShown) return;
+    final status = _softUpdate;
+    if (status == null) return;
+    _updatePromptShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      UpdateAvailableDialog.maybeShow(context, status);
+    });
   }
 
   @override
@@ -332,6 +365,10 @@ class _AppBootstrapState extends State<AppBootstrap> with WidgetsBindingObserver
         context.read<ClientMatchesProvider>().reset();
       });
     }
+    // Optional update nudge — only once the user is actually inside the app,
+    // agent or client. Held back on the login screen so it can't collide with
+    // the biometric prompt that fires there.
+    if (eitherLoggedIn) _maybePromptForUpdate();
     return const AuthGate();
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -41,7 +43,8 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends State<LoginScreen>
+    with WidgetsBindingObserver {
   static const _genericError = 'Email or password is incorrect.';
 
   final _emailCtl = TextEditingController();
@@ -55,15 +58,46 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _activationEmail;
   bool _autoUnlockTried = false;
 
-  /// False on devices where fingerprint sign-in isn't offered — notably Face
-  /// ID iPhones, which are excluded by product decision. Starts false so the
-  /// unlock button can't flash up before the check answers.
-  bool _fingerprintAvailable = false;
+  /// Result of the capability probe. Starts [FingerprintSupport.notOffered] so
+  /// the unlock button can't flash up before the check answers.
+  ///
+  /// [FingerprintSupport.unknown] counts as *offered*: the probe fails
+  /// transiently (activity still resuming, sensor locked out, plugin busy) far
+  /// more often than a device genuinely lacks a sensor, and hiding the button
+  /// on an inconclusive answer is what made fingerprint sign-in "disappear"
+  /// for a whole session with nothing on screen to explain it. Showing it and
+  /// letting the real prompt report the real error is strictly better — the
+  /// worst case is a tap that fails with a message.
+  FingerprintSupport _fingerprint = FingerprintSupport.notOffered;
+
+  bool get _fingerprintAvailable => _fingerprint != FingerprintSupport.notOffered;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+  }
+
+  /// Re-probe when the app comes back to the foreground. The first probe runs
+  /// moments after the splash hands over, which is exactly when the platform
+  /// is most likely to answer [FingerprintSupport.unknown]; without a retry
+  /// that one bad answer stuck for the life of the screen.
+  ///
+  /// Capability only — this never re-fires the prompt. The system sheet itself
+  /// churns the lifecycle (hence [SecurityService.isAuthenticating]), and
+  /// auto-firing on resume would turn that churn into a prompt loop.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (SecurityService.isAuthenticating) return;
+    unawaited(_refreshFingerprintSupport());
+  }
+
+  Future<void> _refreshFingerprintSupport() async {
+    final support = await SecurityService.instance.probeFingerprint();
+    if (!mounted || support == _fingerprint) return;
+    setState(() => _fingerprint = support);
   }
 
   Future<void> _bootstrap() async {
@@ -72,11 +106,11 @@ class _LoginScreenState extends State<LoginScreen> {
     // The email is prefilled from our own store; the password is left to the
     // OS password manager via autofill — the app never keeps a copy.
     final email = await auth.readSavedEmail();
-    final fingerprint = await SecurityService.instance.canUseFingerprint();
+    final fingerprint = await SecurityService.instance.probeFingerprint();
     if (!mounted) return;
     setState(() {
       if (_emailCtl.text.isEmpty) _emailCtl.text = email;
-      _fingerprintAvailable = fingerprint;
+      _fingerprint = fingerprint;
     });
     // Small beat before the system sheet: local_auth needs a resumed activity,
     // and firing it in the same frame the splash hands over can have the
@@ -105,6 +139,13 @@ class _LoginScreenState extends State<LoginScreen> {
       case BiometricUnlock.sessionExpired:
         setState(() =>
             _error = 'Your session has expired. Sign in with your password.');
+      case BiometricUnlock.unreachable:
+        // The fingerprint was accepted — the network wasn't. Say so, and keep
+        // the unlock button on screen: the token is still good, so a retry a
+        // moment later gets them in without a password.
+        setState(() => _error =
+            "Couldn't reach CoreX just now. Check your connection and tap "
+            'Unlock with fingerprint again.');
       case BiometricUnlock.cancelled:
         if (!auto) {
           setState(
@@ -118,6 +159,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _emailCtl.dispose();
     _passwordCtl.dispose();
     super.dispose();
@@ -476,6 +518,40 @@ class _LoginScreenState extends State<LoginScreen> {
                             leading: TablerIcons.fingerprint,
                             onPressed:
                                 _busy ? null : () => _tryBiometricUnlock(),
+                          ),
+                        ],
+                        // Biometrics are on, but this device no longer holds a
+                        // session for them to unlock — after a reinstall,
+                        // a restore, or an expired token. Never leave this
+                        // silent: the user is looking at a password form
+                        // wondering where their fingerprint prompt went, and
+                        // the app has never stored a password for them to
+                        // fall back on.
+                        if (auth.biometricNeedsPasswordSignIn) ...[
+                          const SizedBox(height: 12),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                TablerIcons.fingerprint,
+                                size: 18,
+                                color: CorexTokens.textSecondary(context),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Sign in with your password once to switch '
+                                  'fingerprint sign-in back on — this device '
+                                  "doesn't have your session any more.",
+                                  style: TextStyle(
+                                    color: CorexTokens.textSecondary(context),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                         const SizedBox(height: 20),
