@@ -2,7 +2,7 @@ workflows:
   ios-release:
     name: CoreX OS – iOS Release
     instance_type: mac_mini_m2
-    max_build_duration: 60
+    max_build_duration: 90
     integrations:
       # Exact name of the App Store Connect API key integration in Codemagic:
       #   Codemagic → Teams/User settings → Integrations → App Store Connect.
@@ -20,8 +20,51 @@ workflows:
     scripts:
       - name: Create .env (required asset)
         script: cp .env.example .env
+      - name: Verify version and API base URL
+        script: |
+          set -e
+          # 1.0.9(15) shipped with kAppBuildNumber still on 13. That constant is
+          # what the forced-update gate compares against the server's min_build
+          # and what device registration reports, so drift means the gate
+          # silently misjudges which build is running. Same class of invisible
+          # failure as the permission macros below — fail here instead.
+          PUBSPEC_BUILD=$(sed -n 's/^version: .*+\([0-9][0-9]*\)$/\1/p' pubspec.yaml)
+          DART_BUILD=$(sed -n 's/^const int kAppBuildNumber = \([0-9][0-9]*\);$/\1/p' lib/config/app_version.dart)
+          PUBSPEC_NAME=$(sed -n 's/^version: \(.*\)+[0-9][0-9]*$/\1/p' pubspec.yaml)
+          DART_NAME=$(sed -n "s/^const String kAppVersion = '\(.*\)';$/\1/p" lib/config/app_version.dart)
+          echo "  pubspec.yaml            $PUBSPEC_NAME+$PUBSPEC_BUILD"
+          echo "  lib/config/app_version  $DART_NAME+$DART_BUILD"
+          if [ -z "$PUBSPEC_BUILD" ] || [ -z "$DART_BUILD" ]; then
+            echo "ERROR: could not parse a version out of one of those files."
+            exit 1
+          fi
+          if [ "$PUBSPEC_BUILD" != "$DART_BUILD" ] || [ "$PUBSPEC_NAME" != "$DART_NAME" ]; then
+            echo "ERROR: version drift — bump lib/config/app_version.dart to match pubspec.yaml."
+            exit 1
+          fi
+          # .env is bundled as a flutter asset, so whatever it holds now ships in
+          # the binary. The fallback in lib/config/env.dart is STAGING, so a
+          # missing or misconfigured file yields an app quietly talking to the
+          # wrong backend.
+          API=$(sed -n 's/^API_BASE_URL=//p' .env)
+          echo "  API_BASE_URL            ${API:-<ABSENT>}"
+          if [ "$API" != "https://corexos.co.za/api" ]; then
+            echo "ERROR: .env does not point at production. Fix .env.example."
+            exit 1
+          fi
+          echo "Version and API base URL OK."
       - name: Get Flutter packages
         script: flutter pub get
+      - name: Static analysis and unit tests
+        script: |
+          set -e
+          # Neither of these ran in CI before, so nothing stopped a change that
+          # merely compiles from reaching App Review. --fatal-warnings because a
+          # warning here (unused import, dead null-aware, unawaited future) is
+          # usually the visible end of a real mistake. Infos are left advisory
+          # so a lint-rule bump can't block a release.
+          flutter analyze --fatal-warnings
+          flutter test
       - name: Install CocoaPods dependencies
         script: |
           set -e
@@ -72,6 +115,171 @@ workflows:
             exit 1
           fi
           echo "All permission macros present."
+      - name: Audit the resolved pod graph
+        script: |
+          set -e
+          # ios/Podfile.lock is NOT committed and this pipeline runs
+          # `pod install --repo-update`, so every build resolves its own
+          # versions and the binary Apple reviews can match nothing ever tested
+          # locally. Print what actually resolved so the log is a record, then
+          # fail on the shape that aborts at load: two majors of one shared
+          # Google runtime, pulled in by Firebase on one side and
+          # GoogleMLKit (via mobile_scanner) on the other.
+          LOCK=ios/Podfile.lock
+          if [ ! -f "$LOCK" ]; then
+            echo "ERROR: $LOCK missing — pod install did not complete."
+            exit 1
+          fi
+          echo "Resolved Firebase / Google / MLKit pods:"
+          sed -n 's/^  - \(Firebase[^ ]*\|Google[^ ]*\|MLKit[^ ]*\|nanopb\|Protobuf\|GTMSessionFetcher[^ ]*\) (\([^)]*\)).*/  \1 \2/p' "$LOCK" | sort -u
+          echo
+          CONFLICT=0
+          for RUNTIME in GoogleUtilities GoogleDataTransport GoogleToolboxForMac \
+                         GTMSessionFetcher Protobuf nanopb; do
+            MAJORS=$(sed -n "s|^  - ${RUNTIME}\(/[^ ]*\)\{0,1\} (\([0-9][0-9]*\)\..*|\2|p" "$LOCK" | sort -u)
+            COUNT=$(printf '%s\n' "$MAJORS" | grep -c '^[0-9]' || true)
+            if [ "$COUNT" -gt 1 ]; then
+              echo "  CONFLICT ${RUNTIME}: majors $(printf '%s ' $MAJORS)"
+              CONFLICT=1
+            elif [ "$COUNT" -eq 1 ]; then
+              echo "  ok       ${RUNTIME} major ${MAJORS}"
+            fi
+          done
+          if [ "$CONFLICT" -ne 0 ]; then
+            echo
+            echo "ERROR: two majors of a shared Google runtime resolved into one app."
+            echo "Both copies register the same Objective-C classes at load time,"
+            echo "which aborts before Dart runs — a launch crash on every device."
+            echo "Pin firebase_core / mobile_scanner in pubspec.yaml until they agree."
+            exit 1
+          fi
+          # Assert `use_frameworks! :linkage => :static` actually took effect.
+          # firebase_core, firebase_messaging and mobile_scanner all declare
+          # static_framework in their podspecs; if Firebase is being embedded
+          # as a dynamic framework anyway, we are back to the mixed linkage
+          # that shipped in 1.0.9(15).
+          FW_SCRIPT="ios/Pods/Target Support Files/Pods-Runner/Pods-Runner-frameworks.sh"
+          if [ -f "$FW_SCRIPT" ] && grep -q "Firebase[A-Za-z]*\.framework" "$FW_SCRIPT"; then
+            echo
+            echo "ERROR: Firebase is being embedded as a DYNAMIC framework."
+            echo "ios/Podfile must keep 'use_frameworks! :linkage => :static'."
+            exit 1
+          fi
+          echo
+          echo "Pod graph OK — one copy of each shared runtime, static linkage."
+      - name: Launch smoke test on iPhone and iPad simulators
+        script: |
+          set -e
+          # The check that would have caught the 1.0.9(15) rejection: actually
+          # start the app and confirm it is alive, with a rendered frame, some
+          # seconds later. Every other step here verifies that the app BUILDS.
+          # This one verifies that it RUNS, on both device families Apple
+          # reviews on — they explicitly called out iPad.
+          #
+          # Scope, honestly: this is a DEBUG SIMULATOR build. It does not cover
+          # AOT- or device-only faults (pod linkage, entitlements, code
+          # signing) — the pod audit above and the IPA inspection below are
+          # what cover those. It does cover the entire Dart cold-start path:
+          # a missing asset, a dotenv throw, Firebase configuration, a provider
+          # constructor that raises, anything that stops the first frame.
+          mkdir -p /tmp/smoke
+          rm -f /tmp/smoke/*.png /tmp/smoke/*.ips
+          flutter build ios --simulator --debug
+          APP=build/ios/iphonesimulator/Runner.app
+          if [ ! -d "$APP" ]; then
+            echo "ERROR: $APP was not produced."
+            exit 1
+          fi
+
+          smoke() {
+            LABEL="$1"; PATTERN="$2"
+            # Match the device NAME at the start of the line, then take the
+            # last parenthesised UUID on it. Naive ".*iPad[^(]*(...)" finds
+            # nothing for "iPad Air 11-inch (M3) (UDID) (Shutdown)" — the
+            # model suffix is itself in parentheses. `tail -1` prefers the
+            # newest runtime, since simctl lists them oldest-first.
+            UDID=$(xcrun simctl list devices available \
+              | grep -E "^[[:space:]]+${PATTERN}" \
+              | sed -n 's/.*(\([0-9A-Fa-f]\{8\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{12\}\)).*/\1/p' \
+              | tail -1)
+            if [ -z "$UDID" ]; then
+              echo "ERROR: no available '${PATTERN}' simulator on this image."
+              xcrun simctl list devices available
+              return 1
+            fi
+            echo "--- ${LABEL} (${UDID}) ---"
+            # Crash reports land here; clear first so we only read this run's.
+            rm -f "$HOME/Library/Logs/DiagnosticReports/Runner"*.ips 2>/dev/null || true
+            xcrun simctl boot "$UDID" >/dev/null 2>&1 || true
+            xcrun simctl bootstatus "$UDID" -b || return 1
+            xcrun simctl uninstall "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+            xcrun simctl install "$UDID" "$APP" || return 1
+
+            # Launch with the app's stdout captured, in the background.
+            # `set -e` is suspended inside a function called as
+            # `smoke ... || FAILED=1`, so anything that must stop this device
+            # carries its own `|| return 1`.
+            LOG="/tmp/smoke/${LABEL}.log"
+            xcrun simctl launch --terminate-running-process --console-pty \
+              "$UDID" "$BUNDLE_ID" > "$LOG" 2>&1 &
+            LAUNCH_JOB=$!
+
+            # Long enough for the splash animation (1.7s) plus the auth check's
+            # own 8s network timeout to resolve, so the frame we screenshot is
+            # a real one and not the launch storyboard.
+            sleep 25
+            xcrun simctl io "$UDID" screenshot "/tmp/smoke/${LABEL}.png" >/dev/null 2>&1 || true
+            kill "$LAUNCH_JOB" 2>/dev/null || true
+            wait "$LAUNCH_JOB" 2>/dev/null || true
+            xcrun simctl shutdown "$UDID" >/dev/null 2>&1 || true
+
+            CRASH=$(ls "$HOME/Library/Logs/DiagnosticReports/Runner"*.ips 2>/dev/null | head -1)
+            if [ -n "$CRASH" ]; then
+              echo "  CRASHED — report follows:"
+              cp "$CRASH" "/tmp/smoke/${LABEL}-crash.ips"
+              cat "$CRASH"
+              return 1
+            fi
+
+            # The gate. NOT "is the process still alive" — that passes for the
+            # exact failure this step exists to catch: main() throwing before
+            # runApp leaves a live process on a black screen with no crash
+            # report. kFirstFrameMarker (lib/main.dart) is printed from a
+            # post-frame callback, so it appears only if a frame really
+            # rendered.
+            if grep -q "COREX_FIRST_FRAME_OK" "$LOG"; then
+              echo "  ok — first frame rendered within 25s."
+              return 0
+            fi
+
+            echo "  ERROR: no first-frame marker after 25s."
+            if [ -s "$LOG" ]; then
+              echo "  The app produced output but never rendered a frame — this"
+              echo "  is a launch failure even though the process survived."
+            else
+              echo "  The log is EMPTY, so stdout capture itself may have failed"
+              echo "  rather than the app. Check that 'simctl launch"
+              echo "  --console-pty' still streams output on this Xcode, and"
+              echo "  that lib/main.dart still prints kFirstFrameMarker."
+            fi
+            echo "  --- captured output ---"
+            cat "$LOG" || true
+            return 1
+          }
+
+          FAILED=0
+          smoke iphone "iPhone" || FAILED=1
+          smoke ipad   "iPad"   || FAILED=1
+          if [ "$FAILED" -ne 0 ]; then
+            echo
+            echo "ERROR: the app did not survive launch on at least one simulator."
+            echo "Screenshots and any crash report are in the build artifacts."
+            exit 1
+          fi
+          echo
+          echo "Launch smoke test passed on iPhone and iPad."
+          echo "Check the screenshot artifacts: a black frame means it launched"
+          echo "but never rendered, which App Review also reads as a crash."
       - name: Set up code signing (fetch or create cert + profile)
         script: |
           keychain initialize
@@ -157,9 +365,115 @@ workflows:
         script: |
           flutter build ipa --release \
             --export-options-plist=/Users/builder/export_options.plist
+      - name: Inspect the shipped IPA
+        script: |
+          set -e
+          # Last gate, on the exact bytes that go to Apple. The simulator smoke
+          # test ran a debug build; this covers what only the signed release
+          # artifact can show — what actually got bundled, and whether it is
+          # really a release build.
+          IPA=$(ls build/ios/ipa/*.ipa 2>/dev/null | head -1)
+          if [ -z "$IPA" ]; then
+            echo "ERROR: no IPA in build/ios/ipa/."
+            exit 1
+          fi
+          WORK=$(mktemp -d)
+          unzip -q "$IPA" -d "$WORK"
+          APP="$WORK/Payload/Runner.app"
+          PLIST="$APP/Info.plist"
+          FAIL=0
+
+          echo "Bundled resources:"
+          # Each of these is absent-and-silent in some failure mode: a missing
+          # GoogleService-Info.plist makes FirebaseApp.configure() raise an
+          # Objective-C exception that Dart cannot catch, and a missing
+          # storyboard is an uncaught NSInternalInconsistencyException. Both
+          # are SIGABRT before the first frame.
+          # Deliberately not asserting individual AppIcon*.png names or the
+          # asset-manifest filename: both move between Xcode and Flutter
+          # releases, and a missing icon is caught by Apple's own upload
+          # validation anyway. These are the ones that fail silently at launch.
+          for R in "GoogleService-Info.plist" \
+                   "Main.storyboardc" \
+                   "LaunchScreen.storyboardc" \
+                   "Assets.car" \
+                   "Frameworks/App.framework/App" \
+                   "Frameworks/Flutter.framework/Flutter" \
+                   "Frameworks/App.framework/flutter_assets/.env"; do
+            if [ -e "$APP/$R" ]; then
+              echo "  ok      $R"
+            else
+              echo "  MISSING $R"
+              FAIL=1
+            fi
+          done
+
+          echo
+          echo "Bundled configuration:"
+          BUNDLED_API=$(sed -n 's/^API_BASE_URL=//p' "$APP/Frameworks/App.framework/flutter_assets/.env" 2>/dev/null | tr -d '\r')
+          echo "  API_BASE_URL            ${BUNDLED_API:-<ABSENT>}"
+          if [ "$BUNDLED_API" != "https://corexos.co.za/api" ]; then
+            echo "  ERROR: the SHIPPED .env does not point at production."
+            FAIL=1
+          fi
+          BUNDLE_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST")
+          PUBSPEC_BUILD=$(sed -n 's/^version: .*+\([0-9][0-9]*\)$/\1/p' pubspec.yaml)
+          echo "  CFBundleVersion         $BUNDLE_VERSION (pubspec: $PUBSPEC_BUILD)"
+          if [ "$BUNDLE_VERSION" != "$PUBSPEC_BUILD" ]; then
+            echo "  ERROR: the build number did not reach the binary."
+            FAIL=1
+          fi
+          # Apple reviews on iPad and expects it to work; 1 and 2 must both be
+          # present or the iPad run is a scaled-up iPhone build.
+          FAMILY=$(/usr/libexec/PlistBuddy -c "Print :UIDeviceFamily" "$PLIST" 2>/dev/null | tr -d ' \n' || true)
+          echo "  UIDeviceFamily          $FAMILY"
+          case "$FAMILY" in
+            *1*2*) ;;
+            *) echo "  ERROR: not a universal build — iPad is not in UIDeviceFamily."; FAIL=1 ;;
+          esac
+          # Every permission the app can ask for needs its purpose string, or
+          # iOS kills the process the moment the API is touched.
+          for KEY in NSCameraUsageDescription NSMicrophoneUsageDescription \
+                     NSPhotoLibraryUsageDescription NSPhotoLibraryAddUsageDescription \
+                     NSFaceIDUsageDescription; do
+            if /usr/libexec/PlistBuddy -c "Print :$KEY" "$PLIST" >/dev/null 2>&1; then
+              echo "  ok      $KEY"
+            else
+              echo "  MISSING $KEY"
+              FAIL=1
+            fi
+          done
+
+          echo
+          echo "Signature:"
+          ENT=$(codesign -d --entitlements :- "$APP" 2>/dev/null || true)
+          # A build carrying get-task-allow is debuggable, which the App Store
+          # sandbox refuses to launch — an instant, total launch crash.
+          if printf '%s' "$ENT" | grep -q "get-task-allow"; then
+            echo "  ERROR: get-task-allow is present. This is a debuggable build;"
+            echo "  it will crash on launch for every App Store user."
+            FAIL=1
+          else
+            echo "  ok      no get-task-allow"
+          fi
+          APS=$(printf '%s' "$ENT" | grep -A1 "aps-environment" | tail -1 | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
+          echo "  aps-environment         ${APS:-<ABSENT>}"
+          codesign -dv "$APP" 2>&1 | sed -n 's/^/  /p' || true
+
+          echo
+          if [ "$FAIL" -ne 0 ]; then
+            echo "ERROR: the IPA failed inspection — see the lines above."
+            exit 1
+          fi
+          echo "IPA inspection passed."
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+      # Launch-smoke evidence: screenshot + captured stdout per device family,
+      # plus any simulator crash report. Worth opening even on a green build.
+      - /tmp/smoke/*.log
+      - /tmp/smoke/*.png
+      - /tmp/smoke/*.ips
     publishing:
       app_store_connect:
         auth: integration

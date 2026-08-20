@@ -28,7 +28,18 @@ require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelpe
 flutter_ios_podfile_setup
 
 target 'Runner' do
-  use_frameworks!
+  # `:linkage => :static` is required, not a preference. Three of our pods
+  # declare `static_framework = true` in their own podspecs — firebase_core,
+  # firebase_messaging, and mobile_scanner (which drags in the whole
+  # GoogleMLKit/BarcodeScanning tree). Under a plain `use_frameworks!` those
+  # are built as static libs inside framework wrappers while the rest of the
+  # pods stay dynamic, so the shared Google runtime (GoogleUtilities,
+  # GoogleDataTransport, nanopb) ends up linked twice: once into the app
+  # binary, once into a dynamic framework. The duplicate Objective-C classes
+  # register against each other at load time, which aborts before Dart ever
+  # runs — a launch crash on every device, which is what App Review saw.
+  # Static everywhere gives exactly one copy of each.
+  use_frameworks! :linkage => :static
   use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))

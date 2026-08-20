@@ -42,7 +42,14 @@ class MessagingService {
   static const _kRegisteredTokenKey = 'fcm_registered_token_v1';
 
   final ApiService _api = ApiService();
-  final FirebaseMessaging _fcm = FirebaseMessaging.instance;
+
+  /// Resolved lazily, never in a field initialiser. `FirebaseMessaging.instance`
+  /// calls `Firebase.app()`, which THROWS when no default app exists — and
+  /// [AuthProvider] holds a [MessagingService] as a field, so constructing it
+  /// eagerly means a failed `Firebase.initializeApp()` takes down the very
+  /// first widget build instead of merely disabling push. `main` catching the
+  /// init error is otherwise a false comfort: the app dies one frame later.
+  FirebaseMessaging get _fcm => FirebaseMessaging.instance;
   final FlutterLocalNotificationsPlugin _local =
       FlutterLocalNotificationsPlugin();
 
@@ -115,11 +122,28 @@ class MessagingService {
 
   bool _initialised = false;
 
+  /// Completes once [init] has run, successfully or not. [onLogin] waits on it.
+  ///
+  /// `init` used to be awaited in `main` ahead of `runApp`, so it could not
+  /// lose a race. It now runs after the first frame, which puts it alongside
+  /// `AuthProvider.checkAuth` — and on iOS `getToken()` fails outright until
+  /// init's `requestPermission()` has registered the app with APNs, so a
+  /// cold start that got there first would silently never register a device
+  /// token.
+  final Completer<void> _ready = Completer<void>();
+
   Future<void> init({GlobalKey<NavigatorState>? navigatorKey}) async {
-    if (_initialised) return;
+    if (_initialised) return _ready.future;
     _initialised = true;
     this.navigatorKey = navigatorKey;
+    try {
+      await _init();
+    } finally {
+      if (!_ready.isCompleted) _ready.complete();
+    }
+  }
 
+  Future<void> _init() async {
     // Register the background/terminated message handler. Must be wired before
     // any messages arrive; the handler runs in its own isolate.
     FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
@@ -160,6 +184,11 @@ class MessagingService {
   }
 
   Future<void> onLogin() async {
+    // See [_ready]. Bounded so a Firebase init that never ran (or never
+    // finished) leaves this pending forever instead of just skipping
+    // registration — the caller fires it with `unawaited`.
+    await _ready.future
+        .timeout(const Duration(seconds: 20), onTimeout: () {});
     final token = await _obtainToken();
     if (token == null) return;
     await _registerWithServer(token);

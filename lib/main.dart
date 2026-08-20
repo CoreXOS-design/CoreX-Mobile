@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io' show Platform;
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -32,6 +35,16 @@ import 'utils/app_time.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
+/// Printed once the first frame has actually been rendered.
+///
+/// The simulator launch smoke test in `codemagic.yaml` greps for this exact
+/// string, so the two have to stay in step. A live process is **not** proof of
+/// a successful launch: `main` throwing before [runApp] leaves the app running
+/// and showing a black screen, with no crash report — which is exactly what
+/// App Review files as "crashed on launch". This is the only signal that
+/// distinguishes the two.
+const String kFirstFrameMarker = 'COREX_FIRST_FRAME_OK';
+
 /// Signs the current agent out and hard-resets navigation to a fresh app root.
 ///
 /// We can't rely on [AuthGate] reactively swapping to the login screen: the
@@ -52,33 +65,103 @@ Future<void> logoutAndReset(BuildContext context) async {
   );
 }
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setEnabledSystemUIMode(
-    SystemUiMode.edgeToEdge,
-    overlays: SystemUiOverlay.values,
-  );
-  await dotenv.load(fileName: '.env');
-  Env.apiBaseUrl;
-  // Warm the timezone DB so event times render in Africa/Johannesburg
-  // regardless of the device's zone.
-  initAppTime();
+/// Cold-start sequence.
+///
+/// The rule here, after App Review rejected 1.0.9(15) under 2.1(a) for
+/// "crashed on launch": **nothing that can fail, hang, or open a system dialog
+/// runs before [runApp]**. Anything awaited ahead of the first frame is
+/// invisible to the user — they see only the launch storyboard — and a plugin
+/// fault, a wedged native call or a missing asset there is indistinguishable
+/// from a crash. Only two things now precede [runApp]:
+///
+///   * `dotenv.load` — [Env] is read during the first build (AuthProvider,
+///     AppUpdateService), and it is guarded so a load failure costs
+///     configuration, not launch.
+///   * `Firebase.initializeApp` — [AuthProvider] holds a [MessagingService],
+///     so a default app has to exist by the first build. Bounded by a timeout
+///     and guarded.
+///
+/// Everything else — FCM wiring, the notification permission prompt — is
+/// deferred to [_initDeferredServices] after the first frame.
+void main() {
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    // Report framework errors instead of letting them vanish in release.
+    final priorOnError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      debugPrint('[flutter] uncaught: ${details.exceptionAsString()}');
+      priorOnError?.call(details);
+    };
+
+    // Fire-and-forget: an Android-only presentation tweak must never gate the
+    // first frame on a platform-channel round trip.
+    unawaited(SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.edgeToEdge,
+      overlays: SystemUiOverlay.values,
+    ));
+
+    try {
+      await dotenv.load(fileName: '.env');
+    } catch (e) {
+      // Env.* falls back on its own when dotenv never initialised. Loud in the
+      // log, invisible to the user — the alternative is main() throwing before
+      // runApp, which ships as a black screen.
+      debugPrint('[env] .env failed to load, using defaults: $e');
+    }
+
+    // Warm the timezone DB so event times render in Africa/Johannesburg
+    // regardless of the device's zone.
+    initAppTime();
+
+    try {
+      await Firebase.initializeApp().timeout(const Duration(seconds: 10));
+    } catch (e) {
+      debugPrint('[firebase] init failed: $e');
+    }
+
+    runApp(const CoreXApp());
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      debugPrint(kFirstFrameMarker);
+      unawaited(_initDeferredServices());
+    });
+  }, (error, stack) {
+    debugPrint('[zone] uncaught: $error\n$stack');
+  });
+}
+
+/// Push wiring and the notification prompt, run once the UI is on screen.
+///
+/// Both used to be awaited inside `main`. [MessagingService.init] blocks on
+/// `requestPermission()` and `getInitialMessage()`, so the app sat on the
+/// launch image until the user answered a system alert — a hang the OS and a
+/// reviewer both read as a failed launch.
+Future<void> _initDeferredServices() async {
   try {
-    await Firebase.initializeApp();
     await MessagingService.instance.init(navigatorKey: rootNavigatorKey);
   } catch (e) {
-    debugPrint('[firebase] init failed: $e');
+    debugPrint('[messaging] init failed: $e');
   }
-  await _requestInitialPermissions();
-  runApp(const CoreXApp());
+  try {
+    await _requestInitialPermissions();
+  } catch (e) {
+    debugPrint('[permissions] initial request failed: $e');
+  }
 }
 
 Future<void> _requestInitialPermissions() async {
-  // Camera is NOT requested here on purpose. Asking up front stacks a second
-  // system alert on top of the notification one at cold start — iOS drops
-  // queued alerts, leaving permissions in a state the user never actually
-  // answered. image_picker raises the camera prompt at the point of capture,
-  // which is also what the user expects.
+  // Android only. On iOS the notification prompt is already raised by
+  // `MessagingService.init` via `FirebaseMessaging.requestPermission()`;
+  // asking again through permission_handler pointed a second
+  // UNUserNotificationCenter authorisation request at the same alert.
+  //
+  // Camera is NOT requested here on either platform. Asking up front stacks a
+  // second system alert on top of the notification one at cold start — iOS
+  // drops queued alerts, leaving permissions in a state the user never
+  // actually answered. image_picker raises the camera prompt at the point of
+  // capture, which is also what the user expects.
+  if (!Platform.isAndroid) return;
   final notificationStatus = await Permission.notification.status;
   if (!notificationStatus.isGranted &&
       !notificationStatus.isPermanentlyDenied) {
