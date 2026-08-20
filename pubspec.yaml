@@ -29,7 +29,15 @@ dependencies:
   local_auth_darwin: ^1.4.0
   flutter_secure_storage: ^9.2.2
   flutter_animate: ^4.5.0
-  mobile_scanner: ^5.2.3
+  # Must stay >= 7. Versions 5/6 pin GoogleMLKit ~> 6.0.0, whose MLKitCommon
+  # requires GoogleDataTransport (< 10.0), while firebase_messaging requires
+  # (~> 10.1) — CocoaPods cannot satisfy both and `pod install` fails outright.
+  # Before Swift Package Manager was disabled that conflict was hidden, not
+  # solved: CocoaPods took MLKit's GDT 9.x, SPM brought Firebase's 10.x, and
+  # both shipped in one binary. mobile_scanner 7 uses Apple's Vision framework
+  # on iOS and pulls no Google pods at all, which removes the clash entirely
+  # (Android still uses MLKit via Gradle, where there is no conflict).
+  mobile_scanner: ^7.4.0
   qr_flutter: ^4.1.0
   tabler_icons: ^2.5.0+1
   share_plus: ^10.0.0

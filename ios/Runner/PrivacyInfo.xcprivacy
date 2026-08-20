@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  App-level privacy manifest.
+
+  Apple requires every binary that calls a "required reason API" to declare it.
+  Our pods ship their own manifests (flutter_local_notifications,
+  flutter_secure_storage, permission_handler_apple, record_darwin, …) and the
+  Flutter engine ships one for itself, but the app target had none — which is
+  what triggers the ITMS-91053 "Missing API declaration" mail after upload.
+
+  NSPrivacyCollectedDataTypes is deliberately EMPTY. CoreX does collect account
+  data, but the authoritative declaration is the App Privacy questionnaire in
+  App Store Connect, and inventing entries here that contradict it is worse
+  than leaving Apple to use the answers you already gave. If you ever want the
+  manifest to mirror the questionnaire, fill this in from the ASC answers —
+  don't write the answers from here.
+-->
+<plist version="1.0">
+<dict>
+	<!-- CoreX does no cross-app tracking and contacts no tracking domains. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- shared_preferences → NSUserDefaults. CA92.1: read/write data
+		     accessible only to this app. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<!-- path_provider / image / share_plus write and read files in the app
+		     container (photo compression, document downloads, the upload
+		     queue). C617.1: timestamps of files inside the app container. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+		<!-- Image capture and upload paths check for room before writing.
+		     E174.1: display space to the user / avoid writing when full. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>E174.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

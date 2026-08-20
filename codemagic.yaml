@@ -91,6 +91,110 @@ workflows:
           # so a lint-rule bump can't block a release.
           flutter analyze --fatal-warnings
           flutter test
+      - name: Audit iOS configuration against App Review rules
+        script: |
+          set -e
+          # Source-level review gates, run early for fast feedback. The IPA
+          # inspection at the end re-checks the artifact itself; these catch the
+          # same classes of mistake before 20 minutes of building.
+          PLIST=ios/Runner/Info.plist
+          FAIL=0
+
+          echo "Info.plist:"
+          # Apple requires iPad apps to be resizable for Split View /
+          # Stage Manager. UIRequiresFullScreen opts out and is a review flag.
+          if grep -q "UIRequiresFullScreen" "$PLIST"; then
+            echo "  ERROR   UIRequiresFullScreen is set — iPad multitasking is opted out of."
+            FAIL=1
+          else
+            echo "  ok      no UIRequiresFullScreen (iPad multitasking allowed)"
+          fi
+          # Arbitrary loads disables App Transport Security. Apple asks for
+          # written justification and rejects unjustified use.
+          if grep -q "NSAllowsArbitraryLoads" "$PLIST"; then
+            echo "  ERROR   NSAllowsArbitraryLoads present — ATS disabled."
+            FAIL=1
+          else
+            echo "  ok      App Transport Security not weakened"
+          fi
+          # Without this, every single submission stalls on the export
+          # compliance questionnaire before it even reaches a reviewer.
+          if grep -q "ITSAppUsesNonExemptEncryption" "$PLIST"; then
+            echo "  ok      ITSAppUsesNonExemptEncryption declared"
+          else
+            echo "  ERROR   ITSAppUsesNonExemptEncryption missing — submission will stall."
+            FAIL=1
+          fi
+          # Apple reviews on iPad and rotates the device.
+          IPAD_ORIENTATIONS=$(sed -n '/UISupportedInterfaceOrientations~ipad/,/<\/array>/p' "$PLIST" \
+            | grep -c "UIInterfaceOrientation" || true)
+          echo "  info    iPad orientations declared: $IPAD_ORIENTATIONS"
+          if [ "$IPAD_ORIENTATIONS" -lt 4 ]; then
+            echo "  ERROR   iPad must support all four orientations."
+            FAIL=1
+          fi
+
+          echo
+          echo "Permission purpose strings:"
+          # A missing string crashes the app the instant the API is touched; a
+          # vague one ("we need camera access") gets rejected under 5.1.1 for
+          # not explaining WHY. Length is a crude proxy, but it catches the
+          # placeholder that someone meant to come back to.
+          for KEY in NSCameraUsageDescription NSMicrophoneUsageDescription \
+                     NSPhotoLibraryUsageDescription NSPhotoLibraryAddUsageDescription \
+                     NSFaceIDUsageDescription; do
+            VAL=$(grep -A1 "<key>${KEY}</key>" "$PLIST" | tail -1 \
+              | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
+            if [ -z "$VAL" ] || [ "${#VAL}" -lt 25 ]; then
+              echo "  ERROR   ${KEY} missing or too vague: '${VAL}'"
+              FAIL=1
+            else
+              echo "  ok      ${KEY} (${#VAL} chars)"
+            fi
+          done
+
+          echo
+          echo "Privacy manifest:"
+          # Apple mails ITMS-91053 "Missing API declaration" when a binary uses
+          # a required-reason API without declaring it. A manifest sitting on
+          # disk but absent from the Resources build phase ships nothing, so
+          # check both.
+          if [ ! -f ios/Runner/PrivacyInfo.xcprivacy ]; then
+            echo "  ERROR   ios/Runner/PrivacyInfo.xcprivacy does not exist."
+            FAIL=1
+          elif ! grep -q "PrivacyInfo.xcprivacy in Resources" ios/Runner.xcodeproj/project.pbxproj; then
+            echo "  ERROR   PrivacyInfo.xcprivacy exists but is not in the Resources build phase."
+            FAIL=1
+          else
+            echo "  ok      present and wired into the Resources build phase"
+          fi
+
+          echo
+          echo "App icon:"
+          # An alpha channel in the 1024 marketing icon is an automatic
+          # rejection at upload. PNG colour type lives at byte 25: 4 and 6
+          # carry alpha, 2 and 3 do not.
+          ICON=ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png
+          if [ ! -f "$ICON" ]; then
+            echo "  ERROR   1024x1024 marketing icon missing."
+            FAIL=1
+          else
+            COLORTYPE=$(od -An -tu1 -j25 -N1 "$ICON" | tr -d ' ')
+            if [ "$COLORTYPE" = "4" ] || [ "$COLORTYPE" = "6" ]; then
+              echo "  ERROR   marketing icon has an alpha channel (PNG colour type $COLORTYPE)."
+              echo "          Set remove_alpha_ios: true and rerun flutter_launcher_icons."
+              FAIL=1
+            else
+              echo "  ok      marketing icon has no alpha (PNG colour type $COLORTYPE)"
+            fi
+          fi
+
+          echo
+          if [ "$FAIL" -ne 0 ]; then
+            echo "ERROR: iOS configuration would likely be rejected — see above."
+            exit 1
+          fi
+          echo "iOS configuration OK."
       - name: Install CocoaPods dependencies
         script: |
           set -e
@@ -246,27 +350,18 @@ workflows:
           mkdir -p /tmp/smoke
           rm -f /tmp/smoke/*.png /tmp/smoke/*.ips /tmp/smoke/*.log
 
-          # KNOWN BLOCKER — read before "fixing" this skip.
+          # Tripwire against regressing to mobile_scanner 5/6, which pinned
+          # GoogleMLKit ~> 6.0.0. Those MLKit binaries ship no arm64 SIMULATOR
+          # slice, and arm64 is mandatory for iOS 26 simulators on Apple
+          # Silicon (this runner), so the simulator build could not link at all:
           #
-          # mobile_scanner 5.2.3 pins GoogleMLKit/BarcodeScanning ~> 6.0.0, and
-          # those MLKit binaries ship no arm64 SIMULATOR slice:
-          #
-          #   The following target(s) do not support arm64 architecture, which
-          #   is a requirement for Apple Silicon iOS 26+ simulators:
+          #   The following target(s) do not support arm64 architecture ...
           #     GoogleMLKit, MLImage, MLKitBarcodeScanning, MLKitCommon, MLKitVision
           #
-          # arm64 is mandatory for iOS 26 simulators, and this runner is Apple
-          # Silicon (mac_mini_m2), so the simulator build cannot link. Only the
-          # SIMULATOR is affected — MLKit ships arm64 device slices, so the
-          # release IPA below builds and runs normally.
-          #
-          # Skipping loudly rather than failing: this step is a safety net, and
-          # it must not block shipping a crash fix. To turn it back on, upgrade
-          # mobile_scanner to >= 7 (7.4.0 is resolvable) — that is a two-major
-          # API jump touching lib/screens/auth/client/client_agent_qr_scanner_screen.dart,
-          # so it needs its own change and a real device test. Once the
-          # resolved version passes 7 this guard stops matching and the test
-          # runs for real, with no edit needed here.
+          # mobile_scanner 7 replaced MLKit with Apple's Vision framework on
+          # iOS, so its podspec now depends on nothing but Flutter. Skip rather
+          # than fail if someone pins back: losing the smoke test should not
+          # also block a release, and the reason is printed loudly.
           SCANNER=$(sed -n '/^  mobile_scanner:$/,/^  [a-z_]*:$/p' pubspec.lock \
             | sed -n 's/^    version: "\(.*\)"$/\1/p' | head -1)
           if [ -n "$SCANNER" ] && [ "${SCANNER%%.*}" -lt 7 ]; then
@@ -274,11 +369,47 @@ workflows:
             echo " SKIPPED — launch smoke test cannot run on this runner."
             echo " mobile_scanner ${SCANNER} pulls MLKit binaries with no arm64"
             echo " simulator slice; iOS 26 simulators on Apple Silicon require"
-            echo " arm64. Release IPA builds are unaffected."
-            echo " Unblock by upgrading mobile_scanner to >= 7."
+            echo " arm64. Re-upgrade mobile_scanner to >= 7 to restore it."
             echo "=============================================================="
             exit 0
           fi
+
+          # Counts distinct quantised colours in a PNG, for the blank-screen
+          # heuristic below. CoreGraphics only — nothing to install.
+          cat > /tmp/smoke/distinct_colors.swift <<'SWIFT'
+          import Foundation
+          import CoreGraphics
+          import ImageIO
+
+          guard CommandLine.arguments.count > 1,
+                let src = CGImageSourceCreateWithURL(
+                  URL(fileURLWithPath: CommandLine.arguments[1]) as CFURL, nil),
+                let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { exit(2) }
+          let w = img.width, h = img.height
+          guard w > 0, h > 0 else { exit(2) }
+          var buf = [UInt8](repeating: 0, count: w * h * 4)
+          guard let ctx = CGContext(data: &buf, width: w, height: h,
+                                    bitsPerComponent: 8, bytesPerRow: w * 4,
+                                    space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+          else { exit(2) }
+          ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+          var seen = Set<Int>()
+          var y = 0
+          while y < h {
+            var x = 0
+            while x < w {
+              let i = (y * w + x) * 4
+              // Quantise to 5 bits per channel so JPEG-ish noise and subtle
+              // gradients don't read as thousands of "distinct" colours.
+              let key = (Int(buf[i]) >> 3) << 10 | (Int(buf[i+1]) >> 3) << 5 | (Int(buf[i+2]) >> 3)
+              seen.insert(key)
+              x += 8
+            }
+            y += 8
+          }
+          print(seen.count)
+          SWIFT
 
           flutter build ios --simulator --debug
           APP=build/ios/iphonesimulator/Runner.app
@@ -345,22 +476,51 @@ workflows:
             # rendered.
             if grep -q "COREX_FIRST_FRAME_OK" "$LOG"; then
               echo "  ok — first frame rendered within 25s."
-              return 0
+            else
+
+              echo "  ERROR: no first-frame marker after 25s."
+              if [ -s "$LOG" ]; then
+                echo "  The app produced output but never rendered a frame —"
+                echo "  a launch failure even though the process survived."
+              else
+                echo "  The log is EMPTY, so stdout capture itself may have"
+                echo "  failed rather than the app. Check that 'simctl launch"
+                echo "  --console-pty' still streams output on this Xcode, and"
+                echo "  that lib/main.dart still prints kFirstFrameMarker."
+              fi
+              echo "  --- captured output ---"
+              cat "$LOG" || true
+              return 1
             fi
 
-            echo "  ERROR: no first-frame marker after 25s."
-            if [ -s "$LOG" ]; then
-              echo "  The app produced output but never rendered a frame — this"
-              echo "  is a launch failure even though the process survived."
-            else
-              echo "  The log is EMPTY, so stdout capture itself may have failed"
-              echo "  rather than the app. Check that 'simctl launch"
-              echo "  --console-pty' still streams output on this Xcode, and"
-              echo "  that lib/main.dart still prints kFirstFrameMarker."
+            # Rendering is necessary but not sufficient. A reviewer who lands on
+            # a red error screen or a visibly broken layout files it under the
+            # same 2.1(a) as a crash, so treat a caught Dart error during launch
+            # as a failure. The last two patterns are our own handlers in
+            # lib/main.dart, which catch anything the framework surfaces.
+            if grep -nE "EXCEPTION CAUGHT BY|Unhandled Exception:|A RenderFlex overflowed|Failed assertion:|\[zone\] uncaught:|\[flutter\] uncaught:" "$LOG"; then
+              echo "  ERROR: Dart errors during launch (matches printed above)."
+              return 1
             fi
-            echo "  --- captured output ---"
-            cat "$LOG" || true
-            return 1
+            echo "  ok — no Dart exceptions or overflows during launch."
+
+            # Guard the case the marker cannot catch: a frame rendered, then
+            # something painted a single flat colour over everything. Advisory
+            # only — a screenshot can legitimately be near-uniform (a full-
+            # bleed splash), and blocking a release on image heuristics would
+            # cost more than it saves. The PNG is in the artifacts either way.
+            if [ -f "/tmp/smoke/${LABEL}.png" ] && command -v swift >/dev/null 2>&1; then
+              COLORS=$(swift /tmp/smoke/distinct_colors.swift "/tmp/smoke/${LABEL}.png" 2>/dev/null || echo "")
+              if [ -n "$COLORS" ]; then
+                if [ "$COLORS" -le 2 ]; then
+                  echo "  WARNING: screenshot has only ${COLORS} distinct colour(s) —"
+                  echo "  the screen may be blank. Open /tmp/smoke/${LABEL}.png in the artifacts."
+                else
+                  echo "  ok — screenshot has ${COLORS} distinct colours (not a blank screen)."
+                fi
+              fi
+            fi
+            return 0
           }
 
           FAILED=0
@@ -490,6 +650,7 @@ workflows:
           # releases, and a missing icon is caught by Apple's own upload
           # validation anyway. These are the ones that fail silently at launch.
           for R in "GoogleService-Info.plist" \
+                   "PrivacyInfo.xcprivacy" \
                    "Main.storyboardc" \
                    "LaunchScreen.storyboardc" \
                    "Assets.car" \
@@ -519,6 +680,27 @@ workflows:
             echo "  ERROR: the build number did not reach the binary."
             FAIL=1
           fi
+          SHORT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST")
+          PUBSPEC_NAME=$(sed -n 's/^version: \(.*\)+[0-9][0-9]*$/\1/p' pubspec.yaml)
+          echo "  CFBundleShortVersionString $SHORT_VERSION (pubspec: $PUBSPEC_NAME)"
+          if [ "$SHORT_VERSION" != "$PUBSPEC_NAME" ]; then
+            echo "  ERROR: the marketing version did not reach the binary."
+            FAIL=1
+          fi
+          # These two are checked on the source plist early, but Xcode and the
+          # export step can both rewrite Info.plist, so re-assert on what ships.
+          if /usr/libexec/PlistBuddy -c "Print :UIRequiresFullScreen" "$PLIST" >/dev/null 2>&1; then
+            echo "  ERROR: UIRequiresFullScreen reached the binary (iPad multitasking opted out)."
+            FAIL=1
+          else
+            echo "  ok      no UIRequiresFullScreen"
+          fi
+          if /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSAllowsArbitraryLoads" "$PLIST" >/dev/null 2>&1; then
+            echo "  ERROR: NSAllowsArbitraryLoads reached the binary (ATS disabled)."
+            FAIL=1
+          else
+            echo "  ok      App Transport Security intact"
+          fi
           # Apple reviews on iPad and expects it to work; 1 and 2 must both be
           # present or the iPad run is a scaled-up iPhone build.
           FAMILY=$(/usr/libexec/PlistBuddy -c "Print :UIDeviceFamily" "$PLIST" 2>/dev/null | tr -d ' \n' || true)
@@ -539,6 +721,22 @@ workflows:
               FAIL=1
             fi
           done
+
+          echo
+          echo "Architectures:"
+          # A simulator slice in an App Store binary is an instant upload
+          # rejection; a missing arm64 slice means it cannot run on any
+          # supported device.
+          ARCHS=$(lipo -archs "$APP/Runner" 2>/dev/null || echo "")
+          echo "  Runner binary           ${ARCHS:-<unreadable>}"
+          case "$ARCHS" in
+            *arm64*) echo "  ok      arm64 present" ;;
+            *) echo "  ERROR: no arm64 slice."; FAIL=1 ;;
+          esac
+          case "$ARCHS" in
+            *x86_64*) echo "  ERROR: x86_64 simulator slice present in a store build."; FAIL=1 ;;
+            *) echo "  ok      no simulator slice" ;;
+          esac
 
           echo
           echo "Signature:"
@@ -562,6 +760,48 @@ workflows:
             exit 1
           fi
           echo "IPA inspection passed."
+      - name: Human checklist before submitting
+        script: |
+          # Not a gate — everything below is outside what CI can see, and every
+          # one of them has rejected an app before. Printed last so it is the
+          # final thing in the log when you go to hit Submit.
+          cat <<'EOF'
+          ==========================================================
+           AUTOMATED GATES PASSED. THESE ARE STILL ON YOU:
+          ==========================================================
+
+           1. DEMO ACCOUNT (Guideline 2.1 — the most common rejection
+              for a login-walled app). App Store Connect -> App Review
+              Information -> Sign-In Required. Give a working agent
+              email + password, and confirm it still logs in TODAY
+              against production. A demo account that expired between
+              submissions reads to a reviewer as a broken app.
+
+           2. iPAD. Reviewers use an iPad Air 11" and they rotate it.
+              Open the app on an iPad, in portrait AND landscape, and
+              walk the main tabs. CI proves it launches; it cannot see
+              a layout that overflows in landscape.
+
+           3. THE FEATURE BEHIND EACH PERMISSION must work. Prior
+              rejections here were microphone prompts that never
+              appeared. Physically test: camera capture, photo save,
+              microphone, Face ID, notifications.
+
+           4. PRIVACY ANSWERS. ios/Runner/PrivacyInfo.xcprivacy
+              declares tracking=false and an EMPTY collected-data
+              list; App Store Connect's App Privacy questionnaire is
+              the authoritative answer. Make sure the two do not
+              contradict each other.
+
+           5. WHAT CHANGED THIS BUILD. If the rejection reason is
+              addressed, reply in Resolution Center saying how —
+              a reply materially speeds up re-review.
+
+           6. SCREENSHOTS/METADATA must match what the build actually
+              does. Stale screenshots are a 2.3 rejection.
+
+          ==========================================================
+          EOF
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log

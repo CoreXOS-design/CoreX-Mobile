@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
@@ -71,7 +73,7 @@ class _ClientAgentQrScannerScreenState
       final slug = extractAgentQrSlug(raw);
       if (slug != null) {
         _handled = true;
-        _controller.stop();
+        unawaited(_controller.stop());
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (_) => ClientAgentQrSignupScreen(slug: slug),
@@ -88,7 +90,9 @@ class _ClientAgentQrScannerScreenState
 
   @override
   void dispose() {
-    _controller.dispose();
+    // Async since mobile_scanner 6; State.dispose can't await, and the
+    // teardown doesn't need to complete before this frame ends.
+    unawaited(_controller.dispose());
     super.dispose();
   }
 
@@ -101,7 +105,8 @@ class _ClientAgentQrScannerScreenState
           MobileScanner(
             controller: _controller,
             onDetect: _onDetect,
-            errorBuilder: (context, error, child) => Center(
+            // mobile_scanner 7 dropped the trailing `child` argument.
+            errorBuilder: (context, error) => Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
