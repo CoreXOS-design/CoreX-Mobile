@@ -451,10 +451,42 @@ workflows:
               "$UDID" "$BUNDLE_ID" > "$LOG" 2>&1 &
             LAUNCH_JOB=$!
 
-            # Long enough for the splash animation (1.7s) plus the auth check's
-            # own 8s network timeout to resolve, so the frame we screenshot is
-            # a real one and not the launch storyboard.
-            sleep 25
+            # Poll rather than sleep a fixed window. The first run of this step
+            # failed on a 25s sleep, on a runner that had just spent 63s on
+            # simulator data migration and 20s on install+launch — a cold debug
+            # Flutter app on a still-settling simulator can simply be slower
+            # than any constant worth hardcoding. Polling also returns
+            # immediately on success, so the healthy path got faster.
+            #
+            # Two independent signals, because that first failure could not
+            # distinguish "never rendered" from "Dart's stdout never reached
+            # the pty" (the log held the app's NSLog line and PID, but no Dart
+            # output at all):
+            #   log  — kFirstFrameMarker on stdout
+            #   file — the same marker written into the app container
+            # Either proves a frame rendered. Which one fired is reported, so
+            # a stdout-capture problem is visible instead of looking like a
+            # launch failure.
+            DEADLINE=150
+            WAITED=0
+            SIGNAL=none
+            while [ "$WAITED" -lt "$DEADLINE" ]; do
+              if grep -q "COREX_FIRST_FRAME_OK" "$LOG" 2>/dev/null; then
+                SIGNAL=log; break
+              fi
+              CONTAINER=$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data 2>/dev/null || true)
+              if [ -n "$CONTAINER" ] && [ -f "$CONTAINER/Documents/COREX_FIRST_FRAME_OK" ]; then
+                SIGNAL=file; break
+              fi
+              if ls "$HOME/Library/Logs/DiagnosticReports/Runner"*.ips >/dev/null 2>&1; then
+                echo "  crash report appeared after ${WAITED}s"
+                break
+              fi
+              sleep 3
+              WAITED=$((WAITED + 3))
+            done
+            echo "  waited ${WAITED}s; first-frame signal: ${SIGNAL}"
+
             xcrun simctl io "$UDID" screenshot "/tmp/smoke/${LABEL}.png" >/dev/null 2>&1 || true
             kill "$LAUNCH_JOB" 2>/dev/null || true
             wait "$LAUNCH_JOB" 2>/dev/null || true
@@ -471,23 +503,22 @@ workflows:
             # The gate. NOT "is the process still alive" — that passes for the
             # exact failure this step exists to catch: main() throwing before
             # runApp leaves a live process on a black screen with no crash
-            # report. kFirstFrameMarker (lib/main.dart) is printed from a
-            # post-frame callback, so it appears only if a frame really
-            # rendered.
-            if grep -q "COREX_FIRST_FRAME_OK" "$LOG"; then
-              echo "  ok — first frame rendered within 25s."
+            # report. Both signals are written from the same post-frame
+            # callback in lib/main.dart, so either one proves a real frame.
+            if [ "$SIGNAL" = "log" ]; then
+              echo "  ok — first frame rendered (stdout marker)."
+            elif [ "$SIGNAL" = "file" ]; then
+              echo "  ok — first frame rendered (container breadcrumb)."
+              echo "  NOTE: the app rendered, but the marker never appeared on"
+              echo "  stdout. Dart output is not reaching 'simctl launch"
+              echo "  --console-pty' on this Xcode, which means the Dart error"
+              echo "  scan below is running against an incomplete log and is"
+              echo "  much weaker than it looks. Worth fixing."
             else
-
-              echo "  ERROR: no first-frame marker after 25s."
-              if [ -s "$LOG" ]; then
-                echo "  The app produced output but never rendered a frame —"
-                echo "  a launch failure even though the process survived."
-              else
-                echo "  The log is EMPTY, so stdout capture itself may have"
-                echo "  failed rather than the app. Check that 'simctl launch"
-                echo "  --console-pty' still streams output on this Xcode, and"
-                echo "  that lib/main.dart still prints kFirstFrameMarker."
-              fi
+              echo "  ERROR: no first frame after ${WAITED}s, by either signal."
+              echo "  Neither the stdout marker nor the container breadcrumb"
+              echo "  appeared, and both are written from the same post-frame"
+              echo "  callback — so the app genuinely did not render."
               echo "  --- captured output ---"
               cat "$LOG" || true
               return 1

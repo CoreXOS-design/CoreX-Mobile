@@ -1,10 +1,12 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'config/env.dart';
@@ -124,11 +126,30 @@ void main() {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       debugPrint(kFirstFrameMarker);
+      if (kDebugMode) unawaited(_dropFirstFrameBreadcrumb());
       unawaited(_initDeferredServices());
     });
   }, (error, stack) {
     debugPrint('[zone] uncaught: $error\n$stack');
   });
+}
+
+/// Debug-only twin of [kFirstFrameMarker], written into the app's Documents
+/// directory so CI can confirm a frame rendered **without** depending on
+/// stdout reaching it.
+///
+/// The first CI run of the smoke test captured the app's NSLog line and its
+/// PID but no Dart output at all, which left "the app never rendered" and
+/// "the log pipe dropped Dart's stdout" indistinguishable. A file in the app
+/// container is readable via `simctl get_app_container` and involves no log
+/// plumbing, so the two are now telling apart. Never runs in release.
+Future<void> _dropFirstFrameBreadcrumb() async {
+  try {
+    final dir = await getApplicationDocumentsDirectory();
+    await File('${dir.path}/$kFirstFrameMarker').writeAsString('ok');
+  } catch (e) {
+    debugPrint('[boot] breadcrumb failed (harmless): $e');
+  }
 }
 
 /// Push wiring and the notification prompt, run once the UI is on screen.
