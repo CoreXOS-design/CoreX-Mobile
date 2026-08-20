@@ -36,6 +36,36 @@
 		<string>LaunchScreen</string>
 		<key>UIMainStoryboardFile</key>
 		<string>Main</string>
+		<!-- UIScene lifecycle. Byte-for-byte what `flutter build ios` writes via
+		     its UISceneMigration; committed deliberately so it stops rewriting
+		     AppDelegate.swift and this file on every CI run. That migration was
+		     happening silently in the build clone, which meant the binary Apple
+		     reviewed contained an entry point that existed nowhere in the repo.
+		     The migrator early-returns once UIApplicationSceneManifest is
+		     present, so this is now a no-op. Apple requires scene adoption for
+		     apps built against upcoming SDKs; see
+		     https://flutter.dev/to/uiscene-migration -->
+		<key>UIApplicationSceneManifest</key>
+		<dict>
+			<key>UIApplicationSupportsMultipleScenes</key>
+			<false/>
+			<key>UISceneConfigurations</key>
+			<dict>
+				<key>UIWindowSceneSessionRoleApplication</key>
+				<array>
+					<dict>
+						<key>UISceneClassName</key>
+						<string>UIWindowScene</string>
+						<key>UISceneDelegateClassName</key>
+						<string>FlutterSceneDelegate</string>
+						<key>UISceneConfigurationName</key>
+						<string>flutter</string>
+						<key>UISceneStoryboardFile</key>
+						<string>Main</string>
+					</dict>
+				</array>
+			</dict>
+		</dict>
 		<key>UISupportedInterfaceOrientations</key>
 		<array>
 			<string>UIInterfaceOrientationPortrait</string>
