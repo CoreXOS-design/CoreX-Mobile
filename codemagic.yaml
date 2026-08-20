@@ -418,23 +418,119 @@ workflows:
             exit 1
           fi
 
+          # The exact hardware App Review used on submission
+          # f67bdb8d-9093-4df2-8983-f0b4d7fcac40 (2026-08-19), iOS/iPadOS
+          # 26.6.1. Testing the same device names on the same major OS is the
+          # closest a runner can get to reproducing that review without real
+          # hardware. Update these if a later rejection names different devices.
+          REVIEW_IPHONE="iPhone 17 Pro Max"
+          REVIEW_IPAD="iPad Air 11-inch (M3)"
+          REVIEW_OS_MAJOR=26
+
+          xcrun simctl list devices available > /tmp/smoke/devices.txt
+
+          udid_of() {
+            printf '%s' "$1" | sed -n 's/.*(\([0-9A-Fa-f]\{8\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{12\}\)).*/\1/p'
+          }
+
+          # Exact device-name match, newest iOS runtime wins (simctl lists them
+          # oldest-first, so the last hit is the newest). Matching on
+          # "<name> (" is what keeps "iPhone 17 Pro" from selecting
+          # "iPhone 17 Pro Max", and what makes "iPad Air 11-inch (M3)" work
+          # at all — its model suffix is itself parenthesised.
+          # Emits "udid|runtime|name".
+          resolve_exact() {
+            WANT="$1"; RT=""; RESULT=""
+            while IFS= read -r LINE; do
+              case "$LINE" in
+                "-- iOS "*) RT=${LINE#-- }; RT=${RT% --} ;;
+                "-- "*) RT="" ;;
+                *)
+                  [ -n "$RT" ] || continue
+                  case "$LINE" in
+                    *"$WANT ("*)
+                      UD=$(udid_of "$LINE")
+                      [ -n "$UD" ] && RESULT="${UD}|${RT}|${WANT}" ;;
+                  esac ;;
+              esac
+            done < /tmp/smoke/devices.txt
+            printf '%s' "$RESULT"
+          }
+
+          # Any device of the family, newest runtime, when the review device
+          # isn't on this image and can't be created.
+          resolve_family() {
+            FAM="$1"; RT=""; RESULT=""
+            while IFS= read -r LINE; do
+              case "$LINE" in
+                "-- iOS "*) RT=${LINE#-- }; RT=${RT% --} ;;
+                "-- "*) RT="" ;;
+                *)
+                  [ -n "$RT" ] || continue
+                  TRIMMED=$(printf '%s' "$LINE" | sed 's/^[[:space:]]*//')
+                  case "$TRIMMED" in
+                    "$FAM"*)
+                      UD=$(udid_of "$LINE")
+                      [ -n "$UD" ] && RESULT="${UD}|${RT}|${TRIMMED%% (*}" ;;
+                  esac ;;
+              esac
+            done < /tmp/smoke/devices.txt
+            printf '%s' "$RESULT"
+          }
+
+          # The image may ship the device TYPE without a ready-made simulator.
+          create_exact() {
+            WANT="$1"
+            DTYPE=$(xcrun simctl list devicetypes | grep -F "$WANT (" \
+              | sed -n 's/.*(\(com\.apple\.CoreSimulator\.SimDeviceType\.[^)]*\)).*/\1/p' | head -1)
+            RUNTIME=$(xcrun simctl list runtimes available | grep "^iOS " | tail -1 \
+              | sed -n 's/.*\(com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]*\).*/\1/p')
+            [ -n "$DTYPE" ] && [ -n "$RUNTIME" ] || return 1
+            xcrun simctl create "corex-smoke-${2}" "$DTYPE" "$RUNTIME" 2>/dev/null
+          }
+
           smoke() {
-            LABEL="$1"; PATTERN="$2"
-            # Match the device NAME at the start of the line, then take the
-            # last parenthesised UUID on it. Naive ".*iPad[^(]*(...)" finds
-            # nothing for "iPad Air 11-inch (M3) (UDID) (Shutdown)" — the
-            # model suffix is itself in parentheses. `tail -1` prefers the
-            # newest runtime, since simctl lists them oldest-first.
-            UDID=$(xcrun simctl list devices available \
-              | grep -E "^[[:space:]]+${PATTERN}" \
-              | sed -n 's/.*(\([0-9A-Fa-f]\{8\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{12\}\)).*/\1/p' \
-              | tail -1)
-            if [ -z "$UDID" ]; then
-              echo "ERROR: no available '${PATTERN}' simulator on this image."
-              xcrun simctl list devices available
+            LABEL="$1"; WANT="$2"; FAMILY="$3"
+            MATCHED_REVIEW_DEVICE=no
+
+            FOUND=$(resolve_exact "$WANT")
+            if [ -n "$FOUND" ]; then
+              MATCHED_REVIEW_DEVICE=yes
+            else
+              NEW_UDID=$(create_exact "$WANT" "$LABEL" || true)
+              if [ -n "$NEW_UDID" ]; then
+                xcrun simctl list devices available > /tmp/smoke/devices.txt
+                FOUND=$(resolve_exact "$WANT")
+                [ -n "$FOUND" ] && MATCHED_REVIEW_DEVICE=yes
+              fi
+            fi
+            if [ -z "$FOUND" ]; then
+              FOUND=$(resolve_family "$FAMILY")
+            fi
+            if [ -z "$FOUND" ]; then
+              echo "ERROR: no available '${FAMILY}' simulator on this image."
+              cat /tmp/smoke/devices.txt
               return 1
             fi
-            echo "--- ${LABEL} (${UDID}) ---"
+
+            UDID=${FOUND%%|*}
+            REST=${FOUND#*|}
+            RUNTIME_NAME=${REST%%|*}
+            DEVICE_NAME=${REST#*|}
+
+            echo "--- ${LABEL}: ${DEVICE_NAME} on ${RUNTIME_NAME} (${UDID}) ---"
+            if [ "$MATCHED_REVIEW_DEVICE" = "yes" ]; then
+              echo "  matches the App Review device (${WANT})"
+            else
+              echo "  WARNING: '${WANT}' is not available on this image and could"
+              echo "  not be created; testing ${DEVICE_NAME} instead. App Review"
+              echo "  used ${WANT}, so this run does not reproduce their device."
+            fi
+            OS_MAJOR=$(printf '%s' "$RUNTIME_NAME" | sed -n 's/^iOS \([0-9][0-9]*\).*/\1/p')
+            if [ -n "$OS_MAJOR" ] && [ "$OS_MAJOR" -lt "$REVIEW_OS_MAJOR" ]; then
+              echo "  WARNING: ${RUNTIME_NAME} is older than the iOS ${REVIEW_OS_MAJOR}"
+              echo "  App Review ran. Newer-OS-only faults will not show up here."
+            fi
             # Crash reports land here; clear first so we only read this run's.
             rm -f "$HOME/Library/Logs/DiagnosticReports/Runner"*.ips 2>/dev/null || true
             xcrun simctl boot "$UDID" >/dev/null 2>&1 || true
@@ -555,8 +651,8 @@ workflows:
           }
 
           FAILED=0
-          smoke iphone "iPhone" || FAILED=1
-          smoke ipad   "iPad"   || FAILED=1
+          smoke iphone "$REVIEW_IPHONE" "iPhone" || FAILED=1
+          smoke ipad   "$REVIEW_IPAD"   "iPad"   || FAILED=1
           if [ "$FAILED" -ne 0 ]; then
             echo
             echo "ERROR: the app did not survive launch on at least one simulator."
