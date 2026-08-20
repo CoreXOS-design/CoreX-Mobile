@@ -680,6 +680,11 @@ workflows:
           # asset-manifest filename: both move between Xcode and Flutter
           # releases, and a missing icon is caught by Apple's own upload
           # validation anyway. These are the ones that fail silently at launch.
+          #
+          # Storyboards are PBXVariantGroups (they live in ios/Runner/Base.lproj),
+          # so ibtool compiles them to Base.lproj/Name.storyboardc, NOT the
+          # bundle root — checking only the root reported them missing on a
+          # perfectly good IPA. Accept either location.
           for R in "GoogleService-Info.plist" \
                    "PrivacyInfo.xcprivacy" \
                    "Main.storyboardc" \
@@ -690,8 +695,10 @@ workflows:
                    "Frameworks/App.framework/flutter_assets/.env"; do
             if [ -e "$APP/$R" ]; then
               echo "  ok      $R"
+            elif [ -e "$APP/Base.lproj/$R" ]; then
+              echo "  ok      Base.lproj/$R"
             else
-              echo "  MISSING $R"
+              echo "  MISSING $R (checked bundle root and Base.lproj/)"
               FAIL=1
             fi
           done
@@ -771,18 +778,52 @@ workflows:
 
           echo
           echo "Signature:"
-          ENT=$(codesign -d --entitlements :- "$APP" 2>/dev/null || true)
-          # A build carrying get-task-allow is debuggable, which the App Store
-          # sandbox refuses to launch — an instant, total launch crash.
-          if printf '%s' "$ENT" | grep -q "get-task-allow"; then
-            echo "  ERROR: get-task-allow is present. This is a debuggable build;"
+          # Parse the entitlements as a plist. Grepping for a bare key name is
+          # wrong: App Store distribution entitlements routinely carry
+          # `get-task-allow` explicitly set to <false/>, so presence of the KEY
+          # proves nothing — only the VALUE does. The earlier key-only grep
+          # failed a perfectly good IPA, and the same sloppiness made the
+          # aps-environment line print the team identifier.
+          ENT_FILE="$WORK/entitlements.plist"
+          codesign -d --entitlements :- "$APP" > "$ENT_FILE" 2>/dev/null || true
+          GTA=absent
+          APS=absent
+          if plutil -lint "$ENT_FILE" >/dev/null 2>&1; then
+            GTA=$(plutil -extract get-task-allow raw -o - "$ENT_FILE" 2>/dev/null || echo absent)
+            APS=$(plutil -extract aps-environment raw -o - "$ENT_FILE" 2>/dev/null || echo absent)
+          else
+            # Value-aware fallback if the blob isn't a parseable plist.
+            echo "  note    entitlements not parseable as a plist; using text fallback"
+            if grep -A1 "<key>get-task-allow</key>" "$ENT_FILE" 2>/dev/null | grep -q "<true/>"; then
+              GTA=true
+            elif grep -q "get-task-allow" "$ENT_FILE" 2>/dev/null; then
+              GTA=false
+            fi
+            APS=$(grep -A1 "<key>aps-environment</key>" "$ENT_FILE" 2>/dev/null \
+              | sed -n 's|.*<string>\(.*\)</string>.*|\1|p' | head -1)
+            APS=${APS:-absent}
+          fi
+
+          # get-task-allow=true means a debuggable binary. The App Store
+          # sandbox refuses to launch one — an instant, total launch crash.
+          if [ "$GTA" = "true" ]; then
+            echo "  ERROR: get-task-allow is TRUE. This is a debuggable build;"
             echo "  it will crash on launch for every App Store user."
             FAIL=1
           else
-            echo "  ok      no get-task-allow"
+            echo "  ok      get-task-allow=${GTA} (not a debuggable build)"
           fi
-          APS=$(printf '%s' "$ENT" | grep -A1 "aps-environment" | tail -1 | sed 's/.*<string>\(.*\)<\/string>.*/\1/')
-          echo "  aps-environment         ${APS:-<ABSENT>}"
+
+          echo "  aps-environment         ${APS}"
+          if [ "$APS" = "development" ]; then
+            echo "  WARNING: signed for the APNs SANDBOX, not production."
+            echo "  The app installs and runs, so this will not fail review —"
+            echo "  but every production push silently goes nowhere. Check that"
+            echo "  the export step re-signed with the distribution profile."
+          elif [ "$APS" = "absent" ]; then
+            echo "  WARNING: no aps-environment — push notifications cannot"
+            echo "  register at all. See the profile check earlier in this build."
+          fi
           codesign -dv "$APP" 2>&1 | sed -n 's/^/  /p' || true
 
           echo
