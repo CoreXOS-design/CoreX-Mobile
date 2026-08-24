@@ -20,11 +20,15 @@ import '../widgets/ui/glow_button.dart';
 /// rejected an earlier build for reading as deactivation):
 ///   * Say **deleted**. Never "disabled", "deactivated", "paused", "temporary".
 ///   * Never claim every trace of the person is erased — it isn't.
-///   * The restore path is mentioned once, plainly, at the bottom. It is real
-///     and users deserve to know it exists, but it is not the headline.
+///   * Say nothing here about getting access back. The flow reads as a
+///     deletion, which is what Apple requires; an earlier draft carried a
+///     "you can restore this later" footnote and it undercut exactly that.
 ///
 /// Restoring is web-only and self-service (My Portal → Tools on the CoreX
-/// website); there is deliberately nothing in the app that does it.
+/// website). Nothing in the app mentions or performs it — the one place a user
+/// is told the account is gone rather than restorable is
+/// [kAccountDeletedSignInMessage], which fires only after they try to sign in
+/// again and so cannot soften the deletion itself.
 const Color _kDanger = Color(0xFFEF4444);
 
 /// Shown on the login screen when a sign-in is refused with `account_deleted`,
@@ -47,10 +51,7 @@ Future<void> startAccountDeletion(BuildContext context) async {
 Future<bool> _confirmDelete(BuildContext context) async {
   const title = 'Delete your account?';
   const body = 'Your CoreX app account will be deleted and you will be signed '
-      'out on this and every other device.\n\n'
-      'The deals, commissions and documents your agency holds are its business '
-      'records and are kept as the law requires — deleting your app account '
-      'does not erase those, and you can still reach CoreX in a web browser.';
+      'out of this device.';
 
   final platform = Theme.of(context).platform;
   final isApple =
@@ -200,8 +201,11 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
   Widget build(BuildContext context) {
     return AuthScaffold(
       title: 'Delete account',
+      // Kept word-for-word in step with the confirm dialog in [_confirmDelete].
+      // The two screens are back-to-back in one flow, so any drift between them
+      // reads as a contradiction at the exact moment the user is deciding.
       subtitle: 'Enter your password to delete your CoreX app account. You '
-          'will be signed out on this and every other device immediately.',
+          'will be signed out of this device.',
       child: Form(
         key: _formKey,
         child: Column(
@@ -241,31 +245,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
               onPressed: _busy ? null : () => Navigator.of(context).pop(),
               child: const Text('Cancel'),
             ),
-            const SizedBox(height: 20),
-            const _RestoreNote(),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// The restore path, stated once and without hedging the deletion above it.
-/// Deliberately plain text rather than a button: deletion completes here, in
-/// the app, and a link out could read as though it didn't.
-class _RestoreNote extends StatelessWidget {
-  const _RestoreNote();
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      'If you ever want the app back, app access can be restored by you from '
-      'My Portal → Tools on the CoreX website (corexos.co.za).',
-      textAlign: TextAlign.center,
-      style: TextStyle(
-        fontSize: 12.5,
-        height: 1.45,
-        color: Theme.of(context).textTheme.bodySmall?.color,
       ),
     );
   }
