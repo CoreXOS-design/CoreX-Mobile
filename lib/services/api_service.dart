@@ -152,6 +152,9 @@ class ApiService {
     // Fresh session — clear any stale 401 streak from a previous session.
     _consecutive401s = 0;
     _last401At = null;
+    // A token was issued, so app access is plainly back (restored from the
+    // website, or this is a different user on the same device).
+    accountDeleted = false;
     await _writeTokenToVaults(token);
     // Read straight back: a write that reports success but stores nothing is
     // the exact failure that loses the session at the next cold start, and it
@@ -201,6 +204,53 @@ class ApiService {
   static DateTime? _last401At;
   static const Duration _unauthorizedWindow = Duration(seconds: 12);
 
+  /// True once the server has told us this account's app access is gone —
+  /// either from a login attempt (403 `account_deleted`) or from an
+  /// authenticated call made with a token that has since been revoked.
+  ///
+  /// The login screen reads it so a mid-session bounce-back explains itself
+  /// instead of presenting a bare password form the user can never get past.
+  /// Cleared by [saveToken], i.e. the moment a sign-in succeeds again.
+  static bool accountDeleted = false;
+
+  /// The server's message for a revoked account, matched verbatim. See
+  /// [isAccountDeletedResponse] for why a message comparison is in here at all.
+  static const String _accountDeletedMessage = 'This account has been deleted.';
+
+  /// Recognises "app access is gone" in a 403 body. Public only so the test
+  /// suite can pin it — every 403 in this app runs through it.
+  ///
+  /// Two shapes, because the backend emits two. The login gate
+  /// (`routes/api.php`) returns `{"message": ..., "code": "account_deleted"}`;
+  /// the `EnsureAppAccess` middleware that rejects an already-issued token
+  /// uses Laravel's `abort(403, 'This account has been deleted.')`, which
+  /// carries **no** `code` at all. Matching the message is the only way to
+  /// catch that second case, so it stays until the middleware grows a code —
+  /// at which point the `code` branch below covers it and this one is dead
+  /// weight rather than wrong.
+  ///
+  /// Kept deliberately exact. Every other 403 in this app is an ordinary
+  /// permission denial ("You don't have access to this property") and must not
+  /// end anyone's session, so a loose match here would be far worse than
+  /// missing one.
+  @visibleForTesting
+  static bool isAccountDeletedResponse(String? body) {
+    if (body == null) return false;
+    // Cheap reject first: the common 403 never gets decoded.
+    if (!body.contains('account_deleted') &&
+        !body.contains(_accountDeletedMessage)) {
+      return false;
+    }
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is! Map) return false;
+      return decoded['code'] == 'account_deleted' ||
+          decoded['message'] == _accountDeletedMessage;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// On a 401, drop the (now invalid) token and signal the auth layer to route
   /// the user back to login. Safe to call on unauthenticated endpoints (e.g. a
   /// failed login) — listeners guard on being logged in, so a login 401 is a
@@ -209,7 +259,24 @@ class ApiService {
   /// Debounced: the first 401 is treated as possibly-transient and the token is
   /// left intact; a second 401 within [_unauthorizedWindow] confirms the
   /// session is genuinely gone, at which point we clear the token and signal.
-  Future<void> _handleUnauthorized(int status) async {
+  ///
+  /// A 403 ends the session too, but *only* when [body] carries the server's
+  /// `account_deleted` code — the token was revoked by the user deleting their
+  /// account, on this device or another one. Bare 403s are everyday permission
+  /// denials ("you don't have access to this property", agency-controlled
+  /// fields) and must never sign anyone out. That case skips the debounce:
+  /// the server has already stated the token is dead, so there is nothing
+  /// transient to wait out.
+  Future<void> _handleUnauthorized(int status, [String? body]) async {
+    if (status == 403 && isAccountDeletedResponse(body)) {
+      debugPrint('[auth] app access has been deleted — dropping the session');
+      accountDeleted = true;
+      _consecutive401s = 0;
+      _last401At = null;
+      await clearToken();
+      sessionExpired.value++;
+      return;
+    }
     if (status != 401) return;
     final now = DateTime.now();
     if (_last401At == null ||
@@ -262,13 +329,64 @@ class ApiService {
       if (body is Map<String, dynamic>) return body;
       throw ApiException(response.statusCode, 'Login failed');
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
+    // The `code` matters as much as the status here: 403 `account_deleted`
+    // means the password was *right* and app access is gone, which needs
+    // completely different copy from a wrong password. See [ApiException.code].
     String message = 'Login failed';
+    String? code;
     try {
       final body = jsonDecode(response.body);
-      if (body is Map && body['message'] is String) message = body['message'];
+      if (body is Map) {
+        if (body['message'] is String) message = body['message'] as String;
+        if (body['code'] is String) code = body['code'] as String;
+      }
     } catch (_) {}
-    throw ApiException(response.statusCode, message);
+    throw ApiException(response.statusCode, message, code: code);
+  }
+
+  // --- Account deletion (App Store guideline 5.1.1(v)) ---
+
+  /// `DELETE /v1/me/app-access` — deletes this account's access to the mobile
+  /// app. The person's CoreX account, deals and commissions are untouched:
+  /// what goes is their ability to sign in here.
+  ///
+  /// The server revokes every token it has issued them and clears their device
+  /// tokens, so the caller MUST drop the local session immediately on success —
+  /// nothing else will do it, and the token left on disk is already dead.
+  /// Idempotent; safe to repeat.
+  ///
+  /// Throws [ApiException] 422 with code `invalid_password` when the password
+  /// is wrong, in which case nothing changed and the session is still good.
+  Future<void> deleteAppAccess(String password) async {
+    if (useMockData) {
+      await Future.delayed(const Duration(milliseconds: 600));
+      return;
+    }
+
+    final response = await http.delete(
+      Uri.parse('$baseUrl/v1/me/app-access'),
+      headers: await _headers(),
+      body: jsonEncode({'password': password}),
+    ).timeout(_timeout);
+
+    if (response.statusCode == 200 || response.statusCode == 204) return;
+
+    // Deliberately NOT routed through [_handleUnauthorized]. A wrong password
+    // is a 422 that must leave the session alone, and a 403 here means access
+    // was already removed — the caller signs out locally on both the success
+    // and the already-gone path, so a debounced global expiry signal would only
+    // race that.
+    String message = 'Could not delete your account';
+    String? code;
+    try {
+      final body = jsonDecode(response.body);
+      if (body is Map) {
+        if (body['message'] is String) message = body['message'] as String;
+        if (body['code'] is String) code = body['code'] as String;
+      }
+    } catch (_) {}
+    throw ApiException(response.statusCode, message, code: code);
   }
 
   // --- Demo Mode ---
@@ -440,7 +558,7 @@ class ApiService {
       if (body is Map<String, dynamic>) return body;
       throw ApiException(response.statusCode, 'Failed to load profile');
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load profile');
   }
 
@@ -920,7 +1038,7 @@ class ApiService {
           .map((e) => CalendarEvent.fromJson(Map<String, dynamic>.from(e)))
           .toList();
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load calendar range');
   }
 
@@ -957,7 +1075,7 @@ class ApiService {
       }
       return (events: events, byDate: byDate);
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load calendar');
   }
 
@@ -1177,7 +1295,7 @@ class ApiService {
       return CalendarOptions.fromJson(
           Map<String, dynamic>.from(jsonDecode(response.body) as Map));
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load event options');
   }
 
@@ -1199,7 +1317,7 @@ class ApiService {
               PropertySearchResult.fromJson(Map<String, dynamic>.from(e)))
           .toList();
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to search properties');
   }
 
@@ -1222,7 +1340,7 @@ class ApiService {
           .map((e) => PropertyOwner.fromJson(Map<String, dynamic>.from(e)))
           .toList();
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load property owners');
   }
 
@@ -1245,7 +1363,7 @@ class ApiService {
               AttendeeSearchResult.fromJson(Map<String, dynamic>.from(e)))
           .toList();
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to search attendees');
   }
 
@@ -1264,7 +1382,7 @@ class ApiService {
       return EventFormData.fromResponseBody(response.body);
     }
     if (response.statusCode == 422) throw _parseValidationError(response.body);
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(
         response.statusCode, _serverErrorMessage(response.body, 'create event'));
   }
@@ -1279,7 +1397,7 @@ class ApiService {
     if (response.statusCode == 200) {
       return EventFormData.fromResponseBody(response.body);
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load event');
   }
 
@@ -1297,7 +1415,7 @@ class ApiService {
       return EventFormData.fromResponseBody(response.body);
     }
     if (response.statusCode == 422) throw _parseValidationError(response.body);
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(
         response.statusCode, _serverErrorMessage(response.body, 'update event'));
   }
@@ -1350,7 +1468,7 @@ class ApiService {
       final list = data['properties'] as List? ?? [];
       return list.map((e) => Property.fromJson(e)).toList();
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load properties');
   }
 
@@ -1370,7 +1488,7 @@ class ApiService {
     if (response.statusCode == 403) {
       throw ApiException(403, _scopeForbiddenMessage(response.body));
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load property');
   }
 
@@ -2446,7 +2564,7 @@ class ApiService {
         .get(Uri.parse('$baseUrl/v1/mobile/properties/$propertyId/documents'),
             headers: await _headers())
         .timeout(_timeout);
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     if (response.statusCode == 200) {
       return PropertyDriveData.fromJson(
           Map<String, dynamic>.from(jsonDecode(response.body) as Map));
@@ -2490,7 +2608,7 @@ class ApiService {
         if (token != null) 'Authorization': 'Bearer $token',
       },
     ).timeout(_downloadTimeout);
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     if (response.statusCode == 200) {
       return DownloadedFile(
         bytes: response.bodyBytes,
@@ -2844,7 +2962,7 @@ class ApiService {
       final unread = body['unread'] is num ? (body['unread'] as num).toInt() : 0;
       return (items: list, unread: unread);
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load notifications');
   }
 
@@ -3023,7 +3141,7 @@ class ApiService {
         leads: leads,
       );
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load portal leads');
   }
 
@@ -3042,7 +3160,7 @@ class ApiService {
           .map((e) => PortalLeadDate.fromJson(Map<String, dynamic>.from(e)))
           .toList();
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load portal lead dates');
   }
 
@@ -3061,7 +3179,7 @@ class ApiService {
           : Map<String, dynamic>.from(body);
       return PortalLead.fromJson(lead);
     }
-    await _handleUnauthorized(response.statusCode);
+    await _handleUnauthorized(response.statusCode, response.body);
     throw ApiException(response.statusCode, 'Failed to load portal lead');
   }
 
@@ -3101,10 +3219,18 @@ class HidePropertyResult {
 class ApiException implements Exception {
   final int statusCode;
   final String message;
-  ApiException(this.statusCode, this.message);
+
+  /// Machine-readable reason slug from the response body's `code` field, when
+  /// the server sent one. Branch on this rather than string-matching
+  /// [message]: `invalid_password` and `account_deleted` are both credential
+  /// failures on the same status family but need entirely different copy.
+  final String? code;
+
+  ApiException(this.statusCode, this.message, {this.code});
 
   @override
-  String toString() => 'ApiException($statusCode): $message';
+  String toString() =>
+      'ApiException($statusCode${code == null ? '' : '/$code'}): $message';
 }
 
 /// Thrown by [ApiService.uploadPropertyImage] when the server rejects a
@@ -3154,7 +3280,11 @@ class DuplicateContactException extends ApiException {
 /// should hide the feature. This shouldn't happen when gating on
 /// `rental_inspections_available`; it's a defensive backstop.
 class RentalNotEligibleException extends ApiException {
-  /// Either `not_a_rental` or `not_live`.
-  final String code;
-  RentalNotEligibleException(this.code, String message) : super(422, message);
+  RentalNotEligibleException(String code, String message)
+      : super(422, message, code: code);
+
+  /// Either `not_a_rental` or `not_live` — always present on this subtype,
+  /// which is what it adds over the nullable [ApiException.code].
+  @override
+  String get code => super.code!;
 }

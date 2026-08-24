@@ -12,7 +12,11 @@ import '../services/security_service.dart';
 import '../widgets/event_reminder_picker.dart';
 import '../widgets/ui/icon_badge.dart';
 import '../widgets/ui/section_header.dart';
+import 'delete_account_screen.dart';
 import 'notification_schedule_screen.dart';
+
+/// Destructive-action red, matching Sign out on the Profile screen.
+const Color _kDanger = Color(0xFFEF4444);
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -177,6 +181,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
             const SizedBox(height: 24),
+            const SectionHeader(label: 'Account'),
+            const SizedBox(height: 12),
+            // Second entry point for App Store guideline 5.1.1(v) — the
+            // primary one sits with Sign out on the Profile screen. Settings
+            // is where people (and reviewers) look first for an account
+            // action, and a deletion flow nobody can find is the same as not
+            // having one.
+            _SettingsCard(children: [
+              _SettingsTile(
+                icon: Icons.delete_outline_rounded,
+                tint: _kDanger,
+                label: 'Delete my account',
+                labelColor: _kDanger,
+                trailing: Icon(Icons.chevron_right_rounded,
+                    size: 20, color: AppTheme.textMuted(context)),
+                onTap: () => startAccountDeletion(context),
+              ),
+            ]),
+            const SizedBox(height: 24),
             const SectionHeader(label: 'About'),
             const SizedBox(height: 12),
             _SettingsCard(children: [
@@ -268,12 +291,18 @@ class _SettingsTile extends StatelessWidget {
   final Widget trailing;
   final VoidCallback? onTap;
 
+  /// Overrides the default primary text colour. Only the destructive row uses
+  /// it — a red label is what marks "Delete my account" as different in kind
+  /// from every other setting on the screen.
+  final Color? labelColor;
+
   const _SettingsTile({
     required this.icon,
     required this.tint,
     required this.label,
     required this.trailing,
     this.onTap,
+    this.labelColor,
   });
 
   @override
@@ -290,7 +319,7 @@ class _SettingsTile extends StatelessWidget {
               style: TextStyle(
                 fontSize: 14.5,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.textPrimary(context),
+                color: labelColor ?? AppTheme.textPrimary(context),
               ),
             ),
           ),

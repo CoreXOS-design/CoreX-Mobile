@@ -17,6 +17,7 @@ import '../../theme/corex_tokens.dart';
 import '../../widgets/corex/corex_monogram.dart';
 import '../../widgets/corex/corex_primary_button.dart';
 import '../../widgets/corex/corex_secondary_button.dart';
+import '../delete_account_screen.dart' show kAccountDeletedSignInMessage;
 import 'client/client_agent_qr_scanner_screen.dart';
 import 'client/client_auth_shared.dart';
 import 'client/client_otp_screen.dart';
@@ -111,7 +112,14 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() {
       if (_emailCtl.text.isEmpty) _emailCtl.text = email;
       _fingerprint = fingerprint;
+      // Landed back here because app access was deleted — from this device, or
+      // from another one mid-session. Without this the user faces an
+      // unexplained password form they can never get past.
+      if (auth.accountWasDeleted) _error = kAccountDeletedSignInMessage;
     });
+    // Nothing left to unlock in that case: the token is gone and only a
+    // restored account can issue a new one.
+    if (auth.accountWasDeleted) return;
     // Small beat before the system sheet: local_auth needs a resumed activity,
     // and firing it in the same frame the splash hands over can have the
     // platform reject the call outright.
@@ -205,6 +213,18 @@ class _LoginScreenState extends State<LoginScreen>
     // Every path from here on calls setState, so the guard belongs here rather
     // than above.
     if (!mounted) return;
+    // 403 `account_deleted` = the password was *right*, but this account's app
+    // access has been deleted. Must be caught before both the 401 branch and
+    // the client lookup: telling them the password was wrong would send them
+    // hunting for a typo that doesn't exist, and the email still resolves to a
+    // real user so the client path has nothing to offer either.
+    if (auth.lastLoginWasDeletedAccount) {
+      setState(() {
+        _busy = false;
+        _error = kAccountDeletedSignInMessage;
+      });
+      return;
+    }
     // 401 = the email is a known user, password was wrong. Don't leak into the
     // client lookup flow — show a clear password error and stop here.
     if (auth.lastLoginStatus == 401) {

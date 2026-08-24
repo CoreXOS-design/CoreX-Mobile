@@ -62,11 +62,28 @@ class AuthProvider extends ChangeNotifier {
   bool _needsBiometricSetupPrompt = false;
   String? _error;
   int? _lastLoginStatus;
+  String? _lastLoginCode;
   Map<String, dynamic>? _user;
 
   /// HTTP status of the most recent [login] attempt, or null on network error.
-  /// 200 = success, 401/422 = bad credentials for an existing user.
+  /// 200 = success, 401/422 = bad credentials for an existing user,
+  /// 403 = the password was right but app access has been deleted.
   int? get lastLoginStatus => _lastLoginStatus;
+
+  /// Server-supplied reason for the most recent failed [login] —
+  /// `invalid_password`, `user_not_found` or `account_deleted` — or null when
+  /// the server sent no code (or the call never reached it).
+  String? get lastLoginCode => _lastLoginCode;
+
+  /// True when the last sign-in failed because this account's app access has
+  /// been deleted. The password was correct; no token was issued.
+  bool get lastLoginWasDeletedAccount =>
+      _lastLoginCode == 'account_deleted' || _lastLoginStatus == 403;
+
+  /// True when the session ended because app access was deleted — either on
+  /// this device or another one. Survives the bounce back to the login screen
+  /// so it can say *why* the user is looking at a password form again.
+  bool get accountWasDeleted => ApiService.accountDeleted;
 
   bool get isLoading => _isLoading;
   /// True only when fully authenticated AND not locked. AuthGate uses this
@@ -159,6 +176,7 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = true;
     _error = null;
     _lastLoginStatus = null;
+    _lastLoginCode = null;
     notifyListeners();
 
     try {
@@ -200,7 +218,14 @@ class AuthProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _lastLoginStatus = e is ApiException ? e.statusCode : null;
-      _error = 'Invalid email or password';
+      _lastLoginCode = e is ApiException ? e.code : null;
+      // A deleted account is not a credential problem — the password was
+      // right. Saying "invalid email or password" would send the user hunting
+      // for a typo that doesn't exist. The login screen renders the full
+      // explanation; this is the fallback for anything reading [error].
+      _error = lastLoginWasDeletedAccount
+          ? 'This account has been deleted.'
+          : 'Invalid email or password';
       _isLoading = false;
       notifyListeners();
       return false;

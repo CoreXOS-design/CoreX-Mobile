@@ -7,6 +7,7 @@ import '../main.dart';
 import '../models/branding.dart';
 import '../theme.dart';
 import '../providers/auth_provider.dart';
+import 'delete_account_screen.dart';
 import '../widgets/corex/corex_bottom_nav.dart';
 import '../widgets/ui/section_header.dart';
 import '../widgets/ui/status_chip.dart';
@@ -101,6 +102,14 @@ class ProfileScreen extends StatelessWidget {
             ]),
             const SizedBox(height: 32),
             _SignOutButton(onPressed: () => logoutAndReset(context)),
+            const SizedBox(height: 8),
+            // App Store guideline 5.1.1(v): account deletion has to be
+            // reachable from inside the app. It sits under Sign out —
+            // separate, quieter, and unmistakably its own action — so it can't
+            // be mistaken for the everyday way to leave.
+            _DeleteAccountButton(
+              onPressed: () => startAccountDeletion(context),
+            ),
           ],
           ),
         ),
@@ -150,6 +159,38 @@ class _SignOutButton extends StatelessWidget {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppTheme.radius),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Deliberately a plain text button, not a second outlined block: it has to be
+/// clearly findable (App Review looks for it) without competing with Sign out,
+/// which is the action people actually want ninety-nine times out of a hundred.
+class _DeleteAccountButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  const _DeleteAccountButton({required this.onPressed});
+
+  static const _danger = Color(0xFFEF4444);
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton.icon(
+        onPressed: onPressed,
+        icon: const Icon(TablerIcons.trash, size: 18, color: _danger),
+        label: const Text(
+          'Delete my account',
+          style: TextStyle(
+            color: _danger,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 14),
         ),
       ),
     );
