@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../services/ai_consent.dart';
 import '../services/api_service.dart';
 import '../services/messaging_service.dart';
 import '../services/security_service.dart';
@@ -367,6 +368,10 @@ class AuthProvider extends ChangeNotifier {
     await _messaging.onLogout();
     await _api.clearToken();
     await _security.setBiometricEnabled(false);
+    // Agents share devices. AI consent is a personal answer about that person's
+    // own speech and photos, so the next one to sign in has to give their own
+    // rather than inherit it. See [AiConsent].
+    await AiConsent.instance.clear();
     // Signing out disables biometrics, so the one-time setup offer has to be
     // re-armed with it. Without this the "already prompted" mark outlived the
     // opt-in it belonged to: the next sign-in never offered biometrics again,

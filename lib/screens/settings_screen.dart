@@ -8,10 +8,12 @@ import '../theme.dart';
 import '../providers/auth_provider.dart';
 import '../providers/notifications_provider.dart';
 import '../providers/theme_provider.dart';
+import '../services/ai_consent.dart';
 import '../services/security_service.dart';
 import '../widgets/event_reminder_picker.dart';
 import '../widgets/ui/icon_badge.dart';
 import '../widgets/ui/section_header.dart';
+import 'ai_data_screen.dart';
 import 'delete_account_screen.dart';
 import 'notification_schedule_screen.dart';
 
@@ -178,6 +180,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           .setBiometricEnabled(v)
                       : null,
                 ),
+              ),
+            ]),
+            const SizedBox(height: 24),
+            const SectionHeader(label: 'Privacy'),
+            const SizedBox(height: 12),
+            // App Store 5.1.1(i) / 5.1.2(i): the AI disclosure has to stay
+            // reachable and the permission revocable after the first-run sheet
+            // is gone. This row is also where a reviewer will look for it.
+            _SettingsCard(children: [
+              _SettingsTile(
+                icon: Icons.auto_awesome_outlined,
+                tint: brand.icon,
+                label: 'Data & AI',
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ListenableBuilder(
+                      listenable: AiConsent.instance,
+                      builder: (context, _) => Text(
+                        AiConsent.instance.granted ? 'On' : 'Off',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textMuted(context),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right_rounded,
+                        size: 20, color: AppTheme.textMuted(context)),
+                  ],
+                ),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const AiDataScreen(),
+                )),
               ),
             ]),
             const SizedBox(height: 24),

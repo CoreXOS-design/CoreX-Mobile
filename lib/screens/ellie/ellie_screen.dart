@@ -5,12 +5,14 @@ import '../../widgets/ui/content_width.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../services/ai_api.dart';
+import '../../services/ai_consent.dart';
 import '../../services/api_service.dart';
 import '../../services/ellie_voice_recorder.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../utils/app_time.dart';
 import '../../widgets/ai/ai_badge.dart';
+import '../../widgets/ai/ai_disclosure.dart';
 import '../../widgets/corex/corex_bottom_nav.dart';
 import '../../widgets/ellie/ellie_result_sheet.dart';
 import '../calendar_screen.dart';
@@ -34,6 +36,12 @@ class _EllieScreenState extends State<EllieScreen>
   MicPermission? _mic;
   bool _askingMic = false;
 
+  /// Mirror of [AiConsent.granted], refreshed on open and after the sheet.
+  /// Starts false so a press can never beat the read and send an utterance the
+  /// user hasn't agreed to.
+  bool _aiConsented = false;
+  bool _askingAiConsent = false;
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +50,7 @@ class _EllieScreenState extends State<EllieScreen>
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
     WidgetsBinding.instance.addObserver(this);
+    _refreshAiConsent();
     _refreshMic();
   }
 
@@ -56,7 +65,39 @@ class _EllieScreenState extends State<EllieScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Picks up access granted from the Settings app without needing a restart.
-    if (state == AppLifecycleState.resumed) _refreshMic();
+    if (state != AppLifecycleState.resumed) return;
+    // Consent can equally have been withdrawn in Settings → Data & AI while
+    // this screen sat in the background; re-read it or the mic would still be
+    // live against an answer the user has since changed.
+    _refreshAiConsent();
+    _refreshMic();
+  }
+
+  /// Reads the stored AI consent without ever showing the sheet.
+  Future<void> _refreshAiConsent() async {
+    await AiConsent.instance.ensureLoaded();
+    final granted = AiConsent.instance.granted;
+    if (!mounted || granted == _aiConsented) return;
+    setState(() => _aiConsented = granted);
+  }
+
+  /// Resolves AI consent as a step of its own, for the same reason
+  /// [_askForMic] is one: the sheet cancels the press that opened it.
+  Future<void> _askForAiConsent() async {
+    if (_askingAiConsent) return;
+    _askingAiConsent = true;
+    try {
+      final granted = await showAiConsentSheet(context);
+      if (!mounted) return;
+      setState(() => _aiConsented = granted);
+      if (granted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Hold the mic and speak.')),
+        );
+      }
+    } finally {
+      _askingAiConsent = false;
+    }
   }
 
   /// Reads current access without ever prompting.
@@ -115,6 +156,19 @@ class _EllieScreenState extends State<EllieScreen>
 
   Future<void> _onPointerDown() async {
     if (_phase != _Phase.idle || _pointerDown) return;
+    // AI consent is resolved before the microphone, and before any recording:
+    // the audio is transcribed on CoreX's servers but the resulting transcript
+    // goes to a third-party AI provider, so agreement has to precede the send
+    // (App Store 5.1.1(i) / 5.1.2(i)).
+    //
+    // Same one-step-per-press discipline as [_askForMic] below — the sheet
+    // cancels the touch that opened it, so this press only resolves consent and
+    // the next one records. Recording from here would always release at ~0 ms
+    // and be discarded, which is precisely the 2.1(a) failure.
+    if (!_aiConsented) {
+      await _askForAiConsent();
+      return;
+    }
     if (_mic != MicPermission.granted) {
       await _askForMic();
       return;
@@ -339,6 +393,10 @@ class _EllieScreenState extends State<EllieScreen>
     // Treat the pre-read state as ready so the button never flashes a
     // permission prompt on a device that already granted access.
     final needsMic = _mic != null && _mic != MicPermission.granted;
+    // Takes precedence over [needsMic] in the copy below, matching the order
+    // [_onPointerDown] resolves them in — asking for the microphone before the
+    // user has agreed to the AI at all would be the wrong question first.
+    final needsConsent = !_aiConsented;
     final accent = CorexAccentTheme.of(context);
     // ~470pt of fixed content (mic target, labels, transcript) does not fit a
     // landscape phone or a short iPad window. Centre it while there's room and
@@ -357,9 +415,11 @@ class _EllieScreenState extends State<EllieScreen>
                     ? 'Listening…'
                     : (thinking
                         ? 'Thinking…'
-                        : (needsMic
-                            ? 'Ellie needs your microphone to hear you'
-                            : 'Hold the mic and tell Ellie what to do')),
+                        : (needsConsent
+                            ? 'Ellie uses AI to understand what you say'
+                            : (needsMic
+                                ? 'Ellie needs your microphone to hear you'
+                                : 'Hold the mic and tell Ellie what to do'))),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 15,
@@ -368,11 +428,13 @@ class _EllieScreenState extends State<EllieScreen>
               ),
               const SizedBox(height: 8),
               Text(
-                needsMic
-                    ? (_mic == MicPermission.permanentlyDenied
-                        ? 'Turn on Microphone for CoreX in Settings, then come back.'
-                        : 'Tap the mic to allow access.')
-                    : 'Try: "Book a viewing with John at 12 Beach Road tomorrow at 11am"',
+                needsConsent
+                    ? 'Tap the mic to see what is sent and who it goes to.'
+                    : (needsMic
+                        ? (_mic == MicPermission.permanentlyDenied
+                            ? 'Turn on Microphone for CoreX in Settings, then come back.'
+                            : 'Tap the mic to allow access.')
+                        : 'Try: "Book a viewing with John at 12 Beach Road tomorrow at 11am"'),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 12,

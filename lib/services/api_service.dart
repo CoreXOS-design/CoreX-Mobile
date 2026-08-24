@@ -27,6 +27,7 @@ import '../models/space.dart';
 import '../models/task_extras.dart';
 import '../models/today_card.dart';
 import '../models/visibility.dart';
+import 'ai_consent.dart';
 
 class ApiService {
   static String get baseUrl => Env.apiBaseUrl;
@@ -2040,6 +2041,19 @@ class ApiService {
     // POSTed more than once. A stable per-photo id lets the server dedupe
     // instead of creating duplicate gallery rows.
     if (clientId != null) request.fields['client_upload_id'] = clientId;
+    // AI consent (App Store 5.1.1(i) / 5.1.2(i)). Uploading a gallery image is
+    // what queues `AnalysePropertyImageJob`, which sends the photo to
+    // Anthropic — so this upload IS the moment of sharing, and the flag has to
+    // ride along with it.
+    //
+    // NOT YET ENFORCED SERVER-SIDE. `MobilePropertyController` currently
+    // dispatches the job on the `use_property_image_ai` permission alone and
+    // ignores this field, so today a '0' is a statement of intent, not a
+    // guarantee. The backend must read it (skip the dispatch when it is '0')
+    // before the photo half of the consent promise is true. Sending it now
+    // means the app side needs no further change when that lands.
+    await AiConsent.instance.ensureLoaded();
+    request.fields['ai_analysis'] = AiConsent.instance.granted ? '1' : '0';
 
     final http.StreamedResponse streamed;
     final String body;

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/space.dart';
+import '../../services/ai_consent.dart';
 import '../../services/api_service.dart';
 import '../../utils/display_text.dart';
 import '../../theme.dart';
@@ -54,7 +55,19 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
   void initState() {
     super.initState();
     _load();
-    _aiCtrl.load();
+    // Only fetch AI results for an agent who has agreed to the AI features at
+    // all (App Store 5.1.1(i) / 5.1.2(i)). This is a read of results the upload
+    // already produced, so it is not itself the moment data is shared — the
+    // upload is, see [ApiService.uploadPropertyImage] — but showing AI output
+    // to someone who declined, or never answered, contradicts the answer they
+    // gave.
+    _loadAiIfConsented();
+  }
+
+  Future<void> _loadAiIfConsented() async {
+    await AiConsent.instance.ensureLoaded();
+    if (!mounted || !AiConsent.instance.granted) return;
+    await _aiCtrl.load();
   }
 
   @override
