@@ -2078,6 +2078,11 @@ class ApiService {
             analysisId: aid is num
                 ? aid.toInt()
                 : (aid is String ? int.tryParse(aid) : null),
+            // A 200 (rather than 201) is the server telling us this
+            // client_upload_id was already committed. Carry that through: the
+            // dedupe response's `room_tag` is always null and must not be read
+            // as "filed unsorted". See [UploadedImage.duplicate].
+            duplicate: json['duplicate'] == true || status == 200,
           );
         }
       } catch (_) {}
@@ -2085,8 +2090,46 @@ class ApiService {
     }
 
     if (status == 422) {
-      List<String> available = const [];
-      String message = "Tag is not available on this property";
+      // Two unrelated failures share this status, and they need opposite
+      // handling:
+      //
+      //  * `room_tag` is not on the property's live list — recoverable. The
+      //    sheet refreshes its chips and asks the user to re-select.
+      //  * Laravel rejected the `image` field itself (the `mimes` / `max`
+      //    rules) — a stale-tag prompt is nonsense here, and no retry can make
+      //    the same bytes valid.
+      //
+      // Telling them apart means looking at WHICH key failed. Treating every
+      // 422 as a tag error wiped the sheet's entire tag list and threw the real
+      // reason away, so an `image` rejection surfaced as "the tags disappeared"
+      // with the photos stuck in the queue and nothing anywhere naming the
+      // actual cause.
+      //
+      // The asymmetry that makes this bite iOS first is in how the two pickers
+      // choose an output container. ImageResizer on Android picks PNG only when
+      // the bitmap actually `hasAlpha()`, so an opaque photo or screenshot comes
+      // back as JPEG. image_picker_ios instead keys off the SOURCE container
+      // (FLTImagePickerMetaDataUtil.getImageMIMETypeFromImageData), so a PNG
+      // stays PNG — and convertImage then ignores imageQuality for it entirely,
+      // returning a full UIImagePNGRepresentation. Same picked screenshot:
+      // ~1 MB JPEG on Android, a multi-MB PNG on iOS. So both the odd container
+      // and the outsized payload reaching this endpoint are iOS-only shapes.
+      // `available_tags` — and ONLY that key — marks the availability
+      // rejection, because it is the one branch that can be recovered from:
+      // the caller replaces its chip list with what came back and re-files the
+      // affected photos against it. The server always sends it there
+      // (MobilePropertyController::uploadImage) and never anywhere else.
+      //
+      // An `errors.room_tag` on its own is a different animal: Laravel's
+      // `nullable|string|max:100` rule failing, which arrives with no list.
+      // Treating that as an availability rejection too would hand the caller an
+      // EMPTY available list, and the sheet would replace its live chips with
+      // nothing — the same "the tags disappeared" disappearance this block was
+      // written to stop, just entered through the other door. It also strands
+      // the queue: with no chips there is nothing left to tap to re-file.
+      List<String>? available;
+      String? serverMessage;
+      String? fieldError;
       try {
         final json = jsonDecode(body);
         if (json is Map) {
@@ -2095,18 +2138,36 @@ class ApiService {
                 .map((e) => e.toString())
                 .toList();
           }
-          if (json['message'] is String) {
-            message = json['message'] as String;
-          } else if (json['errors'] is Map) {
+          if (json['message'] is String &&
+              (json['message'] as String).isNotEmpty) {
+            serverMessage = json['message'] as String;
+          }
+          if (json['errors'] is Map) {
             final errors = json['errors'] as Map;
-            if (errors['room_tag'] is List &&
-                (errors['room_tag'] as List).isNotEmpty) {
-              message = (errors['room_tag'] as List).first.toString();
+            // Whichever field the server actually objected to. `image` wins
+            // when both are present: a rejected file is the harder failure and
+            // no retry or re-tag can rescue it.
+            for (final key in const ['image', 'room_tag']) {
+              final e = errors[key];
+              if (e is List && e.isNotEmpty) {
+                fieldError = e.first.toString();
+                break;
+              }
             }
           }
         }
       } catch (_) {}
-      throw TagValidationException(message, available);
+
+      if (available != null) {
+        throw TagValidationException(
+            fieldError ?? serverMessage ?? 'Tag is not available on this property',
+            available);
+      }
+      // Not an availability problem. Surface what the server actually objected
+      // to so the failed-photo row says something true instead of blaming the
+      // tag.
+      throw ApiException(
+          422, fieldError ?? serverMessage ?? 'The server rejected this image');
     }
 
     if (status == 403) {

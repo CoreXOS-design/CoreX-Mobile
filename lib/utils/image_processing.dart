@@ -44,6 +44,13 @@ class ImageProcessResult {
   /// False when the file couldn't be decoded/written — caller should upload the
   /// original rather than drop the photo.
   final bool ok;
+
+  /// True when we declined to decode because the source exceeds
+  /// [ImageUploadConfig.maxDecodePixels]. Distinct from a plain failure: the
+  /// file is fine, we simply refused to spend the memory, and the original is
+  /// uploaded for the server to normalise and downscale.
+  final bool oversized;
+
   final PhotoOrientationSource source;
 
   /// The raw EXIF `Orientation` value as found, null when the tag was absent.
@@ -55,12 +62,14 @@ class ImageProcessResult {
 
   const ImageProcessResult({
     required this.ok,
+    this.oversized = false,
     this.source = PhotoOrientationSource.unknown,
     this.exifOrientation,
     this.appliedRotation = 0,
   });
 
   static const failed = ImageProcessResult(ok: false);
+  static const tooLarge = ImageProcessResult(ok: false, oversized: true);
 }
 
 /// Parameters for [processImageForUpload], sent to a background isolate.
@@ -75,11 +84,16 @@ class ImageProcessArgs {
   /// trusted fallback"; the pixels and the bad tag are then both left as-is.
   final int? fallbackRotation;
 
+  /// Refuse to decode a source larger than this many pixels. See
+  /// [ImageUploadConfig.maxDecodePixels].
+  final int maxDecodePixels;
+
   const ImageProcessArgs({
     required this.srcPath,
     required this.destPath,
     required this.maxEdge,
     required this.quality,
+    required this.maxDecodePixels,
     this.fallbackRotation,
   });
 }
@@ -120,6 +134,7 @@ Future<ImageProcessResult> processImageForUpload({
   int maxEdge = 2560,
   int quality = 82,
   int? fallbackRotation,
+  int maxDecodePixels = ImageUploadConfig.maxDecodePixels,
 }) {
   return compute(
     _processImageInIsolate,
@@ -128,6 +143,7 @@ Future<ImageProcessResult> processImageForUpload({
       destPath: destPath,
       maxEdge: maxEdge,
       quality: quality,
+      maxDecodePixels: maxDecodePixels,
       fallbackRotation: fallbackRotation,
     ),
   );
@@ -137,6 +153,16 @@ Future<ImageProcessResult> processImageForUpload({
 ImageProcessResult _processImageInIsolate(ImageProcessArgs a) {
   try {
     final bytes = File(a.srcPath).readAsBytesSync();
+
+    // Cheap header probe before committing to a full decode. The camera is
+    // opened at the highest resolution the device will give us (to match the
+    // aspect ratio and detail of a gallery pick), and on a few Android sensors
+    // that is large enough that materialising it would be a memory-kill risk.
+    // Reading the header costs a marker scan; decoding costs hundreds of MB.
+    final info = img.findDecoderForData(bytes)?.startDecode(bytes);
+    if (info != null && info.width * info.height > a.maxDecodePixels) {
+      return ImageProcessResult.tooLarge;
+    }
 
     // Read the tag from the raw bytes FIRST — decoding consumes it.
     final srcIfd = img.decodeJpgExif(bytes)?.imageIfd;
@@ -154,19 +180,24 @@ ImageProcessResult _processImageInIsolate(ImageProcessArgs a) {
     img.Image image;
     PhotoOrientationSource source;
     var applied = 0;
+    // The Orientation tag to write on the way out. Deliberately not applied
+    // until after the resize: copyResize bakes — and then *nulls* — any tag
+    // that isn't 1, which would silently discard the value the `unknown` branch
+    // exists to hand back.
+    int? finalOrientation;
 
     if (validExif) {
       // decodeImage already turned the pixels upright. Stamp the tag rather
       // than leave it absent, so an absent tag downstream unambiguously means
       // "nobody has vouched for these pixels".
       image = decoded;
-      image.exif.imageIfd.orientation = 1;
+      finalOrientation = 1;
       source = PhotoOrientationSource.exif;
       applied = _degreesForOrientation(rawOrientation);
     } else if (a.fallbackRotation != null) {
       final degrees = a.fallbackRotation! % 360;
       image = degrees == 0 ? decoded : img.copyRotate(decoded, angle: degrees);
-      image.exif.imageIfd.orientation = 1;
+      finalOrientation = 1;
       source = PhotoOrientationSource.sensor;
       applied = degrees;
     } else {
@@ -174,7 +205,7 @@ ImageProcessResult _processImageInIsolate(ImageProcessArgs a) {
       // original tag back (the decoder nulls it) so the server still sees
       // whatever the device wrote and can apply its own safety net.
       image = decoded;
-      image.exif.imageIfd.orientation = rawOrientation;
+      finalOrientation = rawOrientation;
       source = PhotoOrientationSource.unknown;
     }
 
@@ -186,6 +217,15 @@ ImageProcessResult _processImageInIsolate(ImageProcessArgs a) {
           ? img.copyResize(image, width: a.maxEdge)
           : img.copyResize(image, height: a.maxEdge);
     }
+
+    image.exif.imageIfd.orientation = finalOrientation;
+    // Make IFD0's own dimensions describe the frame we are about to write.
+    // Rotating and resizing carry the source EXIF block through untouched, so
+    // without this the file keeps declaring the size it had before we turned it
+    // — the "EXIF says 1280x720, frame is 720x1280" contradiction that made the
+    // sideways uploads impossible to reason about after the fact.
+    image.exif.imageIfd.imageWidth = image.width;
+    image.exif.imageIfd.imageHeight = image.height;
 
     File(a.destPath).writeAsBytesSync(img.encodeJpg(image, quality: a.quality));
     return ImageProcessResult(
@@ -249,6 +289,17 @@ Future<PreparedPhoto> prepareForUpload(CapturedPhoto photo) async {
       quality: ImageUploadConfig.quality,
       fallbackRotation: photo.sensorRotation,
     );
+    if (result.oversized) {
+      // Deliberate, not a failure: hand the original over and let the server's
+      // ImageOrientationNormalizer bake the EXIF and PropertyImageStorer cap it
+      // at the same 2560px. Costs uplink on this one photo; the alternative was
+      // several hundred MB of decode on the phone.
+      debugPrint(
+        'Image processing: source exceeds the decode budget — uploading the '
+        'original for the server to normalise (${photo.file.path})',
+      );
+      return PreparedPhoto(file: photo.file, isTemp: false);
+    }
     if (!result.ok) return PreparedPhoto(file: photo.file, isTemp: false);
 
     if (result.source == PhotoOrientationSource.unknown) {

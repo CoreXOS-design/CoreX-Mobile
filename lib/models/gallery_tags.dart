@@ -60,8 +60,26 @@ class GalleryTagsData {
 /// agency; the caller uses it to drive the `/ai-suggestions` poll batch.
 class UploadedImage {
   final String url;
+
+  /// The tag the server actually filed the photo under — **only meaningful
+  /// when [duplicate] is false**. See [duplicate].
   final String? roomTag;
   final int? analysisId;
 
-  const UploadedImage({required this.url, this.roomTag, this.analysisId});
+  /// True when the server recognised our `client_upload_id` and returned the
+  /// already-stored record instead of filing a second copy (HTTP 200, not 201).
+  ///
+  /// Matters because `MobilePropertyController::uploadImage`'s fast-path dedupe
+  /// answers with `room_tag: null` regardless of how the photo was actually
+  /// filed. Reading [roomTag] on a duplicate therefore reports "Unsorted" for a
+  /// correctly-tagged photo — which is precisely the shape a retried upload
+  /// takes, so any tag check must sit this response out rather than trust it.
+  final bool duplicate;
+
+  const UploadedImage({
+    required this.url,
+    this.roomTag,
+    this.analysisId,
+    this.duplicate = false,
+  });
 }

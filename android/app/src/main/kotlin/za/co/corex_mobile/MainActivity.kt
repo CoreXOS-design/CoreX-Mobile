@@ -9,5 +9,7 @@ class MainActivity : FlutterFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FileBridge.CHANNEL)
             .setMethodCallHandler(FileBridge(applicationContext))
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DeviceRotationBridge.CHANNEL)
+            .setMethodCallHandler(DeviceRotationBridge(this))
     }
 }

@@ -25,4 +25,21 @@ class ImageUploadConfig {
 
   /// JPEG quality (0-100). 82 is visually near-lossless for photos.
   static const int quality = 82;
+
+  /// Largest source image, in pixels, we will decode in-process.
+  ///
+  /// `package:image` has no scaled decode: it materialises the whole frame as
+  /// 3 bytes per pixel, on top of the coefficient blocks the JPEG decoder holds
+  /// while it works — call it ~6 bytes per source pixel at peak. 24 MP is
+  /// therefore around 150 MB, which a phone can carry; a 50 MP still (some
+  /// Android sensors expose one to CameraX without entering high-resolution
+  /// mode) would be 300 MB and is a plausible way to be killed for memory.
+  ///
+  /// The cap costs nothing in output quality. Everything above [maxEdge] is
+  /// discarded by the downscale anyway — 24 MP is already ~5x the pixels that
+  /// survive it — so this only ever bounds work we were going to throw away.
+  ///
+  /// Over the cap, [prepareForUpload] uploads the original untouched and lets
+  /// the server do the orientation bake and downscale it already performs.
+  static const int maxDecodePixels = 24 * 1000 * 1000;
 }

@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme.dart';
+import '../../utils/device_rotation.dart';
 import '../../utils/image_processing.dart';
 
 /// Full-screen, in-app camera with multi-capture, native lens switching
@@ -15,6 +17,14 @@ import '../../utils/image_processing.dart';
 /// OEM firmware bug that ships JPEGs with a missing or invalid (0) EXIF
 /// Orientation tag over sideways pixels — we never have to trust the file's own
 /// metadata to know which way is up.
+///
+/// ORIENTATION: this screen pins its UI to portrait, which on Android also
+/// blinds the `camera` plugin — it derives device orientation from the display,
+/// so it saw "upright" however the phone was tilted and wrote every landscape
+/// shot sideways into a portrait frame under EXIF Orientation 1. The physical
+/// orientation now comes from [DeviceRotation] (the accelerometer) and is
+/// applied per shot. iOS already reads the hardware orientation itself, so
+/// there we simply stop overriding it.
 class MultiCaptureCamera extends StatefulWidget {
   const MultiCaptureCamera({super.key});
 
@@ -53,10 +63,37 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   final List<CapturedPhoto> _captured = [];
   bool _reviewing = false;
 
-  /// True while capture is pinned to portraitUp. Only then does the sensor's
-  /// mounting angle equal the rotation needed to stand a photo upright, so this
-  /// gates whether we hand that reading on as an orientation fallback.
-  bool _captureLockedPortrait = false;
+  /// Resolution ladder for stills, most wanted first.
+  ///
+  /// [ResolutionPreset.high] is 1280x720 — under a megapixel, far too small for
+  /// listings, portal feeds and printed brochures, and the reason in-app photos
+  /// arrived at a quarter of the size of gallery-picked ones.
+  ///
+  /// [ResolutionPreset.max] rather than `ultraHigh`, because ultraHigh does not
+  /// actually reach parity: it is 3840x2160, i.e. **16:9**, so after the 2560px
+  /// long-edge cap a shot lands at 2560x1440 (3.7 MP) while the same scene
+  /// picked from the gallery — where image_picker fits the sensor's native 4:3
+  /// into a 2560 box — lands at 2560x1920 (4.9 MP). Same long edge, a third
+  /// less picture: in-app stills came out letterboxed against gallery ones, and
+  /// the vertical crop is exactly what you do not want on a room interior.
+  /// `max` asks for the largest frame the device offers, which is the sensor's
+  /// native aspect, so the two paths finally produce the same photo.
+  ///
+  /// The memory objection to `max` is handled where it belongs, at the decode:
+  /// see [ImageUploadConfig.maxDecodePixels]. It is also smaller than it looks
+  /// — camerax's ResolutionSelector never opts into the ultra-high-resolution
+  /// sensor mode (it sets no `setAllowedResolutionMode`), so a 200 MP phone
+  /// offers its binned still here, not its headline number.
+  ///
+  /// The lower rungs are for iOS, where a session preset can genuinely fail to
+  /// bind; camerax falls back internally (closestLowerThenHigher) and will
+  /// rarely reach them.
+  static const List<ResolutionPreset> _resolutionLadder = [
+    ResolutionPreset.max,
+    ResolutionPreset.ultraHigh,
+    ResolutionPreset.veryHigh,
+    ResolutionPreset.high,
+  ];
 
   // Digital zoom on the active controller.
   double _minZoom = 1.0;
@@ -89,6 +126,10 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
     ]);
+    // The portrait lock above is what hides the phone's real orientation from
+    // the camera plugin on Android, so the accelerometer has to be listening
+    // for as long as this screen can take a photo.
+    DeviceRotation.start();
     _initCamera();
   }
 
@@ -96,6 +137,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _controller?.dispose();
+    DeviceRotation.stop();
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     super.dispose();
   }
@@ -103,6 +145,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive) {
+      DeviceRotation.stop();
       final ctrl = _controller;
       if (ctrl == null || !ctrl.value.isInitialized) return;
       // Show a spinner (not a dead preview) and release the device.
@@ -110,6 +153,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
       if (mounted) setState(() => _initializing = true);
       ctrl.dispose();
     } else if (state == AppLifecycleState.resumed) {
+      DeviceRotation.start();
       // Only bring the camera back if we actually let it go.
       if (_controller == null && !_initInFlight) _initCamera();
     }
@@ -117,49 +161,91 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
 
   @override
   void didChangeMetrics() {
-    // Covers rotation on iPad, where the portrait lock requested in initState
-    // is ignored.
     final ctrl = _controller;
     if (ctrl != null && ctrl.value.isInitialized) {
       _applyCaptureOrientation(ctrl);
     }
   }
 
-  /// Keeps saved photos upright on every device.
+  /// Hands orientation back to whoever actually knows which way the phone is
+  /// pointing, once per controller.
   ///
-  /// Phones are pinned portrait by initState, so pinning capture to portraitUp
-  /// matches what the user sees. iPad ignores that lock — forcing portraitUp
-  /// there would write every landscape photo sideways, so hand orientation
-  /// back to the plugin and let it follow the device.
+  /// This used to pin capture to portraitUp whenever the UI was portrait — which
+  /// initState guarantees on every phone. That is the sideways-photo bug: a
+  /// landscape scene written into a portrait frame with EXIF Orientation 1, the
+  /// file insisting it was upright while the picture lay on its side.
+  ///
+  /// Unlocking is the whole fix on iOS, where the plugin applies
+  /// `UIDevice.current.orientation` — the real hardware orientation — at
+  /// capture. On Android unlocking only falls back to the display rotation,
+  /// which the same portrait lock freezes, so there [_pinCaptureOrientation]
+  /// sets the true orientation immediately before each shot instead.
   Future<void> _applyCaptureOrientation(CameraController ctrl) async {
-    if (!mounted) return;
-    final portrait = MediaQuery.orientationOf(context) == Orientation.portrait;
+    // Never unlock between _pinCaptureOrientation and takePicture. didChangeMetrics
+    // fires for insets and system-UI changes too, and landing here mid-shot would
+    // drop the lock we just set — handing that one photo back to the frozen
+    // display rotation, which is the bug.
+    if (_capturing) return;
     try {
-      if (portrait) {
-        await ctrl.lockCaptureOrientation(DeviceOrientation.portraitUp);
-      } else {
-        await ctrl.unlockCaptureOrientation();
-      }
-      _captureLockedPortrait = portrait;
+      await ctrl.unlockCaptureOrientation();
     } catch (_) {
-      // Couldn't pin the orientation — the sensor reading no longer describes
-      // the capture, so stop offering it as a fallback.
-      _captureLockedPortrait = false;
+      // Nothing to unlock, or the controller went away mid-call.
+    }
+  }
+
+  /// Pins the next capture to the way the phone is physically being held, and
+  /// returns that rotation in clockwise degrees.
+  ///
+  /// Null means "the platform is already handling it" (iOS) or "we don't know"
+  /// (sensor silent, device flat, bridge unavailable) — and a null must never be
+  /// rounded to zero, because "assume upright" is exactly what shipped the
+  /// sideways photos.
+  Future<int?> _pinCaptureOrientation(CameraController ctrl) async {
+    if (!Platform.isAndroid) return null;
+    final reading = await DeviceRotation.read();
+    if (reading == null) return null;
+    try {
+      await ctrl.lockCaptureOrientation(reading.orientation);
+      return reading.degreesClockwise;
+    } catch (_) {
+      return null;
     }
   }
 
   /// Clockwise degrees needed to stand this device's raw sensor output upright,
   /// or null when we can't say for certain and must fall back to the file's EXIF.
   ///
-  /// Android reports `sensorOrientation` as the sensor's mounting angle relative
-  /// to the device's natural (portrait) orientation, so with capture pinned to
-  /// portraitUp it *is* the correction. Restricted to Android because that's
-  /// where the semantics are defined and where the defect lives; iOS writes a
-  /// correct EXIF tag, which the processing step already honours.
-  int? _sensorRotationForCapture(CameraController ctrl) {
-    if (!Platform.isAndroid || !_captureLockedPortrait) return null;
-    final degrees = ctrl.description.sensorOrientation % 360;
-    return degrees < 0 ? degrees + 360 : degrees;
+  /// Only used when a file's own EXIF Orientation is missing or invalid — the
+  /// HUAWEI/HONOR firmware defect. It is Android's own JPEG-orientation formula:
+  /// the sensor's mounting angle relative to the device's natural orientation,
+  /// plus how far the device itself is turned (minus, for a front camera, which
+  /// counter-rotates). [deviceRotation] of null means the capture orientation is
+  /// not ours to describe, so we offer nothing rather than a guess.
+  int? _sensorRotationForCapture(CameraController ctrl, int? deviceRotation) {
+    if (!Platform.isAndroid || deviceRotation == null) return null;
+    final sensor = ctrl.description.sensorOrientation;
+    final front =
+        ctrl.description.lensDirection == CameraLensDirection.front;
+    final total = front ? sensor - deviceRotation : sensor + deviceRotation;
+    return ((total % 360) + 360) % 360;
+  }
+
+  /// Opens [camera] at the best resolution it will actually bind at.
+  ///
+  /// Returns an initialised controller, or null when every preset failed.
+  Future<CameraController?> _openController(CameraDescription camera) async {
+    for (final preset in _resolutionLadder) {
+      final ctrl = CameraController(camera, preset, enableAudio: false);
+      try {
+        await ctrl.initialize();
+        return ctrl;
+      } catch (_) {
+        try {
+          await ctrl.dispose();
+        } catch (_) {/* already gone */}
+      }
+    }
+    return null;
   }
 
   Future<void> _initCamera() async {
@@ -229,12 +315,24 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
     _controller = null;
     if (mounted) setState(() => _initializing = true);
     await old?.dispose();
-    final ctrl =
-        CameraController(preset.camera, ResolutionPreset.high, enableAudio: false);
+    final ctrl = await _openController(preset.camera);
+    if (ctrl == null) {
+      if (!mounted) return;
+      setState(() {
+        _initializing = false;
+        _error = 'Could not start camera';
+      });
+      return;
+    }
+    // The screen may have closed while the ladder was binding. dispose() has
+    // already run against a null _controller, so assigning now would strand an
+    // open camera device that nothing will ever release.
+    if (!mounted) {
+      await ctrl.dispose();
+      return;
+    }
     _controller = ctrl;
     try {
-      await ctrl.initialize();
-      if (!mounted) return;
       await _applyCaptureOrientation(ctrl);
       final minZ = await ctrl.getMinZoomLevel();
       final maxZ = await ctrl.getMaxZoomLevel();
@@ -380,12 +478,24 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
     _controller = null;
     // Release the device before re-opening on the new lens.
     await oldCtrl?.dispose();
-    final newCtrl =
-        CameraController(target.camera, ResolutionPreset.high, enableAudio: false);
+    final newCtrl = await _openController(target.camera);
+    if (newCtrl == null) {
+      _initInFlight = false;
+      if (!mounted) return;
+      setState(() {
+        _initializing = false;
+        _error = 'Could not switch lens';
+      });
+      return;
+    }
+    // See _startLens: assigning after dispose() has run strands the device.
+    if (!mounted) {
+      _initInFlight = false;
+      await newCtrl.dispose();
+      return;
+    }
     _controller = newCtrl;
     try {
-      await newCtrl.initialize();
-      if (!mounted) return;
       await _applyCaptureOrientation(newCtrl);
       final minZ = await newCtrl.getMinZoomLevel();
       final maxZ = await newCtrl.getMaxZoomLevel();
@@ -428,11 +538,24 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
       _controller = null;
       // Release the back camera before opening the front one.
       await oldCtrl?.dispose();
-      final ctrl =
-          CameraController(front.first, ResolutionPreset.high, enableAudio: false);
+      final ctrl = await _openController(front.first);
+      if (ctrl == null) {
+        _initInFlight = false;
+        if (!mounted) return;
+        setState(() {
+          _initializing = false;
+          _error = 'Could not start front camera';
+        });
+        return;
+      }
+      // See _startLens: assigning after dispose() has run strands the device.
+      if (!mounted) {
+        _initInFlight = false;
+        await ctrl.dispose();
+        return;
+      }
       _controller = ctrl;
       try {
-        await ctrl.initialize();
         await _applyCaptureOrientation(ctrl);
         final minZ = await ctrl.getMinZoomLevel();
         final maxZ = await ctrl.getMaxZoomLevel();
@@ -514,12 +637,36 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
     if (ctrl == null || !ctrl.value.isInitialized || _capturing) return;
     setState(() => _capturing = true);
     try {
+      // Read and apply the physical orientation per shot, not per controller —
+      // the user turns the phone between photos, and on Android nothing else
+      // will notice.
+      final deviceRotation = await _pinCaptureOrientation(ctrl);
       final xFile = await ctrl.takePicture();
+      if (Platform.isAndroid && deviceRotation == null) {
+        // Not benign, and not debug-only: with no reading we cannot lock, so
+        // CameraX falls back to getDefaultDisplayRotation() — the value the
+        // portrait lock freezes at 0. That is exactly the sideways-photo bug,
+        // and _sensorRotationForCapture offers nothing to rescue it downstream.
+        // Only reachable when the phone has been flat since the screen opened.
+        debugPrint('Capture: device rotation unknown (accelerometer has not '
+            'reported) — photo may be written sideways');
+      }
+      if (kDebugMode) {
+        // The tilt is knowable only here, at capture. Say what we read and what
+        // we did with it, so a sideways photo can be traced to the reading that
+        // produced it instead of guessed at from the file afterwards.
+        debugPrint(
+          'Capture: device rotation '
+          '${deviceRotation == null ? 'unknown (platform-handled)' : '$deviceRotation° CW'}'
+          ', sensor ${ctrl.description.sensorOrientation}°'
+          ', preview ${ctrl.value.previewSize}',
+        );
+      }
       if (!mounted) return;
       setState(() {
         _captured.add(CapturedPhoto(
           File(xFile.path),
-          sensorRotation: _sensorRotationForCapture(ctrl),
+          sensorRotation: _sensorRotationForCapture(ctrl, deviceRotation),
         ));
         _capturing = false;
       });

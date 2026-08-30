@@ -81,6 +81,10 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   /// Set when a stale-tag 422 aborts the run so the summary is suppressed.
   bool _cancelBatch = false;
 
+  /// Photos the server filed under something other than the tag we sent, as
+  /// "sent → filed" strings. Populated from the 201 body, reset per batch.
+  final List<String> _tagMismatches = [];
+
   /// True while picked photos are being downscaled/orientation-baked.
   bool _preparing = false;
 
@@ -193,6 +197,53 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     }
   }
 
+  /// Selects the tag stamped on photos added from here on, and re-tags any
+  /// already-queued photo whose stored tag the property no longer offers.
+  ///
+  /// The re-tag half is what makes the stale-tag prompt actionable. A photo
+  /// carries the tag it was queued under (see [_enqueueAll]) and nothing at
+  /// drain time may overwrite it, or a chip selection that moves as the agent
+  /// works through the house files older photos in the wrong room. But when the
+  /// server rejects a tag as no longer on the property, that photo's stored tag
+  /// is unusable: every retry re-sends it, 422s again, and re-prompts — a loop
+  /// with no exit but deleting the photo, because nothing else in the sheet
+  /// writes [PendingUpload.roomTag] after enqueue.
+  ///
+  /// Re-tagging exactly the photos whose tag is gone breaks that loop and
+  /// cannot disturb a photo that is correctly filed.
+  Future<void> _selectTag(String? tag) async {
+    setState(() => _selectedTag = tag);
+    // Not loaded yet = no basis to call anything stale. A loaded-but-EMPTY list
+    // is different: it means the property has lost every space, so every tagged
+    // photo in the queue really is unfilable and needs moving to Unsorted.
+    final data = _tags;
+    if (data == null) return;
+    final available = data.availableTags;
+    // Never re-tag a photo mid-request: [_uploadOne] captured its tag before
+    // the attempt, so changing it here would leave the queue item disagreeing
+    // with what is actually on the wire.
+    final stale = _items
+        .where((e) =>
+            e.roomTag != null &&
+            !available.contains(e.roomTag) &&
+            !_inFlight.contains(e.id))
+        .toList();
+    if (stale.isEmpty) return;
+    for (final item in stale) {
+      item.roomTag = tag;
+      await UploadQueue.instance.setRoomTag(item.id, tag);
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// True when [item] is queued under a tag the property no longer offers, so
+  /// uploading it as-is can only 422. Surfaced on the thumbnail.
+  bool _isStaleTag(PendingUpload item) {
+    final data = _tags;
+    if (data == null || item.roomTag == null) return false;
+    return !data.availableTags.contains(item.roomTag);
+  }
+
   Future<void> _pickFromGallery() async {
     try {
       final picked = await _picker.pickMultiImage(
@@ -253,6 +304,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
       _cancelBatch = false;
       _uploadedCount = 0;
       _targetCount = items.length;
+      _tagMismatches.clear();
     });
 
     final queue = List<PendingUpload>.from(items);
@@ -279,18 +331,26 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   /// backoff. Retries network errors, timeouts and transient non-2xx; treats
   /// 403/413 (and a stale-tag 422) as terminal.
   Future<void> _uploadOne(PendingUpload item) async {
-    if (item.roomTag != _selectedTag) {
-      item.roomTag = _selectedTag;
-      await UploadQueue.instance.setRoomTag(item.id, _selectedTag);
-    }
+    // The tag is whatever was selected when THIS photo was queued
+    // (see [_enqueueAll]). Nothing at drain time may overwrite it: the chip
+    // selection moves as the agent works through the house, and stamping the
+    // current selection onto an older photo files it under the wrong room —
+    // or, when the selection has been cleared, under no room at all.
+    final String? sentTag = item.roomTag;
     if (mounted) setState(() => _inFlight.add(item.id));
     try {
       for (var attempt = 1; attempt <= _maxAttempts; attempt++) {
         if (_cancelBatch) return;
         try {
-          await _api.uploadPropertyImage(
-              widget.propertyId, item.file, _selectedTag,
+          // Retries re-send the same [sentTag], so a retry can never land the
+          // photo under a different room than the first attempt.
+          final result = await _api.uploadPropertyImage(
+              widget.propertyId, item.file, sentTag,
               clientId: item.id);
+          // The 201 reports the tag the server ACTUALLY filed the photo under
+          // (null = unsorted). That is the only authoritative answer, so check
+          // it rather than assuming the request was honoured.
+          _verifyFiledTag(sent: sentTag, result: result);
           await UploadQueue.instance.remove(item.id);
           if (!mounted) return;
           setState(() {
@@ -310,10 +370,17 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                 .withAvailable(e.availableTags);
             _selectedTag = null;
           });
-          _showSnack('Some tags are no longer available — please re-select');
+          _showSnack('Some tags are no longer available — pick a tag to '
+              're-file those photos');
           return;
         } on ApiException catch (e) {
-          final terminal = e.statusCode == 403 || e.statusCode == 413;
+          // A 422 reaching here is a validation failure on the FILE — a tag 422
+          // arrives as TagValidationException and is caught above. The same
+          // bytes cannot become valid on a second attempt, so retrying only
+          // delays the failure and burns the user's uplink three times over.
+          final terminal = e.statusCode == 403 ||
+              e.statusCode == 413 ||
+              e.statusCode == 422;
           if (terminal || attempt >= _maxAttempts) {
             await UploadQueue.instance.markFailed(item.id, e.message);
             if (mounted) setState(() {});
@@ -337,6 +404,36 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     }
   }
 
+  /// Compares the tag we posted against the tag the server says it filed the
+  /// photo under, from the 201 body.
+  ///
+  /// The server matches case- and whitespace-insensitively and stores the
+  /// library's canonical casing, so "bedroom 2" coming back as "Bedroom 2" is
+  /// a match, not a drift. Anything else means the photo is not where the
+  /// agent put it — most importantly `filed == null`, which is the server
+  /// saying "unsorted" no matter what the UI showed.
+  ///
+  /// Two responses carry no usable answer and must be sat out rather than read
+  /// as "unsorted", or a correctly-filed photo gets reported as misfiled:
+  ///
+  ///  * a dedupe hit ([UploadedImage.duplicate]) — the server's fast path
+  ///    answers `room_tag: null` whatever the photo was really filed under, and
+  ///    that is the shape EVERY retried upload takes, so this would have cried
+  ///    wolf on exactly the batches that had a rough time on the network;
+  ///  * an unparseable body (empty [UploadedImage.url]) — we know nothing.
+  void _verifyFiledTag(
+      {required String? sent, required UploadedImage result}) {
+    if (result.duplicate || result.url.isEmpty) return;
+    final filed = result.roomTag;
+    String norm(String? s) => (s ?? '').trim().toLowerCase();
+    if (norm(sent) == norm(filed)) return;
+    _tagMismatches.add(
+      '${sent ?? "no tag"} → ${filed ?? "Unsorted"}',
+    );
+    debugPrint('Upload tag mismatch: sent room_tag=${sent ?? "(omitted)"} '
+        'but server filed it under ${filed ?? "(unsorted)"}');
+  }
+
   /// Exponential backoff (~1s, 2s, 4s) with jitter to avoid a retry stampede.
   Future<void> _backoff(int attempt) async {
     final base = 1000 * (1 << (attempt - 1));
@@ -353,11 +450,26 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     if (_cancelBatch) return; // the re-select prompt was already shown
     final failed = _failed.length;
     final pending = _pending.length;
+    // A photo the server filed somewhere else is on the server but in the
+    // wrong place — the upload "succeeded", so nothing else here would say so.
+    // Folded into the success line rather than shown as a second snack: two
+    // queued snacks make the user wait out a "3 photos uploaded" to read the
+    // warning, and the warning is the half worth acting on.
+    final n = _tagMismatches.length;
+    final mismatch = n == 0
+        ? null
+        : n == 1
+            ? 'filed as ${_tagMismatches.first.split(' → ').last} — check the gallery'
+            : '$n filed under a different room — check the gallery';
     if (failed == 0 && pending == 0 && _uploadedCount > 0) {
-      _showSnack(
-          '$_uploadedCount photo${_uploadedCount == 1 ? '' : 's'} uploaded');
+      final uploaded =
+          '$_uploadedCount photo${_uploadedCount == 1 ? '' : 's'} uploaded';
+      _showSnack(mismatch == null ? uploaded : '$uploaded, $mismatch');
       Navigator.of(context).pop(true);
-    } else if (failed > 0) {
+    } else if (mismatch != null) {
+      _showSnack('Some photos were $mismatch');
+    }
+    if (failed > 0) {
       _showSnack(
           "$failed photo${failed == 1 ? '' : 's'} didn't upload — tap Retry below");
     }
@@ -489,13 +601,36 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   Widget _buildTagSection() {
     final tags = _tags;
     if (tags == null || tags.availableTags.isEmpty) {
-      // No spaces yet → don't offer any tag picker. Uploads will be untagged.
+      // No spaces → nothing to pick between. Still offer the "No tag" chip if
+      // anything queued is carrying a tag the property no longer has: that
+      // photo can only 422, and without a chip to tap there is no way to
+      // re-file it and no way to finish the batch but deleting it.
+      final stranded = _items.any(_isStaleTag);
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Text(
-          'This property has no spaces yet — photos will upload to Unsorted.',
-          style: TextStyle(
-              fontSize: 13, color: AppTheme.textSecondary(context)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              stranded
+                  ? 'This property has no spaces left — move these photos to '
+                      'Unsorted to upload them.'
+                  : 'This property has no spaces yet — photos will upload to Unsorted.',
+              style: TextStyle(
+                  fontSize: 13, color: AppTheme.textSecondary(context)),
+            ),
+            if (stranded) ...[
+              const SizedBox(height: 8),
+              _buildTagChip(
+                label: 'Move to Unsorted',
+                // No count: the chip is an action here, not a destination, and
+                // "Move to Unsorted · 12" reads as a quantity being moved.
+                count: 0,
+                selected: false,
+                onTap: () => _selectTag(null),
+              ),
+            ],
+          ],
         ),
       );
     }
@@ -503,8 +638,14 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Deliberately future-tense. The tag is stamped on each photo as it is
+        // added, so a chip tapped after photos are already queued does NOT
+        // move them — the badge on each thumbnail is what says where each one
+        // is going. Labelling this "Tag this photo" invited exactly the wrong
+        // order of operations: queue ten photos, pick a room, upload ten
+        // untagged photos with nothing anywhere saying so.
         Text(
-          'Tag this photo',
+          'Tag for photos you add next',
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
@@ -520,13 +661,13 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                   label: t,
                   count: tags.tagCounts[t] ?? 0,
                   selected: _selectedTag == t,
-                  onTap: () => setState(() => _selectedTag = t),
+                  onTap: () => _selectTag(t),
                 )),
             _buildTagChip(
               label: 'No tag',
               count: tags.untaggedCount,
               selected: _selectedTag == null,
-              onTap: () => setState(() => _selectedTag = null),
+              onTap: () => _selectTag(null),
             ),
           ],
         ),
@@ -657,12 +798,46 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
             itemBuilder: (_, i) {
               final item = pending[i];
               final inFlight = _inFlight.contains(item.id);
+              final stale = _isStaleTag(item);
               return Stack(
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(AppTheme.radius),
                     child: Image.file(item.file,
                         width: 90, height: 90, fit: BoxFit.cover),
+                  ),
+                  // Each photo goes up under the tag it was queued with, which
+                  // is not necessarily the chip currently lit. Show it per
+                  // photo, or the sheet gives no way to tell where anything is
+                  // headed. Red = a tag the property no longer offers; tap any
+                  // chip to re-file those.
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: stale
+                            ? Colors.redAccent.withValues(alpha: 0.9)
+                            : Colors.black54,
+                        borderRadius: const BorderRadius.only(
+                          bottomLeft: Radius.circular(AppTheme.radius),
+                          bottomRight: Radius.circular(AppTheme.radius),
+                        ),
+                      ),
+                      child: Text(
+                        item.roomTag ?? 'Unsorted',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white),
+                      ),
+                    ),
                   ),
                   if (inFlight)
                     Positioned.fill(

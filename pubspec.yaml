@@ -1,7 +1,7 @@
 name: corex_mobile
 description: CoreX OS - Home Finders Coastal mobile app.
 publish_to: 'none'
-version: 1.0.10+20
+version: 1.0.10+21
 
 environment:
   sdk: ^3.6.0
