@@ -6,7 +6,7 @@
 /// means the About screen and the device-registration payload lie about which
 /// build a user is on.
 const String kAppVersion = '1.0.10';
-const int kAppBuildNumber = 20;
+const int kAppBuildNumber = 21;
 
-/// e.g. `1.0.10 (17)` — for surfaces that want the build number too.
+/// e.g. `1.0.10 (21)` — for surfaces that want the build number too.
 const String kAppVersionFull = '$kAppVersion ($kAppBuildNumber)';
