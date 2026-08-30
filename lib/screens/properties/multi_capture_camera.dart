@@ -180,6 +180,17 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   /// capture. On Android unlocking only falls back to the display rotation,
   /// which the same portrait lock freezes, so there [_pinCaptureOrientation]
   /// sets the true orientation immediately before each shot instead.
+  /// Drops the capture-orientation lock. Separate from [_applyCaptureOrientation]
+  /// precisely because that one refuses to run mid-capture — this is the call
+  /// that ends a capture, and it must not be blocked by that guard.
+  Future<void> _releaseCaptureOrientation(CameraController ctrl) async {
+    try {
+      await ctrl.unlockCaptureOrientation();
+    } catch (_) {
+      // Controller already gone; nothing to restore.
+    }
+  }
+
   Future<void> _applyCaptureOrientation(CameraController ctrl) async {
     // Never unlock between _pinCaptureOrientation and takePicture. didChangeMetrics
     // fires for insets and system-UI changes too, and landing here mid-shot would
@@ -641,7 +652,19 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
       // the user turns the phone between photos, and on Android nothing else
       // will notice.
       final deviceRotation = await _pinCaptureOrientation(ctrl);
-      final xFile = await ctrl.takePicture();
+      final XFile xFile;
+      try {
+        xFile = await ctrl.takePicture();
+      } finally {
+        // Release it immediately, and on the failure path too. `CameraPreview`
+        // renders itself through `lockedCaptureOrientation` when that is set
+        // (see its `_getApplicableOrientation`), so a lock left in place turns
+        // the viewfinder a quarter turn and flips its aspect ratio — the
+        // "taking a photo rotates the camera to portrait" report. The lock has
+        // to exist across takePicture, so it is held for the shortest possible
+        // window and the preview is masked meanwhile (see the build method).
+        await _releaseCaptureOrientation(ctrl);
+      }
       if (Platform.isAndroid && deviceRotation == null) {
         // Not benign, and not debug-only: with no reading we cannot lock, so
         // CameraX falls back to getDefaultDisplayRotation() — the value the
@@ -786,6 +809,18 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                                   ),
                                 ),
                               ),
+                              // Shutter mask. Cosmetic in the way a shutter is,
+                              // but it is doing real work: capture has to hold
+                              // a capture-orientation lock, and CameraPreview
+                              // re-renders itself a quarter turn round while
+                              // that lock exists. Covering the viewfinder for
+                              // the few hundred ms it is held is what stops
+                              // that showing up as the preview spinning on
+                              // every shot.
+                              if (_capturing)
+                                const Positioned.fill(
+                                  child: ColoredBox(color: Colors.black),
+                                ),
                               Positioned(
                                 bottom: 16,
                                 child: Column(
