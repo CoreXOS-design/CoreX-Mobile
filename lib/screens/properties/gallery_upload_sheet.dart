@@ -132,14 +132,17 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     if (mounted) setState(() {});
   }
 
-  /// Downscale + orientation-bake each picked photo, then add it to the durable
-  /// queue. Processing runs in a background isolate so the UI stays responsive;
-  /// if it fails (e.g. an undecodable format) we enqueue the original rather
-  /// than drop the photo.
+  /// Puts each picked photo straight into the durable queue, raw.
   ///
-  /// The bake has to happen here, before the photo becomes a queue item: the
-  /// server's thumbnailer drops EXIF without rotating pixels, so anything that
-  /// reaches it leaning on an orientation tag lands sideways on the web.
+  /// The downscale and orientation bake used to happen *here*, ahead of the
+  /// enqueue — which meant a batch of forty spent several seconds being
+  /// decoded before a single one of them was durable, and anything that
+  /// interrupted the loop took the rest with it. The bake now runs in
+  /// [UploadService] against bytes the queue already owns, so the only thing
+  /// standing between a picked photo and durability is a file copy. The
+  /// drainer still waits for the bake before uploading — see
+  /// [PendingUpload.needsProcessing] for why that gate is about the files
+  /// carrying no usable EXIF, not about the server.
   ///
   /// [_selectedTag] is read *here*, per photo, and then belongs to the item.
   /// This is the only moment the on-screen selection and the photo's room are
@@ -149,16 +152,19 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     if (mounted) setState(() => _preparing = true);
     var skipped = 0;
     for (final photo in photos) {
-      final prepared = await prepareForUpload(photo);
       try {
         await _queue.enqueue(
           propertyId: widget.propertyId,
-          source: prepared.file,
+          source: photo.file,
           roomTag: _selectedTag,
           // The id the photo has carried since the shutter, so the `queued`
           // event lands on the same photo the `captured` event described.
           clientUploadId: photo.uploadId,
           batchId: _batchId,
+          needsProcessing: true,
+          // Null for every `image_picker` path — those photos carry no
+          // capture-time reading and must fall back to their own EXIF tag.
+          sensorRotation: photo.sensorRotation,
         );
       } catch (e) {
         // Couldn't copy into durable storage (e.g. storage full). Count it so
@@ -174,15 +180,12 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           batchId: _batchId,
           meta: {'reason': 'enqueue_failed', 'error': e.toString()},
         );
-      } finally {
-        // The queue copied it into durable storage; drop the temp file.
-        try {
-          if (prepared.isTemp && await prepared.file.exists()) {
-            await prepared.file.delete();
-          }
-        } catch (_) {}
       }
-      if (!mounted) return;
+      // Deliberately no `if (!mounted) return` here. This loop used to abandon
+      // every remaining photo the moment the sheet went away, which meant
+      // dismissing it mid-batch silently destroyed the rest — the same class
+      // of bug as the camera's flush-on-close. The photos are the user's;
+      // finishing the batch costs nothing and losing it costs everything.
     }
     if (mounted) setState(() => _preparing = false);
     if (skipped > 0) {
@@ -302,39 +305,53 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
 
   Future<void> _pickFromBurst() async {
     try {
-      // The camera files its own `captured` events, at the shutter — the only
-      // place they mean anything. It needs the property and the shoot to do
-      // that; nothing else about that screen changes.
-      final files = await MultiCaptureCamera.open(
+      // The camera queues each shot itself, at the shutter, and reports it
+      // there too. Nothing comes back to be enqueued here: this sheet used to
+      // receive the whole burst on Done and walk it into the queue, and on
+      // 2026-08-31 that path lost 41 of 47 photos. The room tag is passed as a
+      // callback so every shot is stamped with the selection live at the
+      // moment it was taken.
+      await MultiCaptureCamera.open(
         context,
-        propertyId: widget.propertyId,
-        batchId: _batchId,
+        target: CaptureTarget(
+          propertyId: widget.propertyId,
+          batchId: _batchId,
+          roomTag: () => _selectedTag,
+        ),
       );
-      if (files.isEmpty || !mounted) return;
-      await _enqueueAll(files);
+      if (!mounted) return;
+      // The photos are already queued and already uploading; just catch the
+      // sheet's own view up with them.
+      await _loadQueue();
     } catch (_) {/* user cancelled, ignore */}
   }
 
   /// The agent throwing a queued photo away, from the pending grid or from the
   /// failed list.
   ///
-  /// Reported here rather than inside [UploadQueue.remove], which is also how
-  /// a photo leaves the queue after it has *landed*. Same call, opposite
-  /// meanings — and a report that cannot tell "the agent deleted it" from "the
-  /// server has it" is worse than no report.
+  /// Routed through [UploadService.recallPhoto] rather than removing the queue
+  /// row directly, for the same reason the camera's review grid is: a photo
+  /// that has been on the wire may have landed even when it looks like it
+  /// failed — a timeout is precisely the case where the bytes arrived and the
+  /// answer did not. Discard has to mean gone from the property, not gone from
+  /// this list.
+  ///
+  /// That also puts the `dropped` event on one path. Reporting it inside
+  /// [UploadQueue.remove] would not work: that call is also how a photo leaves
+  /// the queue after it has *landed*, and a report that cannot tell "the agent
+  /// deleted it" from "the server has it" is worse than no report.
   Future<void> _discard(PendingUpload item) async {
-    PhotoTelemetry.instance.record(
+    final result = await _uploader.recallPhoto(
       propertyId: item.propertyId,
       clientUploadId: item.clientUploadId,
-      phase: PhotoPhase.dropped,
+      queueItemId: item.id,
       batchId: item.batchId,
-      meta: {
-        'reason': 'discarded_by_agent',
-        'attempts': item.attempts,
-        if (item.error != null) 'error': item.error,
-      },
+      reason: 'discarded_by_agent',
     );
-    await _queue.remove(item.id);
+    if (result.isGone) return;
+    _showSnack(result.outcome == PhotoRecall.refused
+        ? (result.message ?? "Your account can't delete listing photos")
+        : "Couldn't remove that photo — check your connection and try again");
   }
 
   /// Files a `captured` event per photo for the `image_picker` paths, which

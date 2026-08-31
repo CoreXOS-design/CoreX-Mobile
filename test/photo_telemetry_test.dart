@@ -2,8 +2,10 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:corex_mobile/models/gallery_tags.dart';
 import 'package:corex_mobile/services/photo_telemetry.dart';
 import 'package:corex_mobile/services/upload_queue.dart';
+import 'package:corex_mobile/services/upload_service.dart';
 import 'package:corex_mobile/utils/image_processing.dart';
 
 /// The wire contract behind the 2026-08-31 incident.
@@ -69,6 +71,133 @@ void main() {
 
       expect(PendingUpload.fromJson(item.toJson()).clientUploadId,
           photo.uploadId);
+    });
+  });
+
+  group('a photo queued at the shutter', () {
+    test('persists the raw-and-unbaked state and the sensor reading', () {
+      // The 2026-08-31 shape: 47 captured, 6 queued. The queue row is now
+      // written before the downscale/orientation bake, so both facts the bake
+      // will need have to survive a kill — including the tilt, which is
+      // readable only at capture and exists nowhere else once the camera is
+      // gone.
+      final item = PendingUpload(
+        id: 'shot_1',
+        propertyId: 15753,
+        path: '/data/app/upload_queue/shot_1.jpg',
+        clientUploadId: '1788170293929473_3',
+        batchId: 'shoot-8f21',
+        roomTag: 'Kitchen',
+        needsProcessing: true,
+        sensorRotation: 90,
+        createdAt: 1788170293929,
+      );
+
+      final back = PendingUpload.fromJson(item.toJson());
+
+      expect(back.needsProcessing, isTrue);
+      expect(back.sensorRotation, 90);
+      expect(back.roomTag, 'Kitchen');
+    });
+
+    test('a row written before this existed is treated as already baked', () {
+      // Photos sitting in a queue when this build installs were processed
+      // before they were ever persisted. Reading absent as "needs processing"
+      // would re-bake an already-baked photo; reading it as "done" is both
+      // correct and the safe direction.
+      final legacy = PendingUpload.fromJson({
+        'id': 'old_1',
+        'property_id': 42,
+        'path': '/tmp/old.jpg',
+        'client_upload_id': 'old_1',
+        'room_tag': 'Kitchen',
+        'state': 'pending',
+        'created_at': 1756382773000,
+      });
+
+      expect(legacy.needsProcessing, isFalse);
+      expect(legacy.sensorRotation, isNull);
+    });
+
+    test('an unknown tilt stays unknown rather than becoming zero', () {
+      // Every image_picker path. A null reading means "trust the file's own
+      // EXIF"; a 0 would mean "the device says upright" and would suppress the
+      // fallback the bake depends on.
+      final item = PendingUpload(
+        id: 'pick_1',
+        propertyId: 1,
+        path: '/tmp/p.jpg',
+        clientUploadId: 'pick_1',
+        roomTag: null,
+        needsProcessing: true,
+        sensorRotation: null,
+        createdAt: 1,
+      );
+
+      expect(PendingUpload.fromJson(item.toJson()).sensorRotation, isNull);
+    });
+  });
+
+  group('recalling a deleted photo', () {
+    test('a photo never on the wire is gone once the queue row goes', () {
+      // attempts is incremented only when a request is actually being made,
+      // so zero is the one state where removing the row is the whole job and
+      // no server delete is warranted.
+      final fresh = PendingUpload(
+        id: 'shot_1',
+        propertyId: 15753,
+        path: '/tmp/a.jpg',
+        clientUploadId: '1788176218829168_1',
+        roomTag: null,
+        needsProcessing: true,
+        createdAt: 1,
+      );
+
+      expect(fresh.attempts, 0);
+    });
+
+    test('every recall outcome that means "gone" is treated as gone', () {
+      // notOnServer is an outcome, not a failure: nothing matched because the
+      // photo never landed or someone removed it first. Reading it as failure
+      // would nag the agent about a photo that is already not there.
+      const gone = <PhotoRecall>[
+        PhotoRecall.neverSent,
+        PhotoRecall.deletedFromServer,
+        PhotoRecall.notOnServer,
+      ];
+      for (final outcome in gone) {
+        expect(PhotoRecallResult(outcome, null).isGone, isTrue,
+            reason: '$outcome should count as gone');
+      }
+      // These two leave the photo on the property, so the UI must put it back
+      // rather than imply it was deleted.
+      expect(const PhotoRecallResult(PhotoRecall.refused, null).isGone,
+          isFalse);
+      expect(const PhotoRecallResult(PhotoRecall.failed, null).isGone, isFalse);
+    });
+
+    test('a 404 body still parses as a real outcome', () {
+      // The server answers 404 with deleted:0 when nothing matched. That is
+      // not an error path — it has to come back as a readable result.
+      final result = DeletedImages.fromJson({
+        'message': 'No matching images.',
+        'deleted': 0,
+        'unknown_ids': ['1788176218829168_1'],
+      });
+
+      expect(result.matchedNothing, isTrue);
+      expect(result.unknownIds, ['1788176218829168_1']);
+    });
+
+    test('a successful delete is not mistaken for a miss', () {
+      final result = DeletedImages.fromJson({
+        'message': 'Deleted.',
+        'deleted': 1,
+        'unknown_ids': const [],
+      });
+
+      expect(result.matchedNothing, isFalse);
+      expect(result.deleted, 1);
     });
   });
 

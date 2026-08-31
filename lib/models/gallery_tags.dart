@@ -229,3 +229,41 @@ class GalleryAssignResult {
     );
   }
 }
+
+/// Outcome of [ApiService.deletePropertyImages].
+///
+/// [deleted] is the number the server actually removed; [unknownIds] are the
+/// keys it could not match. A key comes back unknown when the photo was never
+/// on this property, or was already deleted — both of which mean the caller's
+/// list is stale, not that the delete failed.
+///
+/// The server also returns the property's recomputed gallery, which this
+/// deliberately does not model: the one caller is the camera's review grid,
+/// which has no gallery to re-render. Add it here rather than re-fetching if a
+/// gallery-side delete ever needs it.
+class DeletedImages {
+  final String message;
+  final int deleted;
+  final List<String> unknownIds;
+
+  const DeletedImages({
+    required this.message,
+    required this.deleted,
+    required this.unknownIds,
+  });
+
+  /// Nothing matched. The photo is not on the property — usually because it
+  /// never landed, occasionally because someone else removed it first.
+  bool get matchedNothing => deleted == 0;
+
+  factory DeletedImages.fromJson(Map<String, dynamic> json) {
+    final deleted = json['deleted'];
+    return DeletedImages(
+      message: json['message']?.toString() ?? 'Photo deleted.',
+      deleted: deleted is num ? deleted.toInt() : int.tryParse('$deleted') ?? 0,
+      unknownIds: (json['unknown_ids'] is List)
+          ? (json['unknown_ids'] as List).map((e) => e.toString()).toList()
+          : const [],
+    );
+  }
+}

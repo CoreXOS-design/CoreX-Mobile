@@ -124,9 +124,14 @@ class ImageProcessArgs {
 /// pixels**, downscales the longest edge to [ImageProcessArgs.maxEdge], and
 /// writes an upright JPEG to [ImageProcessArgs.destPath].
 ///
-/// Baking is the important part: the server re-encodes thumbnails with GD, which
-/// drops the EXIF Orientation flag without rotating the pixels, so a JPEG whose
-/// pixels rely on that flag renders sideways on the web.
+/// Baking is the important part, though not for the reason it originally was.
+/// The server now runs `ImageOrientationNormalizer` at ingest, ahead of any
+/// thumbnail or downscale, so a JPEG carrying a usable EXIF `Orientation`
+/// comes out upright with or without our help. What it cannot rescue is a file
+/// that carries no usable orientation at all — HUAWEI/HONOR firmware writes
+/// non-upright pixels under `Orientation => 0` or no tag whatsoever — and that
+/// is what [ImageProcessArgs.fallbackRotation] exists for. Bake here, and the
+/// server is a second line of defence rather than the only one.
 ///
 /// Orientation is resolved in strict priority order:
 ///
@@ -287,23 +292,38 @@ class PreparedPhoto {
 int _prepSeq = 0;
 
 /// Downscales [photo] and bakes its orientation into the pixels, ready for
-/// upload. Every capture path must go through this — a photo that skips it
-/// reaches the server with sensor-orientation pixels and lands sideways on the
-/// web the moment the server's thumbnailer drops the EXIF tag.
+/// upload. Every capture path goes through this — a photo that skips it and
+/// carries no usable EXIF `Orientation` (the in-app camera on the firmware
+/// this app exists to work around) has nothing left to tell the server which
+/// way is up, and lands on its side. A photo that skips it *with* good EXIF is
+/// fine: the server normalises orientation at ingest and caps the long edge at
+/// the same 2560px we do.
 ///
 /// Never throws and never drops a photo: on any failure it returns the original
 /// file with `isTemp: false`.
-Future<PreparedPhoto> prepareForUpload(CapturedPhoto photo) async {
-  Directory tmpDir;
-  try {
-    tmpDir = await getTemporaryDirectory();
-  } catch (_) {
-    return PreparedPhoto(file: photo.file, isTemp: false);
+/// [destPath] overrides where the processed copy is written. Pass one when the
+/// result must be durable — a photo queued at the shutter is baked *after* it
+/// is already in the queue, so its processed bytes have to land in storage the
+/// queue owns rather than in a temp file the OS may evict. Callers that pass it
+/// own the file: [PreparedPhoto.isTemp] comes back false, because deleting it
+/// would delete the photo.
+Future<PreparedPhoto> prepareForUpload(
+  CapturedPhoto photo, {
+  String? destPath,
+}) async {
+  Directory? tmpDir;
+  if (destPath == null) {
+    try {
+      tmpDir = await getTemporaryDirectory();
+    } catch (_) {
+      return PreparedPhoto(file: photo.file, isTemp: false);
+    }
   }
 
   try {
-    final dest = '${tmpDir.path}/corex_prep_'
-        '${DateTime.now().microsecondsSinceEpoch}_${_prepSeq++}.jpg';
+    final dest = destPath ??
+        '${tmpDir!.path}/corex_prep_'
+            '${DateTime.now().microsecondsSinceEpoch}_${_prepSeq++}.jpg';
     final result = await processImageForUpload(
       srcPath: photo.file.path,
       destPath: dest,
@@ -334,7 +354,8 @@ Future<PreparedPhoto> prepareForUpload(CapturedPhoto photo) async {
         'left as-is, photo may upload sideways (${photo.file.path})',
       );
     }
-    return PreparedPhoto(file: File(dest), isTemp: true, result: result);
+    return PreparedPhoto(
+        file: File(dest), isTemp: destPath == null, result: result);
   } catch (_) {
     return PreparedPhoto(file: photo.file, isTemp: false);
   }

@@ -2123,6 +2123,69 @@ class ApiService {
     }
   }
 
+  /// `POST /v1/mobile/properties/{id}/images/delete` — removes photos from a
+  /// property's gallery.
+  ///
+  /// [clientUploadIds] is the key to prefer: it is what the photo was queued
+  /// under, it survives a restart, and it resolves without the caller holding
+  /// a URL it may have never seen. [imageUrls] is accepted for callers working
+  /// from a rendered gallery; both may be sent together.
+  ///
+  /// **The upload key is not cleared server-side.** A queued retry for a photo
+  /// the agent has just deleted is absorbed as a duplicate and the photo stays
+  /// deleted, so a caller never has to race its own upload queue against this
+  /// call — delete first, let the queue do whatever it was going to do.
+  ///
+  /// A 404 (`deleted: 0`) is not thrown: nothing matched, which means the
+  /// caller's list is stale rather than that the delete failed. It comes back
+  /// as [DeletedImages.matchedNothing] so the caller can re-fetch instead of
+  /// showing an error for a photo that is already gone.
+  ///
+  ///  * [ApiException] 403 — assistant accounts may never delete listing
+  ///    photos. Surface the server's own message; no retry will help.
+  ///  * [ApiException] 422 — neither key was supplied.
+  Future<DeletedImages> deletePropertyImages(
+    int propertyId, {
+    List<String> clientUploadIds = const [],
+    List<String> imageUrls = const [],
+  }) async {
+    if (clientUploadIds.isEmpty && imageUrls.isEmpty) {
+      throw ApiException(422, 'Select at least one photo to delete');
+    }
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/v1/mobile/properties/$propertyId/images/delete'),
+          headers: await _headers(),
+          body: jsonEncode({
+            if (clientUploadIds.isNotEmpty)
+              'client_upload_ids': clientUploadIds,
+            if (imageUrls.isNotEmpty) 'images': imageUrls,
+          }),
+        )
+        .timeout(_timeout);
+
+    await _handleUnauthorized(response.statusCode, response.body);
+
+    Map<String, dynamic>? body;
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map) body = Map<String, dynamic>.from(decoded);
+    } catch (_) {}
+
+    // 404 is "nothing matched", which the body describes properly — it is an
+    // outcome, not a failure.
+    if (response.statusCode == 200 || response.statusCode == 404) {
+      if (response.statusCode == 200) invalidateOverviewCache(propertyId);
+      return DeletedImages.fromJson(body ?? const {});
+    }
+
+    String message = 'Could not delete that photo';
+    if (body?['message'] is String && (body!['message'] as String).isNotEmpty) {
+      message = body['message'] as String;
+    }
+    throw ApiException(response.statusCode, message);
+  }
+
   /// `POST /v1/mobile/photo-events` — per-photo upload diagnostics.
   ///
   /// Max 200 events per call; the server answers 200 with

@@ -34,7 +34,14 @@ class PendingUpload {
   final String id;
 
   final int propertyId;
-  final String path;
+
+  /// The queue's own copy of the bytes.
+  ///
+  /// Mutable for exactly one reason: a photo is queued at the shutter with the
+  /// camera's raw file, and downscaling/orientation-baking replaces it
+  /// afterwards (see [needsProcessing]). Only [UploadQueue.markProcessed]
+  /// writes it.
+  String path;
 
   /// Idempotency key sent as `client_upload_id`. Persisted in its own right
   /// rather than derived from [id] at send time, so a replay after a restart
@@ -57,6 +64,35 @@ class PendingUpload {
   /// The drainer never writes it.
   String? roomTag;
 
+  /// True while [path] still holds the camera's raw file and the downscale +
+  /// orientation bake has not run yet.
+  ///
+  /// A photo is queued at the shutter, before processing, so that the durable
+  /// row exists within milliseconds of the file appearing on disk.
+  ///
+  /// The drainer skips these until the bake has run. Not because raw pixels
+  /// are a catastrophe — `uploadImage()` runs `ImageOrientationNormalizer`
+  /// before any thumbnail or downscale, so a file that carries usable EXIF
+  /// comes out upright whatever we send. The gate is for the files that carry
+  /// *no* usable orientation: the in-app camera on HUAWEI/HONOR firmware
+  /// writes non-upright pixels under `Orientation => 0` or no tag at all, and
+  /// for those the capture-time [sensorRotation] is the only thing that knows
+  /// which way is up. The server is a safety net under this bake, not a
+  /// substitute for it.
+  ///
+  /// Persisted, so a bake interrupted by a kill is simply redone on the next
+  /// launch from the raw bytes the queue already owns. Processing used to
+  /// happen before the photo was durable at all, which meant an interruption
+  /// lost it outright.
+  bool needsProcessing;
+
+  /// Clockwise degrees the raw pixels must be rotated to sit upright, as read
+  /// from the device at capture. Persisted because the bake can now happen
+  /// long after — even in a later session — and this reading exists nowhere
+  /// else: it is the only defence against OEMs that write a missing or invalid
+  /// EXIF `Orientation` over sideways pixels.
+  final int? sensorRotation;
+
   PendingUploadState state;
   String? error;
   final int createdAt;
@@ -73,6 +109,8 @@ class PendingUpload {
     required this.clientUploadId,
     this.batchId,
     required this.roomTag,
+    this.needsProcessing = false,
+    this.sensorRotation,
     this.state = PendingUploadState.pending,
     this.error,
     required this.createdAt,
@@ -88,6 +126,8 @@ class PendingUpload {
         'client_upload_id': clientUploadId,
         'batch_id': batchId,
         'room_tag': roomTag,
+        'needs_processing': needsProcessing,
+        'sensor_rotation': sensorRotation,
         // `uploading` is in-flight only; persist it as pending so a kill
         // mid-request leaves a photo the drainer will pick up again.
         'state': (state == PendingUploadState.failed ? 'failed' : 'pending'),
@@ -108,6 +148,10 @@ class PendingUpload {
       clientUploadId: (j['client_upload_id'] as String?) ?? id,
       batchId: j['batch_id'] as String?,
       roomTag: j['room_tag'] as String?,
+      // Rows written before the shutter-time enqueue existed were already
+      // processed before they were persisted, so absent means "done".
+      needsProcessing: j['needs_processing'] == true,
+      sensorRotation: (j['sensor_rotation'] as num?)?.toInt(),
       state: j['state'] == 'failed'
           ? PendingUploadState.failed
           : PendingUploadState.pending,
@@ -266,6 +310,8 @@ class UploadQueue extends ChangeNotifier {
     required String? roomTag,
     String? clientUploadId,
     String? batchId,
+    bool needsProcessing = false,
+    int? sensorRotation,
   }) async {
     await _ensureLoaded();
     final id = _nextId();
@@ -281,6 +327,8 @@ class UploadQueue extends ChangeNotifier {
       clientUploadId: clientUploadId ?? id,
       batchId: batchId,
       roomTag: roomTag,
+      needsProcessing: needsProcessing,
+      sensorRotation: sensorRotation,
       createdAt: DateTime.now().millisecondsSinceEpoch,
     );
     _items.add(item);
@@ -296,6 +344,52 @@ class UploadQueue extends ChangeNotifier {
       meta: {'room_tag': roomTag},
     );
     return item;
+  }
+
+  /// The queued item for [id], or null once it has uploaded and left.
+  ///
+  /// How a screen tells "I can still recall this photo" from "the server may
+  /// already have it" — and, via [PendingUpload.attempts], whether it has ever
+  /// been on the wire at all.
+  Future<PendingUpload?> find(String id) async {
+    await _ensureLoaded();
+    return _find(id);
+  }
+
+  /// Where the processed copy of [id] should be written: inside the queue's
+  /// own directory, so the baked bytes are as durable as the raw ones were.
+  /// Always `.jpg` — that is what the encoder produces, and a HEIC original
+  /// baked into a file still named `.heic` would go up under the wrong
+  /// content type.
+  Future<String> processedPathFor(String id) async {
+    final dir = await _dir();
+    return '${dir.path}/${id}_p.jpg';
+  }
+
+  /// Clears [PendingUpload.needsProcessing], optionally repointing the item at
+  /// the processed file, and makes the photo eligible for upload.
+  ///
+  /// [processedPath] is the downscaled, orientation-baked copy; pass null when
+  /// processing declined or failed and the original bytes are what should go
+  /// up. The old file is deleted only once the new path is committed, so a
+  /// kill in between leaves a photo with bytes rather than a row pointing at
+  /// nothing.
+  Future<void> markProcessed(String id, {String? processedPath}) async {
+    await _ensureLoaded();
+    final item = _find(id);
+    if (item == null) return;
+    final previous = item.path;
+    if (processedPath != null && processedPath != previous) {
+      item.path = processedPath;
+    }
+    item.needsProcessing = false;
+    await _commit();
+    if (item.path != previous) {
+      try {
+        final old = File(previous);
+        if (await old.exists()) await old.delete();
+      } catch (_) {}
+    }
   }
 
   /// Marks [id] as on the wire. In-memory only — see [PendingUploadState].

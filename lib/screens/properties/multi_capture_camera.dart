@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../services/photo_telemetry.dart';
+import '../../services/upload_queue.dart';
+import '../../services/upload_service.dart';
 import '../../theme.dart';
 import '../../utils/device_rotation.dart';
 import '../../utils/image_processing.dart';
@@ -26,34 +29,53 @@ import '../../utils/image_processing.dart';
 /// orientation now comes from [DeviceRotation] (the accelerometer) and is
 /// applied per shot. iOS already reads the hardware orientation itself, so
 /// there we simply stop overriding it.
-class MultiCaptureCamera extends StatefulWidget {
-  /// The property these photos are being shot for, when the caller knows it.
-  ///
-  /// Diagnostics only — nothing on this screen behaves differently. It is what
-  /// lets a `captured` event be filed at the shutter, which is the only moment
-  /// a photo that later vanishes was ever provably real. Callers that aren't
-  /// shooting for a property (rental inspections) leave it null and this screen
-  /// reports nothing.
-  final int? propertyId;
+/// Tells the camera to queue every shot itself, the moment it is taken.
+///
+/// Its presence is what separates the two ways this screen can be used. With a
+/// target, each shutter press writes its own durable queue row before the
+/// preview even renders, and closing the screen persists nothing because there
+/// is nothing left to persist. Without one (rental inspections, which upload
+/// through a different endpoint entirely) the screen accumulates and hands the
+/// list back on Done, as it always did.
+class CaptureTarget {
+  final int propertyId;
 
   /// The shoot these photos belong to — one screen session. Groups a batch in
-  /// the report so "the agent shot 40 and 28 arrived" is one query.
-  final String? batchId;
+  /// the report so "the agent shot 47 and 6 arrived" is one query.
+  final String batchId;
 
-  const MultiCaptureCamera({super.key, this.propertyId, this.batchId});
+  /// The room selected right now, read fresh at every shutter press rather
+  /// than captured when the camera opened. Same rule the queue has always
+  /// had: the tag belongs to the photo, taken at the moment of the photo.
+  final String? Function() roomTag;
 
+  const CaptureTarget({
+    required this.propertyId,
+    required this.batchId,
+    required this.roomTag,
+  });
+}
+
+class MultiCaptureCamera extends StatefulWidget {
+  /// Where each shot goes the instant it exists. Null means the caller wants
+  /// the list back on Done instead — see [CaptureTarget].
+  final CaptureTarget? target;
+
+  const MultiCaptureCamera({super.key, this.target});
+
+  /// Opens the camera.
+  ///
+  /// With a [target] the photos are already in the durable queue by the time
+  /// this returns, and the result is an **empty list** — there is nothing left
+  /// for the caller to do with them, and handing back a list to be enqueued is
+  /// precisely the pattern that lost 41 of 47 photos on 2026-08-31. Without a
+  /// target the captures come back for the caller to deal with.
   static Future<List<CapturedPhoto>> open(
     BuildContext context, {
-    int? propertyId,
-    String? batchId,
+    CaptureTarget? target,
   }) async {
     final result = await Navigator.of(context).push<List<CapturedPhoto>>(
-      MaterialPageRoute(
-        builder: (_) => MultiCaptureCamera(
-          propertyId: propertyId,
-          batchId: batchId,
-        ),
-      ),
+      MaterialPageRoute(builder: (_) => MultiCaptureCamera(target: target)),
     );
     return result ?? [];
   }
@@ -83,7 +105,19 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   String? _error;
   bool _capturing = false;
 
+  /// The shots taken this session.
+  ///
+  /// With a [CaptureTarget] this list is **display only** — it drives the
+  /// counter and the review grid, and nothing about persistence depends on it
+  /// or on this screen's lifecycle. Every photo in it is already in the
+  /// durable queue. Without a target it is still the thing handed back on
+  /// Done.
   final List<CapturedPhoto> _captured = [];
+
+  /// Capture id → queue row id, so a photo deleted in review can be pulled
+  /// back out of the queue it was put into at the shutter.
+  final Map<String, String> _queuedIds = {};
+
   bool _reviewing = false;
 
   /// Resolution ladder for stills, most wanted first.
@@ -158,12 +192,16 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
 
   @override
   void dispose() {
-    // Anything still here was never handed to the caller: Cancel, the system
-    // back gesture, or the route being torn down under us. All three throw the
-    // photos away, and until now they went without a trace. Reported from
-    // dispose rather than from [_cancel] so the back gesture — the one an
-    // agent actually uses — is covered too.
-    if (!_confirmed) {
+    // With a target, closing this screen is a no-op for persistence — every
+    // photo was queued at its shutter and none of them care that the camera is
+    // gone. That is the invariant this whole screen now rests on.
+    //
+    // Without one, the caller only ever receives what [_confirm] hands back,
+    // so Cancel, the system back gesture and the route being torn down under
+    // us all throw the captures away. Reported from dispose rather than from
+    // [_cancel] so the back gesture — the one an agent actually uses — is
+    // covered too.
+    if (widget.target == null && !_confirmed) {
       for (final photo in _captured) {
         _report(photo, PhotoPhase.dropped, meta: {'reason': 'camera_closed'});
       }
@@ -722,17 +760,17 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
         File(xFile.path),
         sensorRotation: _sensorRotationForCapture(ctrl, deviceRotation),
       );
-      // The file exists on disk, so the photo is real — report it now, before
-      // the preview renders, before the review step and before anyone taps
-      // Done. Reported later it would only ever agree with the queue, and a
-      // report that can only describe photos that survived is the thing that
-      // left twelve of them unaccounted for.
+      // The file exists on disk, so the photo is real. Report it and persist
+      // it now — before the preview renders, before the review step, before
+      // anyone taps Done, and deliberately before the `mounted` check below.
       //
-      // Note this deliberately precedes the `mounted` check below: a shot
-      // taken as the screen is being torn down never reaches [_captured] and
-      // is lost today, silently. It will now show a `captured` with nothing
-      // after it, which is the whole point.
+      // These two lines are the whole fix. Captures used to pile up in
+      // [_captured] and get queued on the way out of this screen; on
+      // 2026-08-31 that lost 41 of 47 photos on listing 15753 while every
+      // photo that did reach the queue uploaded perfectly. Nothing downstream
+      // of here may depend on this screen still being alive.
       _report(photo, PhotoPhase.captured);
+      await _queueImmediately(photo);
       if (!mounted) return;
       setState(() {
         _captured.add(photo);
@@ -744,13 +782,100 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
     }
   }
 
-  void _removeAt(int index) {
+  /// Writes [photo]'s durable queue row, right now.
+  ///
+  /// Awaited, because "durable" has to mean durable before the next shutter
+  /// press: it is a file copy and a preferences write, not the decode. The
+  /// downscale and orientation bake happen afterwards, against bytes the queue
+  /// already owns — see [UploadService] — so the expensive part cannot cost us
+  /// the photo, and an interrupted bake is redone on the next launch instead
+  /// of taking the photo with it.
+  ///
+  /// No-ops without a [CaptureTarget]: callers that manage their own uploads
+  /// still get the list on Done.
+  Future<void> _queueImmediately(CapturedPhoto photo) async {
+    final target = widget.target;
+    if (target == null) return;
+    try {
+      final item = await UploadQueue.instance.enqueue(
+        propertyId: target.propertyId,
+        source: photo.file,
+        roomTag: target.roomTag(),
+        clientUploadId: photo.uploadId,
+        batchId: target.batchId,
+        // Raw straight off the sensor. The drainer will not touch it until it
+        // has been baked.
+        needsProcessing: true,
+        // The tilt is knowable only here. Persisted with the row so the bake
+        // can happen later, even in another session, and still turn the photo
+        // the right way up.
+        sensorRotation: photo.sensorRotation,
+      );
+      _queuedIds[photo.uploadId] = item.id;
+      // Start moving while the agent is still shooting.
+      unawaited(UploadService.instance.flush());
+    } catch (e) {
+      // Storage full, or the copy failed. The photo is genuinely lost, so say
+      // so on the record and to the agent's face — this is the one failure
+      // this screen must never swallow.
+      debugPrint('[capture] could not queue ${photo.uploadId}: $e');
+      _report(photo, PhotoPhase.dropped,
+          meta: {'reason': 'enqueue_failed', 'error': e.toString()});
+      _warn("Couldn't save that photo — device storage may be full");
+    }
+  }
+
+  void _warn(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Deletes a photo from the review grid — wherever it has got to.
+  ///
+  /// Queueing at capture means a photo can already have uploaded by the time
+  /// the agent reviews it: the drainer runs on its own schedule and does not
+  /// care that this screen is open. [UploadService.recallPhoto] closes that
+  /// gap — it pulls the queue row and, when the photo could have reached the
+  /// property, deletes it there too. Delete in review means deleted, not
+  /// "deleted unless the timing was unlucky".
+  Future<void> _removeAt(int index) async {
     final photo = _captured[index];
+    final target = widget.target;
     setState(() => _captured.removeAt(index));
-    _report(photo, PhotoPhase.dropped, meta: {'reason': 'removed_in_review'});
     if (_captured.isEmpty) {
       setState(() => _reviewing = false);
     }
+
+    final queueId = _queuedIds.remove(photo.uploadId);
+    if (target == null) {
+      // No target — this screen never queued it and never reported it, so
+      // dropping it from the list is the whole job.
+      return;
+    }
+
+    final result = await UploadService.instance.recallPhoto(
+      propertyId: target.propertyId,
+      clientUploadId: photo.uploadId,
+      queueItemId: queueId,
+      batchId: target.batchId,
+      reason: 'removed_in_review',
+    );
+    // Silence on success: the thumbnail disappearing already says it.
+    if (result.isGone) return;
+
+    // The photo is still on the property, so the grid must not go on claiming
+    // it was deleted. Put it back where it was — tapping delete again retries,
+    // now going straight to the server since the queue row is gone.
+    if (mounted) {
+      setState(() {
+        _captured.insert(index.clamp(0, _captured.length), photo);
+        _reviewing = true;
+      });
+    }
+    _warn(result.outcome == PhotoRecall.refused
+        ? (result.message ?? "Your account can't delete listing photos")
+        : "Couldn't remove that photo — check your connection and try again");
   }
 
   /// Files a diagnostic event for one in-camera photo. No-ops when the caller
@@ -758,24 +883,31 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   /// property id would be worse than silence.
   void _report(CapturedPhoto photo, PhotoPhase phase,
       {Map<String, dynamic>? meta}) {
-    final propertyId = widget.propertyId;
-    if (propertyId == null) return;
+    final target = widget.target;
+    if (target == null) return;
     PhotoTelemetry.instance.record(
-      propertyId: propertyId,
+      propertyId: target.propertyId,
       clientUploadId: photo.uploadId,
       phase: phase,
-      batchId: widget.batchId,
+      batchId: target.batchId,
       meta: meta,
     );
   }
 
   /// Set by [_confirm] so [dispose] can tell "handed to the caller" from
-  /// "thrown away".
+  /// "thrown away". Only meaningful without a [CaptureTarget] — with one,
+  /// leaving this screen never throws anything away.
   bool _confirmed = false;
 
+  /// Done.
+  ///
+  /// With a target this pops an empty list on purpose: every photo is already
+  /// queued, and there is nothing to hand over. Done is now a way out of the
+  /// camera, not the step that saves the shoot.
   void _confirm() {
     _confirmed = true;
-    Navigator.of(context).pop(_captured);
+    Navigator.of(context)
+        .pop(widget.target == null ? _captured : <CapturedPhoto>[]);
   }
 
   void _cancel() => Navigator.of(context).pop(<CapturedPhoto>[]);

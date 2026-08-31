@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 
 import '../models/gallery_tags.dart';
+import '../utils/image_processing.dart';
 import 'api_service.dart';
 import 'photo_telemetry.dart';
 import 'upload_queue.dart';
@@ -83,6 +84,11 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
   bool _running = false;
   bool get isRunning => _running;
 
+  /// True while the shutter-queued backlog is being baked. Separate from
+  /// [_running]: processing and uploading proceed independently, so a slow
+  /// bake never holds up a photo that is already ready to go.
+  bool _processing = false;
+
   /// True when the last run could not reach the server at all. Drives the
   /// "no connection" copy on the queue banner, and is recomputed at the end of
   /// every run — a run that got an answer, even a rejection, is not offline.
@@ -154,11 +160,22 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
   Future<void> flush() async {
     if (_running || _authBlocked) return;
 
+    // Bake anything queued raw at the shutter. Kicked, not awaited: processing
+    // a 40-photo burst takes several seconds and the photos already baked must
+    // not wait behind it. It calls back here when it finishes.
+    unawaited(_processPending());
+
     final items = await UploadQueue.instance.allItems();
     final now = DateTime.now();
     final ready = items
         .where((e) =>
             e.state == PendingUploadState.pending &&
+            // Wait for the bake. The server normalises orientation at ingest,
+            // so a file with usable EXIF would survive being sent raw — but
+            // the in-app camera's whole reason for existing is the firmware
+            // that writes none, and only the capture-time sensor reading can
+            // rescue those. See [PendingUpload.needsProcessing].
+            !e.needsProcessing &&
             !(_retryAfter[e.id]?.isAfter(now) ?? false))
         .toList();
     if (ready.isEmpty) return;
@@ -179,6 +196,161 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
       // After any upload attempt, while we know the radio just worked.
       unawaited(PhotoTelemetry.instance.flush());
     }
+  }
+
+  /// Takes a photo back — out of the queue, and off the server if it could
+  /// have got there.
+  ///
+  /// Queueing at the shutter means the drainer no longer waits for anyone to
+  /// finish looking at a screen, so by the time an agent deletes a shot in
+  /// review it may already be on the property. Removing the queue row alone
+  /// would leave it in the gallery while the UI implied it was gone.
+  ///
+  /// The server delete is skipped only when the photo provably never left the
+  /// device: still queued, and never once attempted. Anything that has been on
+  /// the wire goes through the endpoint even if it looks like it failed — a
+  /// timed-out upload is exactly the case where the bytes landed and the
+  /// answer did not.
+  ///
+  /// No race to manage: the upload key is not cleared server-side, so a queued
+  /// retry for a photo deleted here is absorbed as a duplicate and the photo
+  /// stays deleted.
+  ///
+  /// Always files a `dropped` event. The report subtracts dropped from
+  /// captured, so a deletion that went unreported would read as a lost photo
+  /// and a healthy shoot would look broken.
+  Future<PhotoRecallResult> recallPhoto({
+    required int propertyId,
+    required String clientUploadId,
+    String? queueItemId,
+    String? batchId,
+    required String reason,
+  }) async {
+    var neverSent = false;
+    String? itemBatchId;
+
+    if (queueItemId != null) {
+      final item = await UploadQueue.instance.find(queueItemId);
+      if (item != null) {
+        itemBatchId = item.batchId;
+        // attempts is only ever incremented once a request is actually being
+        // made, so zero means the bytes have never left this device.
+        neverSent = item.attempts == 0;
+        _retryAfter.remove(item.id);
+        await UploadQueue.instance.remove(item.id);
+      }
+    }
+
+    var outcome = PhotoRecall.neverSent;
+    String? message;
+    if (!neverSent) {
+      try {
+        final result = await _api.deletePropertyImages(
+          propertyId,
+          clientUploadIds: [clientUploadId],
+        );
+        outcome = result.matchedNothing
+            ? PhotoRecall.notOnServer
+            : PhotoRecall.deletedFromServer;
+        message = result.message;
+      } on ApiException catch (e) {
+        // 403 is an assistant account, which may never delete listing photos.
+        // No retry helps, and the server's own wording says why.
+        outcome = e.statusCode == 403
+            ? PhotoRecall.refused
+            : PhotoRecall.failed;
+        message = e.message;
+        debugPrint('[upload] recall of $clientUploadId failed '
+            '(${e.statusCode}): ${e.message}');
+      } catch (e) {
+        outcome = PhotoRecall.failed;
+        debugPrint('[upload] recall of $clientUploadId failed: $e');
+      }
+    }
+
+    PhotoTelemetry.instance.record(
+      propertyId: propertyId,
+      clientUploadId: clientUploadId,
+      phase: PhotoPhase.dropped,
+      batchId: batchId ?? itemBatchId,
+      meta: {'reason': reason, 'recall': outcome.name},
+    );
+    return PhotoRecallResult(outcome, message);
+  }
+
+  /// Downscales and orientation-bakes every photo queued raw at the shutter.
+  ///
+  /// ## Why processing moved here
+  ///
+  /// It used to run *before* a photo was durable — the camera accumulated
+  /// captures in a list, and only on dismiss were they processed and queued.
+  /// On 2026-08-31 that list lost 41 of 47 photos on listing 15753: every
+  /// photo that reached the queue uploaded perfectly, and the entire loss was
+  /// upstream of it. So the queue row is now written at the shutter and the
+  /// bake happens afterwards, against bytes the queue already owns.
+  ///
+  /// That makes processing itself crash-safe for the first time: an
+  /// interrupted bake is simply redone on the next launch, because the raw
+  /// file and the capture-time sensor reading are both persisted. Previously
+  /// an interruption took the photo with it.
+  ///
+  /// One at a time and re-entrancy guarded: each bake is a full decode in a
+  /// background isolate, and forty at once would take the app's memory with
+  /// them.
+  Future<void> _processPending() async {
+    if (_processing) return;
+    _processing = true;
+    var baked = 0;
+    try {
+      // Re-read the queue each pass: the agent is still shooting, and photos
+      // taken during this loop must be picked up by it rather than wait for
+      // the next tick.
+      while (true) {
+        final items = await UploadQueue.instance.allItems();
+        PendingUpload? next;
+        for (final item in items) {
+          if (item.needsProcessing) {
+            next = item;
+            break;
+          }
+        }
+        if (next == null) break;
+        await _processOne(next);
+        baked++;
+      }
+    } catch (e) {
+      debugPrint('[upload] processing pass failed: $e');
+    } finally {
+      _processing = false;
+    }
+    // Newly baked photos are eligible now; don't make them wait for a tick.
+    if (baked > 0) unawaited(flush());
+  }
+
+  /// Bakes one photo in place. Always clears the flag, even on failure — a row
+  /// that could never be processed must still upload (the server normalises
+  /// what it can) rather than sit in the queue forever, invisible to the
+  /// drainer and un-retryable by the agent.
+  Future<void> _processOne(PendingUpload item) async {
+    String? processedPath;
+    try {
+      final prepared = await prepareForUpload(
+        CapturedPhoto(
+          item.file,
+          sensorRotation: item.sensorRotation,
+          uploadId: item.clientUploadId,
+        ),
+        destPath: await UploadQueue.instance.processedPathFor(item.id),
+      );
+      // prepareForUpload hands back the original when it declines (oversized)
+      // or fails; only a genuinely new file repoints the row.
+      if (prepared.file.path != item.path) processedPath = prepared.file.path;
+    } catch (e) {
+      debugPrint('[upload] could not process ${item.id}, '
+          'uploading the original: $e');
+    }
+    await UploadQueue.instance.markProcessed(item.id,
+        processedPath: processedPath);
   }
 
   /// Bounded worker pool over [ready]. Workers stop early when a run-level
@@ -464,6 +636,40 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
     stopService();
     super.dispose();
   }
+}
+
+/// Where a recalled photo turned out to be.
+enum PhotoRecall {
+  /// Still queued and never once attempted, so it never left the device.
+  neverSent,
+
+  /// It had reached the property, and the server has now removed it.
+  deletedFromServer,
+
+  /// Nothing matched: it never landed, or someone removed it first. The photo
+  /// is gone either way — this is an outcome, not a failure.
+  notOnServer,
+
+  /// An assistant account. Assistants may never delete listing photos.
+  refused,
+
+  /// The delete could not be made. The photo may still be on the property.
+  failed,
+}
+
+/// [PhotoRecall] plus the server's own wording, for the cases worth repeating
+/// to the agent verbatim.
+class PhotoRecallResult {
+  final PhotoRecall outcome;
+  final String? message;
+
+  const PhotoRecallResult(this.outcome, this.message);
+
+  /// True when the photo is definitely no longer on the property.
+  bool get isGone =>
+      outcome == PhotoRecall.neverSent ||
+      outcome == PhotoRecall.deletedFromServer ||
+      outcome == PhotoRecall.notOnServer;
 }
 
 /// What one attempt did, from the run’s point of view.
