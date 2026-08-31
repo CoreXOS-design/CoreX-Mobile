@@ -21,7 +21,29 @@ class CapturedPhoto {
   /// capture-time sensor reading. Null when unknown (all `image_picker` paths).
   final int? sensorRotation;
 
-  const CapturedPhoto(this.file, {this.sensorRotation});
+  /// The photo's identity for the whole pipeline: the server's idempotency
+  /// key (`client_upload_id`) *and* the id every diagnostic event is filed
+  /// under.
+  ///
+  /// Allocated **here**, at capture, rather than by the queue at enqueue time.
+  /// That is the point: an id that only exists once a photo reaches the queue
+  /// cannot describe a photo that never got there, and photos dying between
+  /// the camera and the queue is the failure this pipeline could not see. From
+  /// the shutter onwards the photo has a name, so its absence is a fact rather
+  /// than an inference from a gap in a sequence.
+  final String uploadId;
+
+  CapturedPhoto(this.file, {this.sensorRotation, String? uploadId})
+      : uploadId = uploadId ?? newUploadId();
+
+  static int _idSeq = 0;
+
+  /// Monotonic-per-session id. Same shape the queue has always generated, so
+  /// keys from before and after this change sort and read alike.
+  static String newUploadId() {
+    _idSeq++;
+    return '${DateTime.now().microsecondsSinceEpoch}_$_idSeq';
+  }
 }
 
 /// How [processImageForUpload] decided which way is up.

@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'photo_telemetry.dart';
+
 /// State of a queued photo.
 ///
 /// `uploading` is transient — it exists so the gallery can badge the photo
@@ -37,7 +39,15 @@ class PendingUpload {
   /// Idempotency key sent as `client_upload_id`. Persisted in its own right
   /// rather than derived from [id] at send time, so a replay after a restart
   /// presents the *same* key the first attempt did and the server can dedupe.
+  ///
+  /// Allocated at the shutter (see [CapturedPhoto.uploadId]), not here, so the
+  /// diagnostic trail for a photo starts before the queue row exists.
   final String clientUploadId;
+
+  /// The shoot this photo belongs to, for diagnostics only. Persisted so an
+  /// upload replayed days later still reports under the batch it was shot in;
+  /// null for photos queued before this existed.
+  final String? batchId;
 
   /// The room the agent had selected when this photo was queued. `null` means
   /// "upload untagged" — a deliberate choice, not a missing value.
@@ -61,6 +71,7 @@ class PendingUpload {
     required this.propertyId,
     required this.path,
     required this.clientUploadId,
+    this.batchId,
     required this.roomTag,
     this.state = PendingUploadState.pending,
     this.error,
@@ -75,6 +86,7 @@ class PendingUpload {
         'property_id': propertyId,
         'path': path,
         'client_upload_id': clientUploadId,
+        'batch_id': batchId,
         'room_tag': roomTag,
         // `uploading` is in-flight only; persist it as pending so a kill
         // mid-request leaves a photo the drainer will pick up again.
@@ -94,6 +106,7 @@ class PendingUpload {
       // the idempotency key, so that is the correct migration value: a photo
       // queued by the old build and replayed by this one still dedupes.
       clientUploadId: (j['client_upload_id'] as String?) ?? id,
+      batchId: j['batch_id'] as String?,
       roomTag: j['room_tag'] as String?,
       state: j['state'] == 'failed'
           ? PendingUploadState.failed
@@ -242,10 +255,17 @@ class UploadQueue extends ChangeNotifier {
   ///
   /// [roomTag] is captured here, at queue time, from the selection that was
   /// live when the photo was taken — and is never recomputed afterwards.
+  ///
+  /// [clientUploadId] should be the id the photo was given at the shutter
+  /// ([CapturedPhoto.uploadId]) so the queue row joins up with the `captured`
+  /// event that preceded it. It falls back to the queue's own id for callers
+  /// that have no capture-time id to offer.
   Future<PendingUpload> enqueue({
     required int propertyId,
     required File source,
     required String? roomTag,
+    String? clientUploadId,
+    String? batchId,
   }) async {
     await _ensureLoaded();
     final id = _nextId();
@@ -258,12 +278,23 @@ class UploadQueue extends ChangeNotifier {
       id: id,
       propertyId: propertyId,
       path: dest.path,
-      clientUploadId: id,
+      clientUploadId: clientUploadId ?? id,
+      batchId: batchId,
       roomTag: roomTag,
       createdAt: DateTime.now().millisecondsSinceEpoch,
     );
     _items.add(item);
     await _commit();
+    // Only after the row is durable. A `queued` event for a photo that isn't
+    // actually in the store would be the one lie this log must not tell — a
+    // photo missing its `queued` is exactly the signal we are hunting.
+    PhotoTelemetry.instance.record(
+      propertyId: propertyId,
+      clientUploadId: item.clientUploadId,
+      phase: PhotoPhase.queued,
+      batchId: batchId,
+      meta: {'room_tag': roomTag},
+    );
     return item;
   }
 

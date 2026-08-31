@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../services/photo_telemetry.dart';
 import '../../theme.dart';
 import '../../utils/device_rotation.dart';
 import '../../utils/image_processing.dart';
@@ -26,11 +27,33 @@ import '../../utils/image_processing.dart';
 /// applied per shot. iOS already reads the hardware orientation itself, so
 /// there we simply stop overriding it.
 class MultiCaptureCamera extends StatefulWidget {
-  const MultiCaptureCamera({super.key});
+  /// The property these photos are being shot for, when the caller knows it.
+  ///
+  /// Diagnostics only — nothing on this screen behaves differently. It is what
+  /// lets a `captured` event be filed at the shutter, which is the only moment
+  /// a photo that later vanishes was ever provably real. Callers that aren't
+  /// shooting for a property (rental inspections) leave it null and this screen
+  /// reports nothing.
+  final int? propertyId;
 
-  static Future<List<CapturedPhoto>> open(BuildContext context) async {
+  /// The shoot these photos belong to — one screen session. Groups a batch in
+  /// the report so "the agent shot 40 and 28 arrived" is one query.
+  final String? batchId;
+
+  const MultiCaptureCamera({super.key, this.propertyId, this.batchId});
+
+  static Future<List<CapturedPhoto>> open(
+    BuildContext context, {
+    int? propertyId,
+    String? batchId,
+  }) async {
     final result = await Navigator.of(context).push<List<CapturedPhoto>>(
-      MaterialPageRoute(builder: (_) => const MultiCaptureCamera()),
+      MaterialPageRoute(
+        builder: (_) => MultiCaptureCamera(
+          propertyId: propertyId,
+          batchId: batchId,
+        ),
+      ),
     );
     return result ?? [];
   }
@@ -135,6 +158,16 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
 
   @override
   void dispose() {
+    // Anything still here was never handed to the caller: Cancel, the system
+    // back gesture, or the route being torn down under us. All three throw the
+    // photos away, and until now they went without a trace. Reported from
+    // dispose rather than from [_cancel] so the back gesture — the one an
+    // agent actually uses — is covered too.
+    if (!_confirmed) {
+      for (final photo in _captured) {
+        _report(photo, PhotoPhase.dropped, meta: {'reason': 'camera_closed'});
+      }
+    }
     WidgetsBinding.instance.removeObserver(this);
     _controller?.dispose();
     DeviceRotation.stop();
@@ -685,12 +718,24 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
           ', preview ${ctrl.value.previewSize}',
         );
       }
+      final photo = CapturedPhoto(
+        File(xFile.path),
+        sensorRotation: _sensorRotationForCapture(ctrl, deviceRotation),
+      );
+      // The file exists on disk, so the photo is real — report it now, before
+      // the preview renders, before the review step and before anyone taps
+      // Done. Reported later it would only ever agree with the queue, and a
+      // report that can only describe photos that survived is the thing that
+      // left twelve of them unaccounted for.
+      //
+      // Note this deliberately precedes the `mounted` check below: a shot
+      // taken as the screen is being torn down never reaches [_captured] and
+      // is lost today, silently. It will now show a `captured` with nothing
+      // after it, which is the whole point.
+      _report(photo, PhotoPhase.captured);
       if (!mounted) return;
       setState(() {
-        _captured.add(CapturedPhoto(
-          File(xFile.path),
-          sensorRotation: _sensorRotationForCapture(ctrl, deviceRotation),
-        ));
+        _captured.add(photo);
         _capturing = false;
       });
     } catch (_) {
@@ -700,13 +745,39 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   }
 
   void _removeAt(int index) {
+    final photo = _captured[index];
     setState(() => _captured.removeAt(index));
+    _report(photo, PhotoPhase.dropped, meta: {'reason': 'removed_in_review'});
     if (_captured.isEmpty) {
       setState(() => _reviewing = false);
     }
   }
 
-  void _confirm() => Navigator.of(context).pop(_captured);
+  /// Files a diagnostic event for one in-camera photo. No-ops when the caller
+  /// gave us no property — the event has nowhere to be filed, and inventing a
+  /// property id would be worse than silence.
+  void _report(CapturedPhoto photo, PhotoPhase phase,
+      {Map<String, dynamic>? meta}) {
+    final propertyId = widget.propertyId;
+    if (propertyId == null) return;
+    PhotoTelemetry.instance.record(
+      propertyId: propertyId,
+      clientUploadId: photo.uploadId,
+      phase: phase,
+      batchId: widget.batchId,
+      meta: meta,
+    );
+  }
+
+  /// Set by [_confirm] so [dispose] can tell "handed to the caller" from
+  /// "thrown away".
+  bool _confirmed = false;
+
+  void _confirm() {
+    _confirmed = true;
+    Navigator.of(context).pop(_captured);
+  }
+
   void _cancel() => Navigator.of(context).pop(<CapturedPhoto>[]);
 
   @override

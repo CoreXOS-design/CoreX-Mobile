@@ -2123,6 +2123,33 @@ class ApiService {
     }
   }
 
+  /// `POST /v1/mobile/photo-events` — per-photo upload diagnostics.
+  ///
+  /// Max 200 events per call; the server answers 200 with
+  /// `{message, recorded, skipped}` and dedupes on
+  /// `(property_id, client_upload_id, phase)`, so a replayed batch is free.
+  /// Throttled 60/min. See [PhotoTelemetry], which owns the durable log and
+  /// the flush cadence — nothing else should call this.
+  ///
+  /// Deliberately **not** routed through [_handleUnauthorized]. This is a
+  /// background diagnostic that fires whether or not anyone is looking at a
+  /// screen; letting it vote on the session would mean a telemetry blip could
+  /// sign an agent out mid-shoot. It reports the status code and lets the
+  /// caller keep the events for the next flush.
+  Future<void> postPhotoEvents(List<Map<String, dynamic>> events) async {
+    if (events.isEmpty) return;
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/v1/mobile/photo-events'),
+          headers: await _headers(),
+          body: jsonEncode({'events': events}),
+        )
+        .timeout(_timeout);
+
+    if (response.statusCode >= 200 && response.statusCode < 300) return;
+    throw ApiException(response.statusCode, 'Failed to record photo events');
+  }
+
   /// Uploads a single image. Pass [roomTag] `null` to upload untagged.
   ///
   /// Throws [TagValidationException] on a 422 response whose body contains

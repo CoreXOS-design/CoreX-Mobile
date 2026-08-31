@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 
 import '../models/gallery_tags.dart';
 import 'api_service.dart';
+import 'photo_telemetry.dart';
 import 'upload_queue.dart';
 
 /// Drains [UploadQueue] on its own, for as long as the app is open.
@@ -109,10 +110,18 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
     if (_started) return;
     _started = true;
     WidgetsBinding.instance.addObserver(this);
-    _timer = Timer.periodic(_tick, (_) => flush());
+    _timer = Timer.periodic(_tick, (_) {
+      flush();
+      // Piggy-backed on the upload tick rather than given a timer of its own.
+      // Unlike [flush] this runs even with an empty queue: the events that
+      // most need sending are the ones about photos that never made it into
+      // the queue, and there is nothing left on the device to trigger them.
+      unawaited(PhotoTelemetry.instance.flush());
+    });
     // Anything left over from a previous session goes up now, without waiting
     // for the first tick and without anyone opening a gallery.
     flush();
+    unawaited(PhotoTelemetry.instance.flush());
   }
 
   void stopService() {
@@ -131,6 +140,10 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
     // the most likely moment for a re-login to have happened.
     _authBlocked = false;
     flush();
+    // A resume is the first chance to send anything the app was killed
+    // holding — including the `captured` events for a shoot that never
+    // survived to become queue rows.
+    unawaited(PhotoTelemetry.instance.flush());
   }
 
   /// Drains every queued photo across every property.
@@ -163,6 +176,8 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
     } finally {
       _running = false;
       notifyListeners();
+      // After any upload attempt, while we know the radio just worked.
+      unawaited(PhotoTelemetry.instance.flush());
     }
   }
 
@@ -206,6 +221,10 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
     final String? roomTag = item.roomTag;
 
     await UploadQueue.instance.markUploading(item.id);
+    // The attempt ordinal for this try, read before any handler can adjust it
+    // (a connection failure gives the increment back).
+    final attempt = item.attempts;
+    _report(item, PhotoPhase.uploadStarted, meta: {'attempt': attempt});
     try {
       final result = await _api.uploadPropertyImage(
         item.propertyId,
@@ -219,6 +238,13 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
       _retryAfter.remove(item.id);
       _successes++;
       if (_offline) _offline = false;
+      _report(item, PhotoPhase.uploadOk, meta: {
+        'attempt': attempt,
+        'bytes': await _bytesOf(item),
+        // A dedupe hit means the server already had this photo — a replay we
+        // could not otherwise tell apart from a first landing.
+        'duplicate': result.duplicate,
+      });
       await UploadQueue.instance.remove(item.id);
       return _Outcome.ok;
     } on TagValidationException catch (e) {
@@ -230,18 +256,77 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
           '${e.availableTags.length} tags available');
       await UploadQueue.instance.markFailed(
           item.id, '"${item.roomTag}" is no longer a room on this property');
-      return _Outcome.failed;
+      return _reportFailure(item, _Outcome.failed,
+          attempt: attempt, reason: 'stale_tag', error: e.message);
     } on ApiException catch (e) {
-      return _handleApiFailure(item, e);
-    } on SocketException {
-      return _markOffline(item, countAttempt: false);
+      return _reportFailure(item, await _handleApiFailure(item, e),
+          attempt: attempt,
+          reason: 'http_${e.statusCode}',
+          error: e.message);
+    } on SocketException catch (e) {
+      return _reportFailure(
+          item, await _markOffline(item, countAttempt: false),
+          attempt: attempt, reason: 'offline', error: e.message);
     } on TimeoutException {
-      return _handleTimeout(item);
+      return _reportFailure(item, await _handleTimeout(item),
+          attempt: attempt,
+          reason: 'timeout',
+          error: 'no answer within the upload window');
     } catch (e) {
       // http throws ClientException for a dropped/refused connection, which is
       // the same "never reached the server" shape as SocketException.
       debugPrint('[upload] transport failure on ${item.id}: $e');
-      return _markOffline(item, countAttempt: false);
+      return _reportFailure(
+          item, await _markOffline(item, countAttempt: false),
+          attempt: attempt, reason: 'transport', error: e.toString());
+    }
+  }
+
+  /// Files one `upload_failed` per attempt, whatever shape the failure took,
+  /// and passes the outcome straight through.
+  ///
+  /// Every failure path funnels through here rather than reporting inside the
+  /// handlers: one attempt must produce exactly one event, or the report will
+  /// double-count retries and misstate how hard a photo fought to land.
+  /// [outcome] is resolved first so `parked` can say whether this was the
+  /// attempt that gave up on the photo.
+  _Outcome _reportFailure(
+    PendingUpload item,
+    _Outcome outcome, {
+    required int attempt,
+    required String reason,
+    required String error,
+  }) {
+    _report(item, PhotoPhase.uploadFailed, meta: {
+      'attempt': attempt,
+      'reason': reason,
+      'error': error,
+      'parked': outcome == _Outcome.failed,
+    });
+    return outcome;
+  }
+
+  /// Files one diagnostic event for [item], carrying the batch it was shot in.
+  /// Fire-and-forget: [PhotoTelemetry.record] neither blocks nor throws, so an
+  /// upload can never be slowed or failed by its own reporting.
+  void _report(PendingUpload item, PhotoPhase phase,
+      {Map<String, dynamic>? meta}) {
+    PhotoTelemetry.instance.record(
+      propertyId: item.propertyId,
+      clientUploadId: item.clientUploadId,
+      phase: phase,
+      batchId: item.batchId,
+      meta: meta,
+    );
+  }
+
+  /// Size of the photo, for the report. Best-effort and only ever read on a
+  /// path where the upload has already finished — never in front of one.
+  Future<int?> _bytesOf(PendingUpload item) async {
+    try {
+      return await item.file.length();
+    } catch (_) {
+      return null;
     }
   }
 

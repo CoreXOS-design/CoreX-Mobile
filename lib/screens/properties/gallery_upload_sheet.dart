@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../models/gallery_tags.dart';
 import '../../services/api_service.dart';
+import '../../services/photo_telemetry.dart';
 import '../../services/upload_queue.dart';
 import '../../services/upload_service.dart';
 import '../../theme.dart';
@@ -81,6 +82,12 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   /// the upload was driven by a background tick rather than by this sheet.
   late final int _successesAtOpen;
 
+  /// This sheet session, as one shoot. Every photo added while the sheet is
+  /// open reports under it, so a batch that half-arrived can be read as a
+  /// batch instead of reassembled from timestamps.
+  final String _batchId =
+      'shoot-${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
+
   /// The queue is the single source of truth for what is waiting; this sheet
   /// keeps no parallel copy that could drift from it.
   List<PendingUpload> get _items => _queue.cachedItemsFor(widget.propertyId);
@@ -148,11 +155,25 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           propertyId: widget.propertyId,
           source: prepared.file,
           roomTag: _selectedTag,
+          // The id the photo has carried since the shutter, so the `queued`
+          // event lands on the same photo the `captured` event described.
+          clientUploadId: photo.uploadId,
+          batchId: _batchId,
         );
-      } catch (_) {
+      } catch (e) {
         // Couldn't copy into durable storage (e.g. storage full). Count it so
         // we can warn the user rather than losing the photo silently.
         skipped++;
+        // And say so on the record. This is the exact gap the report exists
+        // for: a photo that was captured, never queued, and never seen by the
+        // server. The snackbar tells the agent; this tells us which photo.
+        PhotoTelemetry.instance.record(
+          propertyId: widget.propertyId,
+          clientUploadId: photo.uploadId,
+          phase: PhotoPhase.dropped,
+          batchId: _batchId,
+          meta: {'reason': 'enqueue_failed', 'error': e.toString()},
+        );
       } finally {
         // The queue copied it into durable storage; drop the temp file.
         try {
@@ -265,9 +286,15 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
         maxHeight: ImageUploadConfig.maxHeight,
         imageQuality: ImageUploadConfig.quality,
       );
-      if (picked.isEmpty || !mounted) return;
-      await _enqueueAll(
-          picked.map((x) => CapturedPhoto(File(x.path))).toList());
+      if (picked.isEmpty) return;
+      final photos = picked.map((x) => CapturedPhoto(File(x.path))).toList();
+      // "The picker returned this photo" is this path's shutter, so it is
+      // reported here — ahead of the `mounted` check, which would otherwise
+      // discard the whole selection without a word if the sheet closed while
+      // the picker was up.
+      _reportCaptured(photos);
+      if (!mounted) return;
+      await _enqueueAll(photos);
     } catch (_) {
       // user cancelled, ignore
     }
@@ -275,10 +302,52 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
 
   Future<void> _pickFromBurst() async {
     try {
-      final files = await MultiCaptureCamera.open(context);
+      // The camera files its own `captured` events, at the shutter — the only
+      // place they mean anything. It needs the property and the shoot to do
+      // that; nothing else about that screen changes.
+      final files = await MultiCaptureCamera.open(
+        context,
+        propertyId: widget.propertyId,
+        batchId: _batchId,
+      );
       if (files.isEmpty || !mounted) return;
       await _enqueueAll(files);
     } catch (_) {/* user cancelled, ignore */}
+  }
+
+  /// The agent throwing a queued photo away, from the pending grid or from the
+  /// failed list.
+  ///
+  /// Reported here rather than inside [UploadQueue.remove], which is also how
+  /// a photo leaves the queue after it has *landed*. Same call, opposite
+  /// meanings — and a report that cannot tell "the agent deleted it" from "the
+  /// server has it" is worse than no report.
+  Future<void> _discard(PendingUpload item) async {
+    PhotoTelemetry.instance.record(
+      propertyId: item.propertyId,
+      clientUploadId: item.clientUploadId,
+      phase: PhotoPhase.dropped,
+      batchId: item.batchId,
+      meta: {
+        'reason': 'discarded_by_agent',
+        'attempts': item.attempts,
+        if (item.error != null) 'error': item.error,
+      },
+    );
+    await _queue.remove(item.id);
+  }
+
+  /// Files a `captured` event per photo for the `image_picker` paths, which
+  /// have no shutter of their own to hook.
+  void _reportCaptured(List<CapturedPhoto> photos) {
+    for (final photo in photos) {
+      PhotoTelemetry.instance.record(
+        propertyId: widget.propertyId,
+        clientUploadId: photo.uploadId,
+        phase: PhotoPhase.captured,
+        batchId: _batchId,
+      );
+    }
   }
 
   /// OS camera app — the only path that can reach the device's ultrawide /
@@ -296,7 +365,9 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           imageQuality: ImageUploadConfig.quality,
         );
         if (shot == null) break;
-        await _enqueueAll([CapturedPhoto(File(shot.path))]);
+        final photo = CapturedPhoto(File(shot.path));
+        _reportCaptured([photo]);
+        await _enqueueAll([photo]);
       }
     } catch (_) {/* user cancelled, ignore */}
   }
@@ -649,7 +720,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                       top: 2,
                       right: 2,
                       child: InkWell(
-                        onTap: () => _queue.remove(item.id),
+                        onTap: () => _discard(item),
                         child: Container(
                           decoration: const BoxDecoration(
                             color: Colors.black54,
@@ -762,7 +833,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                   tooltip: 'Discard',
                   icon: const Icon(Icons.delete_outline, size: 18),
                   color: AppTheme.textMuted(context),
-                  onPressed: () => _queue.remove(f.id),
+                  onPressed: () => _discard(f),
                 ),
               ],
             ),
