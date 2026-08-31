@@ -170,11 +170,12 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
     final ready = items
         .where((e) =>
             e.state == PendingUploadState.pending &&
-            // Wait for the bake. The server normalises orientation at ingest,
-            // so a file with usable EXIF would survive being sent raw — but
-            // the in-app camera's whole reason for existing is the firmware
-            // that writes none, and only the capture-time sensor reading can
-            // rescue those. See [PendingUpload.needsProcessing].
+            // Wait for the bake. The server's normaliser cannot stand in for
+            // it here: our shots land in a landscape buffer with no
+            // orientation tag, which is indistinguishable from a real
+            // landscape photo, so it correctly refuses to guess. Only the
+            // capture-time sensor reading resolves that. See
+            // [PendingUpload.needsProcessing].
             !e.needsProcessing &&
             !(_retryAfter[e.id]?.isAfter(now) ?? false))
         .toList();
@@ -224,7 +225,7 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
     required String clientUploadId,
     String? queueItemId,
     String? batchId,
-    required String reason,
+    required DropReason reason,
   }) async {
     var neverSent = false;
     String? itemBatchId;
@@ -268,12 +269,12 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
       }
     }
 
-    PhotoTelemetry.instance.record(
+    PhotoTelemetry.instance.recordDropped(
       propertyId: propertyId,
       clientUploadId: clientUploadId,
-      phase: PhotoPhase.dropped,
+      reason: reason,
       batchId: batchId ?? itemBatchId,
-      meta: {'reason': reason, 'recall': outcome.name},
+      meta: {'recall': outcome.name},
     );
     return PhotoRecallResult(outcome, message);
   }
@@ -327,12 +328,23 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
     if (baked > 0) unawaited(flush());
   }
 
-  /// Bakes one photo in place. Always clears the flag, even on failure — a row
-  /// that could never be processed must still upload (the server normalises
-  /// what it can) rather than sit in the queue forever, invisible to the
-  /// drainer and un-retryable by the agent.
+  /// Bakes one photo in place.
+  ///
+  /// Always clears the flag, even on failure: a row that could not be
+  /// processed must still upload rather than sit in the queue forever,
+  /// invisible to the drainer and un-retryable by the agent. A photo that
+  /// arrives is worth more than a photo that is perfectly oriented.
+  ///
+  /// That fallback is a genuine compromise, not a free one — an unbaked photo
+  /// from this camera has no orientation signal the server can use, so it can
+  /// land sideways. It shows up on the server as an "EXIF orientation missing
+  /// or invalid, no verified correction available" warning, which is the
+  /// canary for this whole path: those warnings are harmless while the bake is
+  /// working (upright pixels, nothing to correct) and are the first sign if a
+  /// new device starts defeating it.
   Future<void> _processOne(PendingUpload item) async {
     String? processedPath;
+    String outcome;
     try {
       final prepared = await prepareForUpload(
         CapturedPhoto(
@@ -345,12 +357,24 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
       // prepareForUpload hands back the original when it declines (oversized)
       // or fails; only a genuinely new file repoints the row.
       if (prepared.file.path != item.path) processedPath = prepared.file.path;
+      // A null result means the original is going up untouched — oversized or
+      // undecodable. The two are worth telling apart eventually, but what
+      // matters here is that neither was baked.
+      outcome = prepared.result?.source.name ?? 'unbaked';
     } catch (e) {
       debugPrint('[upload] could not process ${item.id}, '
           'uploading the original: $e');
+      outcome = 'error';
+    }
+    if (outcome == 'unknown' || outcome == 'unbaked' || outcome == 'error') {
+      // The photo is going up with no orientation anyone can act on. Loud in
+      // the log as well as on the report, because this is the state that ends
+      // in an agent ringing up about sideways photos.
+      debugPrint('[upload] ${item.clientUploadId} uploading unbaked '
+          '($outcome, sensor=${item.sensorRotation}) — may be sideways');
     }
     await UploadQueue.instance.markProcessed(item.id,
-        processedPath: processedPath);
+        processedPath: processedPath, bakeOutcome: outcome);
   }
 
   /// Bounded worker pool over [ready]. Workers stop early when a run-level
@@ -416,6 +440,13 @@ class UploadService with WidgetsBindingObserver, ChangeNotifier {
         // A dedupe hit means the server already had this photo — a replay we
         // could not otherwise tell apart from a first landing.
         'duplicate': result.duplicate,
+        // How this photo's orientation was resolved, and what we had to
+        // resolve it with. The server cannot infer either: a correctly baked
+        // photo and an unbaked one both arrive with no EXIF over a landscape
+        // canvas, which is exactly why its "no verified correction available"
+        // warning cannot answer "did THIS photo ship sideways". This can.
+        'bake': item.bakeOutcome,
+        'sensor_reading': item.sensorRotation,
       });
       await UploadQueue.instance.remove(item.id);
       return _Outcome.ok;

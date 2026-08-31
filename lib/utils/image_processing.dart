@@ -124,14 +124,21 @@ class ImageProcessArgs {
 /// pixels**, downscales the longest edge to [ImageProcessArgs.maxEdge], and
 /// writes an upright JPEG to [ImageProcessArgs.destPath].
 ///
-/// Baking is the important part, though not for the reason it originally was.
-/// The server now runs `ImageOrientationNormalizer` at ingest, ahead of any
-/// thumbnail or downscale, so a JPEG carrying a usable EXIF `Orientation`
-/// comes out upright with or without our help. What it cannot rescue is a file
-/// that carries no usable orientation at all — HUAWEI/HONOR firmware writes
-/// non-upright pixels under `Orientation => 0` or no tag whatsoever — and that
-/// is what [ImageProcessArgs.fallbackRotation] exists for. Bake here, and the
-/// server is a second line of defence rather than the only one.
+/// Baking is the important part, and for this app's own camera it is the
+/// *only* part.
+///
+/// The server runs `ImageOrientationNormalizer` at ingest and does rescue
+/// EXIF-bearing files, so it is easy to assume it covers us. It does not. Its
+/// device heuristic fires only on a known `Make`, an invalid or absent
+/// `Orientation`, **and a portrait-shaped canvas** — and our shots arrive in a
+/// 2560x1920 landscape buffer with no tag, which carries no information
+/// distinguishing a rotated portrait from a real landscape. The server refuses
+/// to guess there, correctly. Most of our files also carry no `Make` at all,
+/// putting them out of reach of the heuristic entirely, and the normaliser is
+/// JPEG-only, so a HEIC gets nothing.
+///
+/// [ImageProcessArgs.fallbackRotation] — the capture-time sensor reading — is
+/// therefore the only thing standing between this camera and sideways photos.
 ///
 /// Orientation is resolved in strict priority order:
 ///
@@ -292,12 +299,15 @@ class PreparedPhoto {
 int _prepSeq = 0;
 
 /// Downscales [photo] and bakes its orientation into the pixels, ready for
-/// upload. Every capture path goes through this — a photo that skips it and
-/// carries no usable EXIF `Orientation` (the in-app camera on the firmware
-/// this app exists to work around) has nothing left to tell the server which
-/// way is up, and lands on its side. A photo that skips it *with* good EXIF is
-/// fine: the server normalises orientation at ingest and caps the long edge at
-/// the same 2560px we do.
+/// upload.
+///
+/// Every capture path goes through this. A photo that skips it and carries no
+/// usable EXIF `Orientation` — everything the in-app camera produces — has
+/// nothing left to tell the server which way is up and lands on its side; the
+/// server's fallback heuristic needs a portrait-shaped canvas, and these
+/// arrive landscape. A photo that skips it *with* good EXIF is fine: the
+/// server normalises orientation at ingest and caps the long edge at the same
+/// 2560px we do.
 ///
 /// Never throws and never drops a photo: on any failure it returns the original
 /// file with `isTemp: false`.

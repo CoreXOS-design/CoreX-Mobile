@@ -5,6 +5,7 @@ import '../../services/api_service.dart';
 import '../../services/upload_queue.dart';
 import '../../services/upload_service.dart';
 import '../../theme.dart';
+import 'upload_status_bar.dart';
 
 /// The room-by-room photo gallery for one property.
 ///
@@ -130,8 +131,8 @@ class _PropertyGalleryState extends State<PropertyGallery> {
       ),
       builder: (ctx) => SafeArea(
         child: ConstrainedBox(
-          constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+          constraints:
+              BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
           child: ListView(
             shrinkWrap: true,
             children: [
@@ -250,7 +251,10 @@ class _PropertyGalleryState extends State<PropertyGallery> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildQueueBanner(queued),
+        // The same bar the camera and the upload sheet show, so the count the
+        // agent saw while shooting is the count they see here.
+        UploadStatusBar(propertyId: widget.propertyId),
+        _buildFailureDetail(queued),
         if (_selected.isNotEmpty) _buildSelectionBar(),
         if (showUnsorted)
           _buildSection(
@@ -290,95 +294,35 @@ class _PropertyGalleryState extends State<PropertyGallery> {
     );
   }
 
-  /// The persistent "N photos waiting to upload" row.
+  /// The reasons behind a failure, under the shared bar.
   ///
-  /// Present whenever anything is queued, on the gallery itself rather than
-  /// buried in the capture sheet — an agent who has closed the sheet is exactly
-  /// the one who needs to know photos are still in flight.
-  Widget _buildQueueBanner(List<PendingUpload> queued) {
-    if (queued.isEmpty) return const SizedBox.shrink();
-    final failed =
-        queued.where((e) => e.state == PendingUploadState.failed).toList();
-    final waiting = queued.length - failed.length;
-    final uploading =
-        queued.any((e) => e.state == PendingUploadState.uploading);
+  /// [UploadStatusBar] says *how many* didn't upload and offers the retry;
+  /// this says *why*, in the server's own words. "Upload failed" tells the
+  /// agent nothing they can act on; "Image is too large" tells them
+  /// everything, so the messages stay even though the count moved out.
+  Widget _buildFailureDetail(List<PendingUpload> queued) {
+    final failed = queued
+        .where((e) => e.state == PendingUploadState.failed)
+        .toList(growable: false);
+    if (failed.isEmpty) return const SizedBox.shrink();
 
-    final String message;
-    final Color tint;
-    if (waiting > 0 && uploading) {
-      message = 'Uploading $waiting photo${waiting == 1 ? '' : 's'}…';
-      tint = AppTheme.brand;
-    } else if (waiting > 0 && _uploader.isOffline) {
-      message =
-          '$waiting photo${waiting == 1 ? '' : 's'} waiting — no connection';
-      tint = Colors.orangeAccent;
-    } else if (waiting > 0) {
-      message = '$waiting photo${waiting == 1 ? '' : 's'} waiting to upload';
-      tint = AppTheme.brand;
-    } else {
-      message =
-          "${failed.length} photo${failed.length == 1 ? '' : 's'} didn't upload";
-      tint = Colors.redAccent;
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: tint.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: tint.withValues(alpha: 0.4)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              if (uploading)
-                const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
-                Icon(Icons.cloud_upload_outlined, size: 16, color: tint),
-              const SizedBox(width: 8),
-              Expanded(
+          ...failed.take(3).map((f) => Padding(
+                padding: const EdgeInsets.only(bottom: 2),
                 child: Text(
-                  message,
+                  '• ${f.error ?? 'Upload failed'}',
                   style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary(context)),
+                      fontSize: 12, color: AppTheme.textSecondary(context)),
                 ),
-              ),
-              if (failed.isNotEmpty)
-                TextButton(
-                  onPressed: () => _uploader.retryAllFor(widget.propertyId),
-                  child: const Text('Retry'),
-                ),
-            ],
-          ),
-          if (failed.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            // The server's own words. "Upload failed" tells the agent nothing
-            // they can act on; "Image is too large" tells them everything.
-            ...failed.take(3).map((f) => Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    '• ${f.error ?? 'Upload failed'}',
-                    style: TextStyle(
-                        fontSize: 12, color: AppTheme.textSecondary(context)),
-                  ),
-                )),
-            if (failed.length > 3)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text('• and ${failed.length - 3} more',
-                    style: TextStyle(
-                        fontSize: 12, color: AppTheme.textMuted(context))),
-              ),
-          ],
+              )),
+          if (failed.length > 3)
+            Text('• and ${failed.length - 3} more',
+                style: TextStyle(
+                    fontSize: 12, color: AppTheme.textMuted(context))),
         ],
       ),
     );
@@ -394,35 +338,63 @@ class _PropertyGalleryState extends State<PropertyGallery> {
         borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: AppTheme.brand.withValues(alpha: 0.4)),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              '$n photo${n == 1 ? '' : 's'} selected',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.textPrimary(context)),
-            ),
-          ),
-          TextButton(
-            onPressed:
-                _assigning ? null : () => setState(() => _selected.clear()),
-            child: const Text('Clear'),
-          ),
-          ElevatedButton(
-            onPressed: (_assigning || !widget.enabled) ? null : _fileSelection,
-            child: _assigning
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
-                  )
-                : const Text('File under…'),
-          ),
-        ],
-      ),
+      child: LayoutBuilder(builder: (ctx, constraints) {
+        final label = Text(
+          '$n photo${n == 1 ? '' : 's'} selected',
+          // Never allowed to wrap. Squeezed narrow enough, a wrapping Text
+          // breaks one character per line and turns this bar into a tall
+          // column of single letters — the "one long box" report.
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textPrimary(context)),
+        );
+        final clear = TextButton(
+          onPressed:
+              _assigning ? null : () => setState(() => _selected.clear()),
+          child: const Text('Clear'),
+        );
+        final file = ElevatedButton(
+          onPressed: (_assigning || !widget.enabled) ? null : _fileSelection,
+          child: _assigning
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
+              : const Text('File under…'),
+        );
+
+        // The two buttons are sized by their own text, so they grow with the
+        // system font scale while the bar does not. Past a point they leave
+        // the label nothing, so below that the bar stacks instead of letting
+        // the label collapse. Ellipsising alone would "fix" it by hiding the
+        // count, which is the one thing this bar exists to say.
+        final needed = 230 * MediaQuery.textScalerOf(ctx).scale(1.0);
+        if (constraints.maxWidth < needed) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              label,
+              const SizedBox(height: 4),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [clear, const SizedBox(width: 4), file],
+              ),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: label),
+            clear,
+            file,
+          ],
+        );
+      }),
     );
   }
 
@@ -504,8 +476,8 @@ class _PropertyGalleryState extends State<PropertyGallery> {
                         foregroundColor: AppTheme.brand,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         minimumSize: const Size(0, 32)),
-                    child: Text(
-                        _allSelected(urls) ? 'Select none' : 'Select all'),
+                    child:
+                        Text(_allSelected(urls) ? 'Select none' : 'Select all'),
                   ),
                 if (canAdd)
                   TextButton.icon(
@@ -530,8 +502,7 @@ class _PropertyGalleryState extends State<PropertyGallery> {
                         ? 'Nothing waiting to be filed.'
                         : 'No photos in this room yet.',
                     style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary(context)),
+                        fontSize: 12, color: AppTheme.textSecondary(context)),
                   )
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -584,7 +555,8 @@ class _PropertyGalleryState extends State<PropertyGallery> {
   }
 
   Widget _countPill(int count, bool isUnsorted) {
-    final color = isUnsorted && count > 0 ? Colors.orangeAccent : AppTheme.brand;
+    final color =
+        isUnsorted && count > 0 ? Colors.orangeAccent : AppTheme.brand;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
@@ -593,8 +565,8 @@ class _PropertyGalleryState extends State<PropertyGallery> {
       ),
       child: Text(
         '$count',
-        style: TextStyle(
-            color: color, fontSize: 11, fontWeight: FontWeight.w700),
+        style:
+            TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700),
       ),
     );
   }
@@ -725,8 +697,8 @@ class _PropertyGalleryState extends State<PropertyGallery> {
                   decoration: const BoxDecoration(
                       color: Colors.black54, shape: BoxShape.circle),
                   padding: const EdgeInsets.all(2),
-                  child: const Icon(Icons.refresh,
-                      color: Colors.white, size: 14),
+                  child:
+                      const Icon(Icons.refresh, color: Colors.white, size: 14),
                 ),
               ),
             ),

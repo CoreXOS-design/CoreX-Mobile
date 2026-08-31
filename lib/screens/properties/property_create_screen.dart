@@ -159,7 +159,8 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
       missing.add(_MissingField('Title', 'title', _titleFieldKey, 1));
     }
     if (_propertyType == null || _propertyType!.isEmpty) {
-      missing.add(const _MissingField('Property Type', 'property_type', null, 1));
+      missing
+          .add(const _MissingField('Property Type', 'property_type', null, 1));
     }
     if (_listingType == null || _listingType!.isEmpty) {
       missing.add(const _MissingField('Listing Type', 'listing_type', null, 1));
@@ -168,8 +169,7 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
       missing.add(const _MissingField('Status', 'status', null, 1));
     }
     if (_p24.suburbId == null) {
-      missing.add(
-          _MissingField('Suburb', 'p24_suburb_id', _suburbFieldKey, 0));
+      missing.add(_MissingField('Suburb', 'p24_suburb_id', _suburbFieldKey, 0));
     }
     if (_price.text.trim().isEmpty) {
       missing.add(_MissingField('Price', 'price', _priceFieldKey, 1));
@@ -312,7 +312,8 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
     }
     final p = provider.selectedProperty;
     if (p != null && mounted) {
-      setState(() => _gallery = GalleryCategories.fromJson(p.galleryCategories));
+      setState(
+          () => _gallery = GalleryCategories.fromJson(p.galleryCategories));
     }
     await _loadGalleryTags();
   }
@@ -456,8 +457,7 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
     if (!mounted) return;
     if (!ok) {
       setState(() => _saving = false);
-      final err =
-          context.read<PropertyProvider>().error ?? 'Failed to create';
+      final err = context.read<PropertyProvider>().error ?? 'Failed to create';
       // Scroll the form to the first invalid field if we have one.
       if (_fieldErrors.isNotEmpty) {
         final first = _fieldErrors.keys.first;
@@ -533,12 +533,14 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
 
   // ---- Upload sheet ----
 
-  Future<void> _openUploadSheet({String? initialTag}) async {
+  Future<void> _openUploadSheet(
+      {String? initialTag, bool lockTag = false}) async {
     if (_propertyId == null) return;
     final uploaded = await GalleryUploadSheet.show(
       context,
       propertyId: _propertyId!,
       initialTag: initialTag,
+      lockTag: lockTag,
     );
     if ((uploaded ?? false) && mounted) {
       await _refreshProperty();
@@ -645,10 +647,14 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _label('Street Number'), _field(_streetNumber),
-          _label('Street Name'), _field(_streetName),
-          _label('Complex Name (optional)'), _field(_complexName),
-          _label('Unit Number (optional)'), _field(_unitNumber),
+          _label('Street Number'),
+          _field(_streetNumber),
+          _label('Street Name'),
+          _field(_streetName),
+          _label('Complex Name (optional)'),
+          _field(_complexName),
+          _label('Unit Number (optional)'),
+          _field(_unitNumber),
           P24LocationPicker(
             key: _suburbFieldKey,
             suburbError: _errorFor('p24_suburb_id'),
@@ -657,8 +663,10 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
               _clearFieldError('p24_suburb_id');
             },
           ),
-          _label('District (optional)'), _field(_district),
-          _label('Region (optional)'), _field(_region),
+          _label('District (optional)'),
+          _field(_district),
+          _label('Region (optional)'),
+          _field(_region),
           const SizedBox(height: 24),
           _navButton('Next', () => _goTo(1)),
         ],
@@ -872,8 +880,7 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
           backgroundColor: AppTheme.surface2(context),
           selectedColor: AppTheme.brand,
           labelStyle: TextStyle(
-            color:
-                isSelected ? Colors.white : AppTheme.textPrimary(context),
+            color: isSelected ? Colors.white : AppTheme.textPrimary(context),
             fontWeight: FontWeight.w600,
           ),
           side: BorderSide.none,
@@ -931,8 +938,7 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
           Expanded(
             child: Text(
               _optionsError ?? '',
-              style:
-                  TextStyle(fontSize: 12, color: Colors.orange.shade400),
+              style: TextStyle(fontSize: 12, color: Colors.orange.shade400),
             ),
           ),
           TextButton(
@@ -1029,8 +1035,7 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
                 onPressed: _saving ? null : () => _openUploadSheet(),
                 icon: const Icon(Icons.add_a_photo, size: 16),
                 label: const Text('Upload'),
-                style:
-                    TextButton.styleFrom(foregroundColor: AppTheme.brand),
+                style: TextButton.styleFrom(foregroundColor: AppTheme.brand),
               ),
             ],
           ),
@@ -1042,8 +1047,11 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
             enabled: !_saving,
             onAssigned: _adoptAssignResult,
             onRefreshRequested: _refreshProperty,
-            onAddPhotos: ({String? initialTag}) =>
-                _openUploadSheet(initialTag: initialTag),
+            // Only ever called from a space section header, always with that
+            // space's name 2014 so the sheet opens locked to it rather than
+            // re-offering every other room the property has.
+            onAddPhotos: ({String? initialTag}) => _openUploadSheet(
+                initialTag: initialTag, lockTag: initialTag != null),
           ),
           const SizedBox(height: 24),
           SizedBox(

@@ -129,8 +129,8 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _optionsError =
-          'Could not load dropdown options — pull to retry');
+      setState(() =>
+          _optionsError = 'Could not load dropdown options — pull to retry');
     }
   }
 
@@ -424,11 +424,13 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
     if (mounted) setState(() => _saving = false);
   }
 
-  Future<void> _openUploadSheet({String? initialTag}) async {
+  Future<void> _openUploadSheet(
+      {String? initialTag, bool lockTag = false}) async {
     final uploaded = await GalleryUploadSheet.show(
       context,
       propertyId: widget.propertyId,
       initialTag: initialTag,
+      lockTag: lockTag,
     );
     // Always refetch after the sheet closes — even a partial upload changes
     // tag_counts, and the spaces editor may have been invalidated from
@@ -482,31 +484,31 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
           ],
         ),
         body: !_loaded && provider.isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SafeArea(
-              top: false,
-              child: Column(
-                children: [
-                  _tabBar(),
-                  Expanded(
-                    child: PageView(
-                      controller: _pageController,
-                      physics: const NeverScrollableScrollPhysics(),
-                      // Keep every page alive once built. Otherwise the
-                      // PageView disposes off-screen pages and
-                      // `_spacesKey.currentState` becomes null — which made
-                      // `_save` silently skip unsaved space edits.
-                      children: [
-                        _KeepAlive(child: _stepAddress()),
-                        _KeepAlive(child: _stepDetails()),
-                        _KeepAlive(child: _stepSpaces()),
-                        _KeepAlive(child: _stepGallery()),
-                      ],
+            ? const Center(child: CircularProgressIndicator())
+            : SafeArea(
+                top: false,
+                child: Column(
+                  children: [
+                    _tabBar(),
+                    Expanded(
+                      child: PageView(
+                        controller: _pageController,
+                        physics: const NeverScrollableScrollPhysics(),
+                        // Keep every page alive once built. Otherwise the
+                        // PageView disposes off-screen pages and
+                        // `_spacesKey.currentState` becomes null — which made
+                        // `_save` silently skip unsaved space edits.
+                        children: [
+                          _KeepAlive(child: _stepAddress()),
+                          _KeepAlive(child: _stepDetails()),
+                          _KeepAlive(child: _stepSpaces()),
+                          _KeepAlive(child: _stepGallery()),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
       ),
     );
   }
@@ -547,8 +549,9 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
                     Container(
                       height: 3,
                       decoration: BoxDecoration(
-                        color:
-                            active ? AppTheme.brand : AppTheme.surface2(context),
+                        color: active
+                            ? AppTheme.brand
+                            : AppTheme.surface2(context),
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -568,10 +571,14 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _label('Street Number'), _field(_streetNumber),
-          _label('Street Name'), _field(_streetName),
-          _label('Complex Name (optional)'), _field(_complexName),
-          _label('Unit Number (optional)'), _field(_unitNumber),
+          _label('Street Number'),
+          _field(_streetNumber),
+          _label('Street Name'),
+          _field(_streetName),
+          _label('Complex Name (optional)'),
+          _field(_complexName),
+          _label('Unit Number (optional)'),
+          _field(_unitNumber),
           P24LocationPicker(
             key: ValueKey('p24-$_loaded-$_p24InitSuburbId-$_p24InitCityId'),
             initialProvinceId: _p24InitProvinceId,
@@ -584,8 +591,10 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
               _clearFieldError('p24_suburb_id');
             },
           ),
-          _label('District (optional)'), _field(_district),
-          _label('Region (optional)'), _field(_region),
+          _label('District (optional)'),
+          _field(_district),
+          _label('Region (optional)'),
+          _field(_region),
           const SizedBox(height: 24),
           _navButton('Next', () => _goTo(1)),
         ],
@@ -740,8 +749,7 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
           Expanded(
             child: Text(
               _optionsError ?? '',
-              style: TextStyle(
-                  fontSize: 12, color: Colors.orange.shade400),
+              style: TextStyle(fontSize: 12, color: Colors.orange.shade400),
             ),
           ),
           TextButton(
@@ -822,8 +830,7 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
                 onPressed: _saving ? null : () => _openUploadSheet(),
                 icon: const Icon(Icons.add_a_photo, size: 16),
                 label: const Text('Upload'),
-                style:
-                    TextButton.styleFrom(foregroundColor: AppTheme.brand),
+                style: TextButton.styleFrom(foregroundColor: AppTheme.brand),
               ),
             ],
           ),
@@ -835,21 +842,28 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
             enabled: !_saving,
             onAssigned: _adoptAssignResult,
             onRefreshRequested: _loadProperty,
-            onAddPhotos: ({String? initialTag}) =>
-                _openUploadSheet(initialTag: initialTag),
+            // Only ever called from a space section header, always with that
+            // space's name 2014 so the sheet opens locked to it rather than
+            // re-offering every other room the property has.
+            onAddPhotos: ({String? initialTag}) => _openUploadSheet(
+                initialTag: initialTag, lockTag: initialTag != null),
           ),
           const SizedBox(height: 16),
           _customTagManager(liveTags),
           const SizedBox(height: 24),
           SizedBox(
-            width: double.infinity, height: 48,
+            width: double.infinity,
+            height: 48,
             child: ElevatedButton(
               // Always allow Save here — even if no field-level diff, the
               // user might have queued space edits we still need to flush.
               onPressed: _saving ? null : _save,
               child: _saving
-                  ? const SizedBox(width: 20, height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
                   : Text(_isDirty ? 'Save Changes' : 'Done'),
             ),
           ),
@@ -889,8 +903,7 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
     // space (Bedroom N, Bathroom N, Garage, etc.). These are the only ones
     // the agent can add or remove from here, and they sync straight to the
     // web via POST/DELETE /gallery/tags.
-    final customTags =
-        liveTags.where((t) => !_isDerivedTag(t)).toList();
+    final customTags = liveTags.where((t) => !_isDerivedTag(t)).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -917,15 +930,14 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
         const SizedBox(height: 4),
         Text(
           'Custom tags sync to the web and can be applied when uploading photos.',
-          style: TextStyle(
-              fontSize: 12, color: AppTheme.textSecondary(context)),
+          style:
+              TextStyle(fontSize: 12, color: AppTheme.textSecondary(context)),
         ),
         const SizedBox(height: 8),
         if (customTags.isEmpty)
           Text(
             'No custom tags yet.',
-            style: TextStyle(
-                fontSize: 12, color: AppTheme.textMuted(context)),
+            style: TextStyle(fontSize: 12, color: AppTheme.textMuted(context)),
           )
         else
           Wrap(
@@ -988,8 +1000,8 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
                         errorText = null;
                       });
                       try {
-                        final updated = await _api.addGalleryTag(
-                            widget.propertyId, input);
+                        final updated =
+                            await _api.addGalleryTag(widget.propertyId, input);
                         if (!mounted) return;
                         setState(() => _liveTags = updated);
                         if (ctx.mounted) Navigator.of(ctx).pop();
@@ -1065,18 +1077,22 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
   // ---- Shared widgets ----
 
   Widget _label(String text) => Padding(
-    padding: const EdgeInsets.only(top: 12, bottom: 6),
-    child: Text(text, style: TextStyle(
-        fontSize: 13, fontWeight: FontWeight.w500,
-        color: AppTheme.textSecondary(context))),
-  );
+        padding: const EdgeInsets.only(top: 12, bottom: 6),
+        child: Text(text,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: AppTheme.textSecondary(context))),
+      );
 
-  Widget _field(TextEditingController c, {TextInputType? keyboard, int maxLines = 1}) =>
+  Widget _field(TextEditingController c,
+          {TextInputType? keyboard, int maxLines = 1}) =>
       TextField(controller: c, keyboardType: keyboard, maxLines: maxLines);
 
   Widget _navButton(String label, VoidCallback onPressed) {
     return SizedBox(
-      width: double.infinity, height: 48,
+      width: double.infinity,
+      height: 48,
       child: ElevatedButton(onPressed: onPressed, child: Text(label)),
     );
   }

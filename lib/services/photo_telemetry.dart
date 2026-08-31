@@ -33,6 +33,44 @@ enum PhotoPhase {
   dropped,
 }
 
+/// Why a photo was dropped.
+///
+/// **Every `dropped` event must carry one**, which is why [PhotoTelemetry]
+/// offers no way to file one without it. The report subtracts only the agent's
+/// own choices — [removedInReview] and [discardedByAgent] — from its loss
+/// count; everything else, *including a drop with no reason at all*, counts as
+/// a photo lost. That default is deliberate on the server's side: treating
+/// every drop as intentional would have hidden the 41-of-47 loss on
+/// 2026-08-31 completely.
+///
+/// So a new drop path needs a new case here, and the backend needs to be told
+/// whether it is a choice or a loss. Until then it reads as a loss, which is
+/// the safe direction to be wrong in.
+enum DropReason {
+  /// The agent deleted it in the camera's review grid. A choice.
+  removedInReview,
+
+  /// The agent discarded it from the upload sheet. A choice.
+  discardedByAgent,
+
+  /// The durable queue row could not be written — storage full, or the copy
+  /// failed. A real loss, and the exact gap this reporting exists to expose.
+  enqueueFailed,
+}
+
+extension DropReasonWire on DropReason {
+  String get wire {
+    switch (this) {
+      case DropReason.removedInReview:
+        return 'removed_in_review';
+      case DropReason.discardedByAgent:
+        return 'discarded_by_agent';
+      case DropReason.enqueueFailed:
+        return 'enqueue_failed';
+    }
+  }
+}
+
 extension PhotoPhaseWire on PhotoPhase {
   String get wire {
     switch (this) {
@@ -174,6 +212,11 @@ class PhotoTelemetry {
     String? batchId,
     Map<String, dynamic>? meta,
   }) {
+    assert(
+      phase != PhotoPhase.dropped || meta?['reason'] != null,
+      'A dropped event needs a reason — use recordDropped(). Without one the '
+      'report counts the photo as lost.',
+    );
     try {
       final payload = <String, dynamic>{
         'property_id': propertyId,
@@ -196,6 +239,31 @@ class PhotoTelemetry {
     } catch (_) {
       // Losing a diagnostic must never cost a photo.
     }
+  }
+
+  /// Files a `dropped` event, which can only be done with a [DropReason].
+  ///
+  /// The one way to report a drop. [record] will assert if it is handed a
+  /// `dropped` phase without a reason, but this is what makes it impossible to
+  /// get wrong in the first place: an unreasoned drop reads as a lost photo on
+  /// the report, so a new code path that forgot one would quietly turn a
+  /// deliberate deletion into an incident.
+  void recordDropped({
+    required int propertyId,
+    required String clientUploadId,
+    required DropReason reason,
+    DateTime? occurredAt,
+    String? batchId,
+    Map<String, dynamic>? meta,
+  }) {
+    record(
+      propertyId: propertyId,
+      clientUploadId: clientUploadId,
+      phase: PhotoPhase.dropped,
+      occurredAt: occurredAt,
+      batchId: batchId,
+      meta: {'reason': reason.wire, if (meta != null) ...meta},
+    );
   }
 
   /// Sends whatever is pending. Safe to call as often as anything likes: it

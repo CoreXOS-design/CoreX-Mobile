@@ -178,10 +178,11 @@ class _RentalInspectionsScreenState extends State<RentalInspectionsScreen> {
     if (photos.isEmpty || !mounted) return;
 
     // Downscale + bake orientation into the pixels before upload, exactly as
-    // the property gallery does. The server normalises orientation at ingest,
-    // so this is not the only defence — but it is the only one for photos the
-    // in-app camera writes with no usable EXIF `Orientation`, which is the
-    // firmware case that camera exists to handle.
+    // the property gallery does. This is the only defence, not a precaution:
+    // in-app captures arrive in a landscape buffer with no EXIF `Orientation`,
+    // and the server's normaliser has nothing to distinguish those from real
+    // landscape photos, so it leaves them alone. Skip this and the inspection
+    // gallery renders them on their side.
     final prepared = <PreparedPhoto>[];
     for (final photo in photos) {
       prepared.add(await prepareForUpload(photo));

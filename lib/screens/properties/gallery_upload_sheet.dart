@@ -10,6 +10,7 @@ import '../../services/upload_service.dart';
 import '../../theme.dart';
 import '../../utils/image_processing.dart';
 import '../../utils/image_upload.dart';
+import '../../widgets/properties/upload_status_bar.dart';
 import 'camera_info.dart';
 import 'multi_capture_camera.dart';
 
@@ -29,10 +30,19 @@ class GalleryUploadSheet extends StatefulWidget {
   final int propertyId;
   final String? initialTag;
 
+  /// Locks the sheet to [initialTag] and hides the room picker entirely.
+  ///
+  /// Set when the agent tapped "Add Photo" *on a space*: they have already
+  /// said which room this is, so offering them the other forty as tappable
+  /// chips is noise at best and a misfile at worst. The general Upload button
+  /// leaves this false and picks a room here instead.
+  final bool lockTag;
+
   const GalleryUploadSheet({
     super.key,
     required this.propertyId,
     this.initialTag,
+    this.lockTag = false,
   });
 
   /// Opens the sheet. Returns `true` if at least one photo landed on the
@@ -42,6 +52,7 @@ class GalleryUploadSheet extends StatefulWidget {
     BuildContext context, {
     required int propertyId,
     String? initialTag,
+    bool lockTag = false,
   }) {
     return showModalBottomSheet<bool>(
       context: context,
@@ -53,6 +64,7 @@ class GalleryUploadSheet extends StatefulWidget {
       builder: (_) => GalleryUploadSheet(
         propertyId: propertyId,
         initialTag: initialTag,
+        lockTag: lockTag,
       ),
     );
   }
@@ -125,6 +137,16 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     if (mounted) setState(() {});
   }
 
+  /// The single way out of this sheet — the X, the drag, and the system back
+  /// gesture all land here, so the agent is asked once however they leave.
+  Future<void> _closeSheet() async {
+    final navigator = Navigator.of(context);
+    final leaving =
+        await confirmLeaveWithPendingUploads(context, widget.propertyId);
+    if (!leaving || !mounted) return;
+    navigator.pop(_anySuccess);
+  }
+
   /// Warms the durable store so [_items] stops being empty; the listener
   /// rebuilds us when it lands.
   Future<void> _loadQueue() async {
@@ -140,9 +162,9 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   /// interrupted the loop took the rest with it. The bake now runs in
   /// [UploadService] against bytes the queue already owns, so the only thing
   /// standing between a picked photo and durability is a file copy. The
-  /// drainer still waits for the bake before uploading — see
-  /// [PendingUpload.needsProcessing] for why that gate is about the files
-  /// carrying no usable EXIF, not about the server.
+  /// drainer still waits for the bake before uploading, and that gate is not
+  /// belt-and-braces: see [PendingUpload.needsProcessing] for why the server's
+  /// normaliser cannot cover what this app's camera writes.
   ///
   /// [_selectedTag] is read *here*, per photo, and then belongs to the item.
   /// This is the only moment the on-screen selection and the photo's room are
@@ -173,12 +195,12 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
         // And say so on the record. This is the exact gap the report exists
         // for: a photo that was captured, never queued, and never seen by the
         // server. The snackbar tells the agent; this tells us which photo.
-        PhotoTelemetry.instance.record(
+        PhotoTelemetry.instance.recordDropped(
           propertyId: widget.propertyId,
           clientUploadId: photo.uploadId,
-          phase: PhotoPhase.dropped,
+          reason: DropReason.enqueueFailed,
           batchId: _batchId,
-          meta: {'reason': 'enqueue_failed', 'error': e.toString()},
+          meta: {'error': e.toString()},
         );
       }
       // Deliberately no `if (!mounted) return` here. This loop used to abandon
@@ -211,7 +233,14 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
         _loadingTags = false;
         // Drop a pre-selected tag that is no longer valid. This touches the
         // *selection only* — never the tag already stamped on a queued photo.
-        if (_selectedTag != null &&
+        //
+        // Not when the sheet is locked to a space: silently switching those
+        // photos to Unsorted would file a whole batch somewhere the agent
+        // never chose, without a picker on screen to show it had happened.
+        // The locked banner says the space is gone instead, and the photos
+        // keep the tag so the existing re-file affordance can deal with them.
+        if (!widget.lockTag &&
+            _selectedTag != null &&
             !data.availableTags.contains(_selectedTag)) {
           _selectedTag = null;
         }
@@ -266,8 +295,8 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           for (final tag in available)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(ctx, _RefileChoice(tag)),
-              child: Text(tag,
-                  style: TextStyle(color: AppTheme.textPrimary(ctx))),
+              child:
+                  Text(tag, style: TextStyle(color: AppTheme.textPrimary(ctx))),
             ),
           SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, const _RefileChoice(null)),
@@ -346,7 +375,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
       clientUploadId: item.clientUploadId,
       queueItemId: item.id,
       batchId: item.batchId,
-      reason: 'discarded_by_agent',
+      reason: DropReason.discardedByAgent,
     );
     if (result.isGone) return;
     _showSnack(result.outcome == PhotoRecall.refused
@@ -397,6 +426,19 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // Dragging the sheet away is the same act as tapping the X, so the prompt
+    // has to sit on the pop itself rather than on the close button.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        await _closeSheet();
+      },
+      child: _buildSheet(),
+    );
+  }
+
+  Widget _buildSheet() {
     return DraggableScrollableSheet(
       initialChildSize: 0.85,
       minChildSize: 0.5,
@@ -421,6 +463,10 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                     controller: scrollCtrl,
                     children: [
                       const SizedBox(height: 8),
+                      // First thing in the scroll view, above the room picker:
+                      // what is still going up matters more than what to shoot
+                      // next.
+                      UploadStatusBar(propertyId: widget.propertyId),
                       if (_loadingTags)
                         const Padding(
                           padding: EdgeInsets.symmetric(vertical: 20),
@@ -465,7 +511,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
         IconButton(
           icon: const Icon(Icons.close),
           color: AppTheme.textSecondary(context),
-          onPressed: () => Navigator.of(ctx).pop(_anySuccess),
+          onPressed: _closeSheet,
         ),
       ],
     );
@@ -490,6 +536,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
 
   Widget _buildTagSection() {
     final tags = _tags;
+    if (widget.lockTag) return _buildLockedTag(tags);
     if (tags == null || tags.availableTags.isEmpty) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -542,6 +589,67 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           ],
         ),
       ],
+    );
+  }
+
+  /// The room, stated rather than offered.
+  ///
+  /// The agent picked this space before the sheet opened, so there is nothing
+  /// to choose — this only has to confirm where the photos are going, and be
+  /// unmistakable about it if that space has since been deleted.
+  Widget _buildLockedTag(GalleryTagsData? tags) {
+    final tag = _selectedTag;
+    final gone =
+        tag != null && tags != null && !tags.availableTags.contains(tag);
+    final count =
+        tag == null ? (tags?.untaggedCount ?? 0) : (tags?.tagCounts[tag] ?? 0);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.brand.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        border: Border.all(color: AppTheme.brand.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(gone ? Icons.error_outline : Icons.folder_outlined,
+              size: 18, color: gone ? Colors.redAccent : AppTheme.brand),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Adding to ${tag ?? "Unsorted"}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary(context),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  gone
+                      ? 'This space no longer exists on the property. Photos '
+                          'added here will need re-filing before they upload.'
+                      : count == 0
+                          ? 'No photos in here yet'
+                          : '$count photo${count == 1 ? '' : 's'} already here',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: gone
+                        ? Colors.redAccent
+                        : AppTheme.textSecondary(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -635,7 +743,8 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
 
   Widget _buildQueueList() {
     final waiting = _waiting;
-    final uploading = waiting.any((e) => e.state == PendingUploadState.uploading);
+    final uploading =
+        waiting.any((e) => e.state == PendingUploadState.uploading);
     final String status;
     if (uploading) {
       status = 'Uploading… ${waiting.length} to go';
@@ -771,8 +880,8 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           const SizedBox(width: 8),
           Text(
             'Preparing photos…',
-            style: TextStyle(
-                fontSize: 13, color: AppTheme.textSecondary(context)),
+            style:
+                TextStyle(fontSize: 13, color: AppTheme.textSecondary(context)),
           ),
         ],
       ),
@@ -799,8 +908,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
               ),
               if (failed.length > 1)
                 TextButton(
-                  onPressed: () =>
-                      _uploader.retryAllFor(widget.propertyId),
+                  onPressed: () => _uploader.retryAllFor(widget.propertyId),
                   child: const Text('Retry all'),
                 ),
             ],
@@ -895,4 +1003,3 @@ class _RefileChoice {
   final String? tag;
   const _RefileChoice(this.tag);
 }
-

@@ -8,27 +8,10 @@ import '../../services/photo_telemetry.dart';
 import '../../services/upload_queue.dart';
 import '../../services/upload_service.dart';
 import '../../theme.dart';
+import '../../widgets/properties/upload_status_bar.dart';
 import '../../utils/device_rotation.dart';
 import '../../utils/image_processing.dart';
 
-/// Full-screen, in-app camera with multi-capture, native lens switching
-/// (0.6x ultrawide / 1x / 2x / 3x — whichever the device exposes), digital
-/// zoom and flash. Photos accumulate; the user taps Done to review and
-/// confirm before the queue is returned.
-///
-/// Each returned photo carries the sensor orientation reported by the device at
-/// the moment it was taken. That reading is what makes this screen immune to the
-/// OEM firmware bug that ships JPEGs with a missing or invalid (0) EXIF
-/// Orientation tag over sideways pixels — we never have to trust the file's own
-/// metadata to know which way is up.
-///
-/// ORIENTATION: this screen pins its UI to portrait, which on Android also
-/// blinds the `camera` plugin — it derives device orientation from the display,
-/// so it saw "upright" however the phone was tilted and wrote every landscape
-/// shot sideways into a portrait frame under EXIF Orientation 1. The physical
-/// orientation now comes from [DeviceRotation] (the accelerometer) and is
-/// applied per shot. iOS already reads the hardware orientation itself, so
-/// there we simply stop overriding it.
 /// Tells the camera to queue every shot itself, the moment it is taken.
 ///
 /// Its presence is what separates the two ways this screen can be used. With a
@@ -56,6 +39,27 @@ class CaptureTarget {
   });
 }
 
+/// Full-screen, in-app camera with multi-capture, native lens switching
+/// (0.6x ultrawide / 1x / 2x / 3x — whichever the device exposes), digital
+/// zoom and flash.
+///
+/// Given a [CaptureTarget], every shot is written to the durable upload queue
+/// at its own shutter press and the screen's own list is display only. Without
+/// one the photos accumulate and are handed back on Done.
+///
+/// Each photo carries the sensor orientation reported by the device at the
+/// moment it was taken. That reading is what makes this screen immune to the
+/// OEM firmware bug that ships JPEGs with a missing or invalid (0) EXIF
+/// Orientation tag over sideways pixels — we never have to trust the file's own
+/// metadata to know which way is up, and nothing downstream can recover it.
+///
+/// ORIENTATION: this screen pins its UI to portrait, which on Android also
+/// blinds the `camera` plugin — it derives device orientation from the display,
+/// so it saw "upright" however the phone was tilted and wrote every landscape
+/// shot sideways into a portrait frame under EXIF Orientation 1. The physical
+/// orientation now comes from [DeviceRotation] (the accelerometer) and is
+/// applied per shot. iOS already reads the hardware orientation itself, so
+/// there we simply stop overriding it.
 class MultiCaptureCamera extends StatefulWidget {
   /// Where each shot goes the instant it exists. Null means the caller wants
   /// the list back on Done instead — see [CaptureTarget].
@@ -87,6 +91,7 @@ class MultiCaptureCamera extends StatefulWidget {
 class _LensPreset {
   /// The physical camera this preset uses.
   final CameraDescription camera;
+
   /// Target digital zoom to apply on that camera when this preset is selected.
   final double targetZoom;
   String label;
@@ -192,20 +197,17 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
 
   @override
   void dispose() {
-    // With a target, closing this screen is a no-op for persistence — every
-    // photo was queued at its shutter and none of them care that the camera is
-    // gone. That is the invariant this whole screen now rests on.
+    // No "camera closed" drop to report, on either path.
     //
-    // Without one, the caller only ever receives what [_confirm] hands back,
-    // so Cancel, the system back gesture and the route being torn down under
-    // us all throw the captures away. Reported from dispose rather than from
-    // [_cancel] so the back gesture — the one an agent actually uses — is
-    // covered too.
-    if (widget.target == null && !_confirmed) {
-      for (final photo in _captured) {
-        _report(photo, PhotoPhase.dropped, meta: {'reason': 'camera_closed'});
-      }
-    }
+    // With a target, closing this screen is a no-op for persistence: every
+    // photo was queued at its own shutter and none of them care that the
+    // camera is gone. That is the invariant this whole screen now rests on,
+    // and it is why there is nothing to lose here any more.
+    //
+    // Without one, Cancel and the back gesture do throw the captures away —
+    // but that path has no property to file an event against, so it is
+    // reported nowhere rather than reported wrongly. It is the rental
+    // inspections flow, which is tracked separately.
     WidgetsBinding.instance.removeObserver(this);
     _controller?.dispose();
     DeviceRotation.stop();
@@ -306,8 +308,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   int? _sensorRotationForCapture(CameraController ctrl, int? deviceRotation) {
     if (!Platform.isAndroid || deviceRotation == null) return null;
     final sensor = ctrl.description.sensorOrientation;
-    final front =
-        ctrl.description.lensDirection == CameraLensDirection.front;
+    final front = ctrl.description.lensDirection == CameraLensDirection.front;
     final total = front ? sensor - deviceRotation : sensor + deviceRotation;
     return ((total % 360) + 360) % 360;
   }
@@ -360,8 +361,8 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
       // Pick a starting camera. Prefer a name match for "ultra" so we
       // open at the widest angle on phones that expose ultrawide as its
       // own CameraDescription (most iPhones, some Hauwei/Honor models).
-      final ultraIdx = back.indexWhere(
-          (c) => c.name.toLowerCase().contains('ultra'));
+      final ultraIdx =
+          back.indexWhere((c) => c.name.toLowerCase().contains('ultra'));
       final startIdx = ultraIdx >= 0 ? ultraIdx : 0;
 
       _lensPresets
@@ -460,8 +461,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
   ///    use that pattern), 1x, and 2x/5x where supported.
   void _rebuildZoomPresetsFromActive() {
     if (_backCameras.isEmpty) return;
-    final activeCam =
-        _controller?.description ?? _backCameras.first;
+    final activeCam = _controller?.description ?? _backCameras.first;
     final newPresets = <_LensPreset>[];
 
     // Digital sub-1.0 zoom on the active camera (logical-multicam path).
@@ -489,7 +489,8 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
       }
       newPresets.add(_LensPreset(
         camera: cam,
-        targetZoom: cam == activeCam ? 1.0.clamp(_minZoom, _maxZoom).toDouble() : 1.0,
+        targetZoom:
+            cam == activeCam ? 1.0.clamp(_minZoom, _maxZoom).toDouble() : 1.0,
         label: label,
       ));
     }
@@ -523,8 +524,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
 
     // Set active to the entry that matches the current camera + zoom.
     int active = _lensPresets.indexWhere((p) =>
-        p.camera == activeCam &&
-        (p.targetZoom - _currentZoom).abs() < 0.05);
+        p.camera == activeCam && (p.targetZoom - _currentZoom).abs() < 0.05);
     if (active < 0) {
       active = _lensPresets.indexWhere((p) => p.camera == activeCam);
     }
@@ -819,8 +819,13 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
       // so on the record and to the agent's face — this is the one failure
       // this screen must never swallow.
       debugPrint('[capture] could not queue ${photo.uploadId}: $e');
-      _report(photo, PhotoPhase.dropped,
-          meta: {'reason': 'enqueue_failed', 'error': e.toString()});
+      PhotoTelemetry.instance.recordDropped(
+        propertyId: target.propertyId,
+        clientUploadId: photo.uploadId,
+        reason: DropReason.enqueueFailed,
+        batchId: target.batchId,
+        meta: {'error': e.toString()},
+      );
       _warn("Couldn't save that photo — device storage may be full");
     }
   }
@@ -859,7 +864,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
       clientUploadId: photo.uploadId,
       queueItemId: queueId,
       batchId: target.batchId,
-      reason: 'removed_in_review',
+      reason: DropReason.removedInReview,
     );
     // Silence on success: the thumbnail disappearing already says it.
     if (result.isGone) return;
@@ -894,18 +899,12 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
     );
   }
 
-  /// Set by [_confirm] so [dispose] can tell "handed to the caller" from
-  /// "thrown away". Only meaningful without a [CaptureTarget] — with one,
-  /// leaving this screen never throws anything away.
-  bool _confirmed = false;
-
   /// Done.
   ///
   /// With a target this pops an empty list on purpose: every photo is already
   /// queued, and there is nothing to hand over. Done is now a way out of the
   /// camera, not the step that saves the shoot.
   void _confirm() {
-    _confirmed = true;
     Navigator.of(context)
         .pop(widget.target == null ? _captured : <CapturedPhoto>[]);
   }
@@ -914,8 +913,20 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
 
   @override
   Widget build(BuildContext context) {
-    if (_reviewing) return _buildReview();
-    return _buildCamera();
+    final target = widget.target;
+    // Back gesture and hardware back, not just the close button — the agent
+    // who closed the app on 18 pending photos got there without touching an X.
+    return PopScope(
+      canPop: target == null,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop || target == null) return;
+        final navigator = Navigator.of(context);
+        if (await confirmLeaveWithPendingUploads(context, target.propertyId)) {
+          if (mounted) navigator.pop(<CapturedPhoto>[]);
+        }
+      },
+      child: _reviewing ? _buildReview() : _buildCamera(),
+    );
   }
 
   Widget _buildCamera() {
@@ -924,6 +935,18 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
       body: SafeArea(
         child: Column(
           children: [
+            // Under the controls, over the viewfinder. This is the screen the
+            // agent is on while shooting and the one they close from, so it is
+            // the screen that has to carry the count.
+            if (widget.target != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: UploadStatusBar(
+                  propertyId: widget.target!.propertyId,
+                  onDark: true,
+                  margin: EdgeInsets.zero,
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
@@ -941,12 +964,12 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                   if (_captured.isNotEmpty)
                     Text(
                       '${_captured.length} taken',
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 14),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 14),
                     ),
                   const Spacer(),
-                  if (_cameras.any(
-                      (c) => c.lensDirection == CameraLensDirection.front))
+                  if (_cameras
+                      .any((c) => c.lensDirection == CameraLensDirection.front))
                     IconButton(
                       icon: const Icon(Icons.flip_camera_ios,
                           color: Colors.white),
@@ -960,8 +983,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
             Expanded(
               child: _initializing
                   ? const Center(
-                      child:
-                          CircularProgressIndicator(color: Colors.white))
+                      child: CircularProgressIndicator(color: Colors.white))
                   : _error != null
                       ? Center(
                           child: Text(_error!,
@@ -974,8 +996,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                             // dereference it with `!` — that hard-crashes the
                             // whole screen. Fall back to a spinner until it's
                             // ready, and use a sane default aspect if missing.
-                            if (ctrl == null ||
-                                !ctrl.value.isInitialized) {
+                            if (ctrl == null || !ctrl.value.isInitialized) {
                               return const Center(
                                   child: CircularProgressIndicator(
                                       color: Colors.white));
@@ -994,115 +1015,118 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                             final pw = isPortrait ? sensorH : sensorW;
                             final ph = isPortrait ? sensorW : sensorH;
                             return GestureDetector(
-                          onScaleStart: _onScaleStart,
-                          onScaleUpdate: _onScaleUpdate,
-                          child: Stack(
-                            alignment: Alignment.bottomCenter,
-                            children: [
-                              ClipRect(
-                                child: OverflowBox(
-                                  alignment: Alignment.center,
-                                  child: FittedBox(
-                                    fit: BoxFit.cover,
-                                    child: SizedBox(
-                                      width: pw,
-                                      height: ph,
-                                      child: CameraPreview(ctrl),
+                              onScaleStart: _onScaleStart,
+                              onScaleUpdate: _onScaleUpdate,
+                              child: Stack(
+                                alignment: Alignment.bottomCenter,
+                                children: [
+                                  ClipRect(
+                                    child: OverflowBox(
+                                      alignment: Alignment.center,
+                                      child: FittedBox(
+                                        fit: BoxFit.cover,
+                                        child: SizedBox(
+                                          width: pw,
+                                          height: ph,
+                                          child: CameraPreview(ctrl),
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ),
-                              // Shutter mask. Cosmetic in the way a shutter is,
-                              // but it is doing real work: capture has to hold
-                              // a capture-orientation lock, and CameraPreview
-                              // re-renders itself a quarter turn round while
-                              // that lock exists. Covering the viewfinder for
-                              // the few hundred ms it is held is what stops
-                              // that showing up as the preview spinning on
-                              // every shot.
-                              if (_capturing)
-                                const Positioned.fill(
-                                  child: ColoredBox(color: Colors.black),
-                                ),
-                              Positioned(
-                                bottom: 16,
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (_currentZoom > _minZoom + 0.05 &&
-                                        _maxZoom > _minZoom + 0.05)
-                                      Container(
-                                        margin:
-                                            const EdgeInsets.only(bottom: 8),
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black54,
-                                          borderRadius:
-                                              BorderRadius.circular(999),
-                                        ),
-                                        child: Text(
-                                          '${_currentZoom.toStringAsFixed(1)}x',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w700,
+                                  // Shutter mask. Cosmetic in the way a shutter is,
+                                  // but it is doing real work: capture has to hold
+                                  // a capture-orientation lock, and CameraPreview
+                                  // re-renders itself a quarter turn round while
+                                  // that lock exists. Covering the viewfinder for
+                                  // the few hundred ms it is held is what stops
+                                  // that showing up as the preview spinning on
+                                  // every shot.
+                                  if (_capturing)
+                                    const Positioned.fill(
+                                      child: ColoredBox(color: Colors.black),
+                                    ),
+                                  Positioned(
+                                    bottom: 16,
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (_currentZoom > _minZoom + 0.05 &&
+                                            _maxZoom > _minZoom + 0.05)
+                                          Container(
+                                            margin: const EdgeInsets.only(
+                                                bottom: 8),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black54,
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              '${_currentZoom.toStringAsFixed(1)}x',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
                                           ),
-                                        ),
-                                      ),
-                                    if (!_onFront && _lensPresets.length > 1)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 6, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black54,
-                                          borderRadius:
-                                              BorderRadius.circular(28),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: List.generate(
-                                            _lensPresets.length,
-                                            (i) {
-                                              final p = _lensPresets[i];
-                                              final active = i == _activeLens;
-                                              return GestureDetector(
-                                                onTap: () => _setLens(i),
-                                                child: Container(
-                                                  margin: const EdgeInsets
-                                                      .symmetric(
-                                                      horizontal: 4),
-                                                  width: 40,
-                                                  height: 40,
-                                                  decoration: BoxDecoration(
-                                                    shape: BoxShape.circle,
-                                                    color: active
-                                                        ? AppTheme.brand
-                                                        : Colors.black38,
-                                                  ),
-                                                  alignment: Alignment.center,
-                                                  child: Text(
-                                                    p.label,
-                                                    style: TextStyle(
-                                                      color: active
-                                                          ? Colors.white
-                                                          : Colors.white70,
-                                                      fontSize: 11,
-                                                      fontWeight:
-                                                          FontWeight.w700,
+                                        if (!_onFront &&
+                                            _lensPresets.length > 1)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 6, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black54,
+                                              borderRadius:
+                                                  BorderRadius.circular(28),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: List.generate(
+                                                _lensPresets.length,
+                                                (i) {
+                                                  final p = _lensPresets[i];
+                                                  final active =
+                                                      i == _activeLens;
+                                                  return GestureDetector(
+                                                    onTap: () => _setLens(i),
+                                                    child: Container(
+                                                      margin: const EdgeInsets
+                                                          .symmetric(
+                                                          horizontal: 4),
+                                                      width: 40,
+                                                      height: 40,
+                                                      decoration: BoxDecoration(
+                                                        shape: BoxShape.circle,
+                                                        color: active
+                                                            ? AppTheme.brand
+                                                            : Colors.black38,
+                                                      ),
+                                                      alignment:
+                                                          Alignment.center,
+                                                      child: Text(
+                                                        p.label,
+                                                        style: TextStyle(
+                                                          color: active
+                                                              ? Colors.white
+                                                              : Colors.white70,
+                                                          fontSize: 11,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                        ),
+                                                      ),
                                                     ),
-                                                  ),
-                                                ),
-                                              );
-                                            },
+                                                  );
+                                                },
+                                              ),
+                                            ),
                                           ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
                             );
                           },
                         ),
@@ -1154,8 +1178,7 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
                     height: 56,
                     child: _captured.isNotEmpty
                         ? TextButton(
-                            onPressed: () =>
-                                setState(() => _reviewing = true),
+                            onPressed: () => setState(() => _reviewing = true),
                             // Zero padding + shrink-wrapped tap target: the
                             // default TextButton padding leaves under 32px of
                             // text width in this 56px slot, which wraps "Done"
@@ -1207,43 +1230,59 @@ class _MultiCaptureCameraState extends State<MultiCaptureCamera>
           ),
         ],
       ),
-      body: GridView.builder(
-        padding: const EdgeInsets.all(8),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-        ),
-        itemCount: _captured.length,
-        itemBuilder: (_, i) {
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(AppTheme.radius),
-                child: Image.file(_captured[i].file,
-                    cacheWidth: 300, fit: BoxFit.cover),
+      body: Column(
+        children: [
+          if (widget.target != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+              child: UploadStatusBar(
+                propertyId: widget.target!.propertyId,
+                onDark: true,
+                margin: EdgeInsets.zero,
               ),
-              Positioned(
-                top: 4,
-                right: 4,
-                child: GestureDetector(
-                  onTap: () => _removeAt(i),
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      color: Colors.black54,
-                      shape: BoxShape.circle,
-                    ),
-                    padding: const EdgeInsets.all(4),
-                    child: const Icon(Icons.close,
-                        color: Colors.white, size: 16),
+            ),
+          Expanded(child: _buildReviewGrid()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReviewGrid() {
+    return GridView.builder(
+      padding: const EdgeInsets.all(8),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+      ),
+      itemCount: _captured.length,
+      itemBuilder: (_, i) {
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppTheme.radius),
+              child: Image.file(_captured[i].file,
+                  cacheWidth: 300, fit: BoxFit.cover),
+            ),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: GestureDetector(
+                onTap: () => _removeAt(i),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
                   ),
+                  padding: const EdgeInsets.all(4),
+                  child: const Icon(Icons.close, color: Colors.white, size: 16),
                 ),
               ),
-            ],
-          );
-        },
-      ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

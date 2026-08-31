@@ -44,6 +44,29 @@ void main() {
     });
   });
 
+  group('drop reasons', () {
+    test('every reason has a distinct wire name', () {
+      // The report keys off these strings, and two paths sharing one would
+      // make an agent's deletion and a real loss indistinguishable.
+      final wires = DropReason.values.map((r) => r.wire).toList();
+      expect(wires.toSet(), hasLength(wires.length));
+      expect(wires, everyElement(isNotEmpty));
+    });
+
+    test('the agent-choice reasons are exactly the two the report subtracts',
+        () {
+      // The server subtracts only these from its loss count; anything else,
+      // including a reason it does not recognise, counts as a photo lost.
+      // Adding a case here without telling the backend makes a deliberate
+      // deletion read as an incident — which is the safe direction, but still
+      // wrong, so this pins the current agreement.
+      expect(DropReason.removedInReview.wire, 'removed_in_review');
+      expect(DropReason.discardedByAgent.wire, 'discarded_by_agent');
+      // A real loss, and deliberately not on that list.
+      expect(DropReason.enqueueFailed.wire, 'enqueue_failed');
+    });
+  });
+
   group('a photo is named at the shutter', () {
     test('every capture gets its own id', () {
       final a = CapturedPhoto(File('/tmp/a.jpg'));
@@ -135,6 +158,53 @@ void main() {
       );
 
       expect(PendingUpload.fromJson(item.toJson()).sensorRotation, isNull);
+    });
+  });
+
+  group('bake outcome', () {
+    test('the orientation sources serialise as the documented vocabulary', () {
+      // These feed `meta.bake` on upload_ok verbatim via `.name`. They are
+      // single lowercase words, so there is no camelCase/snake_case question
+      // here — but if one is ever renamed, the report's vocabulary changes
+      // with it and this is where that shows up.
+      expect(PhotoOrientationSource.exif.name, 'exif');
+      expect(PhotoOrientationSource.sensor.name, 'sensor');
+      expect(PhotoOrientationSource.unknown.name, 'unknown');
+    });
+
+    test('survives the queue, because the bake and the upload can be days '
+        'apart', () {
+      // Persisted for the same reason sensorRotation is: a photo baked in one
+      // session may not upload until another, and `upload_ok` is where the
+      // outcome is reported.
+      final item = PendingUpload(
+        id: 'shot_1',
+        propertyId: 15753,
+        path: '/tmp/a.jpg',
+        clientUploadId: '1788176218829168_1',
+        roomTag: null,
+        needsProcessing: false,
+        bakeOutcome: 'sensor',
+        sensorRotation: 90,
+        createdAt: 1,
+      );
+
+      expect(PendingUpload.fromJson(item.toJson()).bakeOutcome, 'sensor');
+    });
+
+    test('is null on a row that has not been baked yet', () {
+      final raw = PendingUpload(
+        id: 'shot_2',
+        propertyId: 15753,
+        path: '/tmp/b.jpg',
+        clientUploadId: 'b',
+        roomTag: null,
+        needsProcessing: true,
+        createdAt: 1,
+      );
+
+      expect(raw.bakeOutcome, isNull);
+      expect(PendingUpload.fromJson(raw.toJson()).bakeOutcome, isNull);
     });
   });
 

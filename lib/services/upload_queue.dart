@@ -70,21 +70,48 @@ class PendingUpload {
   /// A photo is queued at the shutter, before processing, so that the durable
   /// row exists within milliseconds of the file appearing on disk.
   ///
-  /// The drainer skips these until the bake has run. Not because raw pixels
-  /// are a catastrophe — `uploadImage()` runs `ImageOrientationNormalizer`
-  /// before any thumbnail or downscale, so a file that carries usable EXIF
-  /// comes out upright whatever we send. The gate is for the files that carry
-  /// *no* usable orientation: the in-app camera on HUAWEI/HONOR firmware
-  /// writes non-upright pixels under `Orientation => 0` or no tag at all, and
-  /// for those the capture-time [sensorRotation] is the only thing that knows
-  /// which way is up. The server is a safety net under this bake, not a
-  /// substitute for it.
+  /// The drainer skips these until the bake has run, because **for this
+  /// capture path the bake is the only defence there is.**
+  ///
+  /// It is tempting to treat the server as a backstop — `uploadImage()` does
+  /// run `ImageOrientationNormalizer` ahead of any thumbnail or downscale, and
+  /// it does rescue EXIF-bearing files. It cannot rescue ours. Its device
+  /// heuristic needs three things at once: a `Make` on the known list, a
+  /// missing or invalid `Orientation`, **and a portrait-shaped canvas**. Our
+  /// files fail the third — a portrait shot arrives in a 2560x1920 landscape
+  /// buffer, and with no orientation tag that is indistinguishable from a
+  /// genuinely landscape photo. There is no signal left to read, and the
+  /// server deliberately declines to guess rather than turn real landscapes on
+  /// their side. Most of our files carry no `Make` at all, so the heuristic is
+  /// never even reached, and the normaliser is JPEG-only, so a queued HEIC
+  /// gets nothing whatsoever.
+  ///
+  /// The capture-time [sensorRotation] is the only thing that can resolve it.
+  /// Skip the bake and the photo ships sideways.
   ///
   /// Persisted, so a bake interrupted by a kill is simply redone on the next
   /// launch from the raw bytes the queue already owns. Processing used to
   /// happen before the photo was durable at all, which meant an interruption
   /// lost it outright.
   bool needsProcessing;
+
+  /// How the bake resolved this photo's orientation, once it has run. Null
+  /// until then.
+  ///
+  ///  * `exif` — the file's own tag was valid and was baked in.
+  ///  * `sensor` — the tag was missing or invalid and [sensorRotation] rescued
+  ///    it. This is the case nothing else could have fixed.
+  ///  * `unknown` — no usable tag *and* no sensor reading. The pixels were
+  ///    left as they were, so this photo may be sideways.
+  ///  * `unbaked` — the original was uploaded untouched, because the decode
+  ///    failed or the source exceeded the decode budget.
+  ///  * `error` — processing threw.
+  ///
+  /// Persisted because the bake and the upload can happen in different
+  /// sessions, and reported on `upload_ok`: the server cannot tell a correctly
+  /// baked photo from an unbaked one (both arrive with no EXIF over a
+  /// landscape canvas), so this is the only place that answer exists.
+  String? bakeOutcome;
 
   /// Clockwise degrees the raw pixels must be rotated to sit upright, as read
   /// from the device at capture. Persisted because the bake can now happen
@@ -110,6 +137,7 @@ class PendingUpload {
     this.batchId,
     required this.roomTag,
     this.needsProcessing = false,
+    this.bakeOutcome,
     this.sensorRotation,
     this.state = PendingUploadState.pending,
     this.error,
@@ -127,6 +155,7 @@ class PendingUpload {
         'batch_id': batchId,
         'room_tag': roomTag,
         'needs_processing': needsProcessing,
+        'bake_outcome': bakeOutcome,
         'sensor_rotation': sensorRotation,
         // `uploading` is in-flight only; persist it as pending so a kill
         // mid-request leaves a photo the drainer will pick up again.
@@ -151,6 +180,7 @@ class PendingUpload {
       // Rows written before the shutter-time enqueue existed were already
       // processed before they were persisted, so absent means "done".
       needsProcessing: j['needs_processing'] == true,
+      bakeOutcome: j['bake_outcome'] as String?,
       sensorRotation: (j['sensor_rotation'] as num?)?.toInt(),
       state: j['state'] == 'failed'
           ? PendingUploadState.failed
@@ -374,7 +404,8 @@ class UploadQueue extends ChangeNotifier {
   /// up. The old file is deleted only once the new path is committed, so a
   /// kill in between leaves a photo with bytes rather than a row pointing at
   /// nothing.
-  Future<void> markProcessed(String id, {String? processedPath}) async {
+  Future<void> markProcessed(String id,
+      {String? processedPath, String? bakeOutcome}) async {
     await _ensureLoaded();
     final item = _find(id);
     if (item == null) return;
@@ -382,6 +413,7 @@ class UploadQueue extends ChangeNotifier {
     if (processedPath != null && processedPath != previous) {
       item.path = processedPath;
     }
+    item.bakeOutcome = bakeOutcome;
     item.needsProcessing = false;
     await _commit();
     if (item.path != previous) {
