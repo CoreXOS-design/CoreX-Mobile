@@ -10,6 +10,8 @@ import 'gallery_upload_sheet.dart';
 import 'p24_location_picker.dart';
 import 'property_option_dropdown.dart';
 import 'spaces_editor_section.dart';
+import '../../services/upload_service.dart';
+import '../../widgets/properties/property_gallery.dart';
 
 /// One required field that's currently empty. Used by the
 /// "Missing Required Fields" modal.
@@ -104,17 +106,28 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
   String? _optionsError;
 
   // Step 4 — Gallery
-  Map<String, List<String>> _existingImages = {};
+  /// The property's photos as the server groups them — rooms plus the
+  /// `unsorted` bucket. See [GalleryCategories]: reading only `categories`
+  /// left untagged photos stored on the property but rendered nowhere.
+  GalleryCategories _gallery = GalleryCategories.empty;
   GalleryTagsData? _liveTags;
+
+  /// [UploadService.successCount] as of the last property fetch, so photos
+  /// landed by the background drainer pull their real URLs in instead of
+  /// sitting as local placeholders until the screen happens to reload.
+  int _seenUploads = 0;
 
   @override
   void initState() {
     super.initState();
+    _seenUploads = UploadService.instance.successCount;
+    UploadService.instance.addListener(_onUploadsChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadOptions());
   }
 
   @override
   void dispose() {
+    UploadService.instance.removeListener(_onUploadsChanged);
     _pageController.dispose();
     _streetNumber.dispose();
     _streetName.dispose();
@@ -299,17 +312,32 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
     }
     final p = provider.selectedProperty;
     if (p != null && mounted) {
-      setState(() {
-        if (p.galleryCategories != null) {
-          final cats = p.galleryCategories!['categories'];
-          if (cats is Map<String, dynamic>) {
-            _existingImages = cats.map((k, v) =>
-                MapEntry(k, List<String>.from(v is List ? v : [])));
-          }
-        }
-      });
+      setState(() => _gallery = GalleryCategories.fromJson(p.galleryCategories));
     }
     await _loadGalleryTags();
+  }
+
+  /// Adopts a `gallery/assign` response as the new truth for this screen — the
+  /// gallery and the tag list together, so a filed photo moves without a
+  /// reload and the room picker can't keep offering a room that just went away.
+  void _adoptAssignResult(GalleryAssignResult result) {
+    setState(() {
+      _gallery = result.categories;
+      if (result.availableTags.isNotEmpty) {
+        _liveTags = (_liveTags ?? GalleryTagsData.empty(_propertyId ?? 0))
+            .withAvailable(result.availableTags);
+      }
+    });
+  }
+
+  void _onUploadsChanged() {
+    final service = UploadService.instance;
+    // Wait for the run to finish rather than refetching per photo: a 27-photo
+    // batch would otherwise fire 27 property GETs in thirteen seconds.
+    if (service.isRunning) return;
+    if (service.successCount == _seenUploads) return;
+    _seenUploads = service.successCount;
+    if (mounted) _refreshProperty();
   }
 
   // ---- Save flow ----
@@ -982,9 +1010,6 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
     final liveTags = _liveTags?.availableTags.isNotEmpty == true
         ? _liveTags!.availableTags
         : (p?.galleryTags ?? const <String>[]);
-    final extraKeys = _existingImages.keys
-        .where((k) => !liveTags.contains(k))
-        .toList();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -1010,18 +1035,16 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          if (liveTags.isEmpty && extraKeys.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              child: Text(
-                'No photos yet. Add spaces first to unlock tags, or tap Upload to add untagged photos.',
-                style: TextStyle(color: AppTheme.textSecondary(context)),
-              ),
-            )
-          else ...[
-            ...liveTags.map((tag) => _gallerySection(tag, isLive: true)),
-            ...extraKeys.map((tag) => _gallerySection(tag, isLive: false)),
-          ],
+          PropertyGallery(
+            propertyId: _propertyId!,
+            gallery: _gallery,
+            availableTags: liveTags,
+            enabled: !_saving,
+            onAssigned: _adoptAssignResult,
+            onRefreshRequested: _refreshProperty,
+            onAddPhotos: ({String? initialTag}) =>
+                _openUploadSheet(initialTag: initialTag),
+          ),
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
@@ -1038,73 +1061,6 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
                   : const Text('Save Property'),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _gallerySection(String tag, {required bool isLive}) {
-    final existing = _existingImages[tag] ?? const <String>[];
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '$tag  ·  ${existing.length}',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary(context)),
-                ),
-              ),
-              if (isLive)
-                TextButton.icon(
-                  onPressed: _saving
-                      ? null
-                      : () => _openUploadSheet(initialTag: tag),
-                  icon: const Icon(Icons.add_a_photo, size: 14),
-                  label: const Text('Add Photo'),
-                  style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.brand,
-                      padding: const EdgeInsets.symmetric(horizontal: 8)),
-                ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          if (existing.isEmpty)
-            Text(
-              'No photos in this group yet.',
-              style: TextStyle(
-                  fontSize: 12, color: AppTheme.textSecondary(context)),
-            )
-          else
-            SizedBox(
-              height: 90,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: existing.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (_, i) => ClipRRect(
-                  borderRadius: BorderRadius.circular(AppTheme.radius),
-                  child: Image.network(
-                    existing[i],
-                    width: 120,
-                    height: 90,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      width: 120,
-                      height: 90,
-                      color: AppTheme.surface2(context),
-                      child: Icon(Icons.broken_image,
-                          color: AppTheme.textMuted(context)),
-                    ),
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );

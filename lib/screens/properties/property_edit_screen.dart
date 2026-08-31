@@ -3,12 +3,15 @@ import 'package:provider/provider.dart';
 import '../../models/gallery_tags.dart';
 import '../../models/property_options.dart';
 import '../../services/api_service.dart';
+import '../../services/upload_service.dart';
 import '../../theme.dart';
 import '../../providers/property_provider.dart';
 import 'gallery_upload_sheet.dart';
 import 'p24_location_picker.dart';
 import 'property_option_dropdown.dart';
 import 'spaces_editor_section.dart';
+import '../../models/space.dart';
+import '../../widgets/properties/property_gallery.dart';
 
 class PropertyEditScreen extends StatefulWidget {
   final int propertyId;
@@ -67,24 +70,52 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
   PropertyOptions? _options;
   String? _optionsError;
 
-  /// Existing gallery thumbnails keyed by tag. Mirrors the backend's
-  /// `gallery_categories.categories` map. A key of `Unsorted` holds
-  /// untagged photos.
-  Map<String, List<String>> _existingImages = {};
+  /// The property's photos as the server groups them: tagged rooms plus the
+  /// `unsorted` bucket. Re-seeded from the property payload, and replaced
+  /// wholesale by an assign response so a filed photo moves in one frame.
+  GalleryCategories _gallery = GalleryCategories.empty;
 
   /// Live gallery tags for the property. Fetched directly from
   /// `/gallery/tags` so we don't depend on the detail endpoint actually
   /// including the `gallery_tags` field.
   GalleryTagsData? _liveTags;
+
+  /// The Spaces catalog, used only to tell a space-derived tag ("Scullery",
+  /// "Braai Room") from a custom one the agent typed. It is fetched rather
+  /// than hard-coded because the catalog now runs to about fifty space types
+  /// and grows server-side: any pattern baked into the app would start
+  /// mislabelling rooms the moment the catalog moved. Cached for 24h by
+  /// [ApiService.getSpacesCatalog], so this costs nothing after the first load.
+  SpacesCatalog? _spacesCatalog;
+
   final ApiService _api = ApiService();
+
+  /// [UploadService.successCount] as of the last property fetch. When the
+  /// background drainer lands photos we weren't watching for, this is how the
+  /// gallery notices and pulls the real URLs in — otherwise a photo would sit
+  /// as a local placeholder until the agent happened to reload the screen.
+  int _seenUploads = 0;
 
   @override
   void initState() {
     super.initState();
+    _seenUploads = UploadService.instance.successCount;
+    UploadService.instance.addListener(_onUploadsChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadProperty();
       _loadOptions();
+      _loadSpacesCatalog();
     });
+  }
+
+  void _onUploadsChanged() {
+    final service = UploadService.instance;
+    // Wait for the run to finish rather than refetching per photo: a 27-photo
+    // batch would otherwise fire 27 property GETs in thirteen seconds.
+    if (service.isRunning) return;
+    if (service.successCount == _seenUploads) return;
+    _seenUploads = service.successCount;
+    if (mounted) _loadProperty();
   }
 
   Future<void> _loadOptions({bool forceRefresh = false}) async {
@@ -129,6 +160,32 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
     } catch (_) {
       // Fall back to whatever was on the property detail — not fatal.
     }
+  }
+
+  Future<void> _loadSpacesCatalog() async {
+    try {
+      final catalog = await _api.getSpacesCatalog();
+      if (!mounted) return;
+      setState(() => _spacesCatalog = catalog);
+    } catch (_) {
+      // Only affects whether a tag chip offers a ×; not worth surfacing.
+    }
+  }
+
+  /// Adopts a `gallery/assign` response as the new truth for this screen.
+  ///
+  /// Both halves matter. The gallery re-renders the move without a reload, and
+  /// the tag list comes along because the server recomputes it in the same
+  /// breath — so a room deleted while the agent was filing can't leave the
+  /// picker offering it.
+  void _adoptAssignResult(GalleryAssignResult result) {
+    setState(() {
+      _gallery = result.categories;
+      if (result.availableTags.isNotEmpty) {
+        _liveTags = (_liveTags ?? GalleryTagsData.empty(widget.propertyId))
+            .withAvailable(result.availableTags);
+      }
+    });
   }
 
   Future<void> _loadProperty() async {
@@ -182,34 +239,11 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
         _applyOptionDefaults();
         // Snapshot for dirty diff (after all values are set above).
         _initialValues = _captureSnapshot();
-        // Parse gallery categories. The backend has returned a few shapes
-        // over the life of this endpoint — handle each so the grid actually
-        // renders the photos:
-        //   - { categories: { Tag: [url, url] } }            (legacy)
-        //   - { categories: { Tag: [{ url, ... }, ...] } }   (current)
-        //   - { Tag: [...] }                                  (flat)
-        if (p.galleryCategories != null) {
-          final raw = p.galleryCategories!;
-          final cats = raw['categories'] is Map ? raw['categories'] as Map : raw;
-          _existingImages = <String, List<String>>{};
-          cats.forEach((k, v) {
-            if (v is! List) return;
-            final urls = <String>[];
-            for (final item in v) {
-              // Image URLs from the mobile property API are already absolute
-              // (https://host/storage/...). Use them as-is — no host-prefixing.
-              if (item is String) {
-                if (item.isNotEmpty) urls.add(item);
-              } else if (item is Map) {
-                final u = item['url'] ?? item['src'] ?? item['path'];
-                if (u is String && u.isNotEmpty) {
-                  urls.add(u);
-                }
-              }
-            }
-            _existingImages[k.toString()] = urls;
-          });
-        }
+        // Photos, including the `unsorted` bucket — see [GalleryCategories],
+        // which absorbs every shape this endpoint has emitted. Reading only
+        // `categories` (as this did) is what left untagged photos on the
+        // property but on no screen.
+        _gallery = GalleryCategories.fromJson(p.galleryCategories);
         _loaded = true;
       });
     }
@@ -217,6 +251,7 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
 
   @override
   void dispose() {
+    UploadService.instance.removeListener(_onUploadsChanged);
     _pageController.dispose();
     _streetNumber.dispose();
     _streetName.dispose();
@@ -762,19 +797,12 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
   }
 
   Widget _stepGallery() {
-    // Groups to render = the property's live gallery_tags, in order, then any
-    // extra keys in gallery_categories (e.g. "Unsorted") that aren't in the
-    // tag list — that bucket holds untagged photos and any stale tags from
-    // before a space was removed.
     final p = context.watch<PropertyProvider>().selectedProperty;
     // Prefer the dedicated /gallery/tags response; fall back to whatever
     // the detail endpoint carried.
     final liveTags = _liveTags?.availableTags.isNotEmpty == true
         ? _liveTags!.availableTags
         : (p?.galleryTags ?? const <String>[]);
-    final extraKeys = _existingImages.keys
-        .where((k) => !liveTags.contains(k))
-        .toList();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -800,18 +828,16 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          if (liveTags.isEmpty && extraKeys.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              child: Text(
-                'No photos yet. Add spaces first to unlock tags, or tap Upload to add untagged photos.',
-                style: TextStyle(color: AppTheme.textSecondary(context)),
-              ),
-            )
-          else ...[
-            ...liveTags.map((tag) => _gallerySection(tag, isLive: true)),
-            ...extraKeys.map((tag) => _gallerySection(tag, isLive: false)),
-          ],
+          PropertyGallery(
+            propertyId: widget.propertyId,
+            gallery: _gallery,
+            availableTags: liveTags,
+            enabled: !_saving,
+            onAssigned: _adoptAssignResult,
+            onRefreshRequested: _loadProperty,
+            onAddPhotos: ({String? initialTag}) =>
+                _openUploadSheet(initialTag: initialTag),
+          ),
           const SizedBox(height: 16),
           _customTagManager(liveTags),
           const SizedBox(height: 24),
@@ -832,14 +858,31 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
     );
   }
 
-  /// Tags that are derived from the spaces catalog (Bedroom 1, Bathroom 2,
-  /// Garage, etc.) — these can't be removed via the tag endpoint, so we hide
-  /// the × on the chip. Backend silently no-ops a delete; UX is just cleaner
-  /// without the affordance.
-  static final RegExp _derivedTagPattern = RegExp(
-      r'^(Bedroom|Bathroom|Garage|Kitchen|Lounge|Dining Room|Study|Patio|Garden|Pool|Flatlet)( \d+)?$');
+  /// Strips a trailing instance number, so "Bedroom 3" is compared as
+  /// "Bedroom". Space-derived tags are numbered per property; the catalog
+  /// lists the unnumbered type.
+  static final RegExp _instanceSuffix = RegExp(r'\s+\d+$');
 
-  bool _isDerivedTag(String tag) => _derivedTagPattern.hasMatch(tag);
+  /// True when [tag] is derived from the spaces catalog rather than typed by
+  /// the agent. Derived tags can't be removed via the tag endpoint — the
+  /// backend silently no-ops the delete — so we hide the × on their chip.
+  ///
+  /// Decided against the *live* catalog, never a pattern baked into the app.
+  /// This used to be a regex listing eleven room names; the catalog now offers
+  /// around fifty (Entrance Hall, Scullery, Braai Room, Laundry Room…) and
+  /// grows without an app release, so every space type the regex had never
+  /// heard of was being mislabelled as a custom tag and offered a delete that
+  /// does nothing.
+  ///
+  /// Until the catalog loads, nothing is treated as custom: an affordance that
+  /// silently fails is worse than one that appears a moment late.
+  bool _isDerivedTag(String tag) {
+    final catalog = _spacesCatalog;
+    if (catalog == null) return true;
+    final base = tag.replaceFirst(_instanceSuffix, '').trim();
+    return catalog.allSpaceTypes
+        .any((t) => t.trim().toLowerCase() == base.toLowerCase());
+  }
 
   Widget _customTagManager(List<String> liveTags) {
     // Custom tags = anything in the live list that isn't derived from a
@@ -1017,113 +1060,6 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
         SnackBar(content: Text(e.message)),
       );
     }
-  }
-
-  Widget _gallerySection(String tag, {required bool isLive}) {
-    final existing = _existingImages[tag] ?? const <String>[];
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.surface(context),
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppTheme.borderColor(context)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-            decoration: BoxDecoration(
-              color: AppTheme.surface2(context),
-              borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(AppTheme.radius)),
-              border: Border(
-                bottom: BorderSide(color: AppTheme.borderColor(context)),
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          tag,
-                          style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textPrimary(context)),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppTheme.brand.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          '${existing.length}',
-                          style: TextStyle(
-                              color: AppTheme.brand,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (isLive)
-                  TextButton.icon(
-                    onPressed: _saving
-                        ? null
-                        : () => _openUploadSheet(initialTag: tag),
-                    icon: const Icon(Icons.add_a_photo, size: 14),
-                    label: const Text('Add Photo'),
-                    style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.brand,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        minimumSize: const Size(0, 32)),
-                  ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: existing.isEmpty
-                ? Text(
-                    'No photos in this group yet.',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary(context)),
-                  )
-                : SizedBox(
-                    height: 90,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: existing.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 8),
-                      itemBuilder: (_, i) => ClipRRect(
-                        borderRadius: BorderRadius.circular(AppTheme.radius),
-                        child: Image.network(existing[i],
-                            width: 120,
-                            height: 90,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                                  width: 120,
-                                  height: 90,
-                                  color: AppTheme.surface2(context),
-                                  child: Icon(Icons.broken_image,
-                                      color: AppTheme.textMuted(context)),
-                                )),
-                      ),
-                    ),
-                  ),
-          ),
-        ],
-      ),
-    );
   }
 
   // ---- Shared widgets ----

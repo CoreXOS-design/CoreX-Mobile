@@ -83,3 +83,149 @@ class UploadedImage {
     this.duplicate = false,
   });
 }
+
+/// The `gallery_categories` block on the mobile property payload.
+///
+/// ```json
+/// { "categories": { "Bathroom 3": ["https://.../a.jpg"] },
+///   "unsorted":   ["https://.../b.jpg"] }
+/// ```
+///
+/// [unsorted] is the bucket of photos that reached the property with no
+/// `room_tag`. It used to be absent from the payload entirely, which is how an
+/// untagged photo could be stored server-side and still appear on no screen —
+/// the agent's "some didn't upload" report was really "uploaded, nowhere to
+/// look". Parse it even when the key is missing (older servers) so callers can
+/// treat "no unsorted section" and "an empty one" the same way.
+///
+/// [fromJson] is deliberately generous, because this endpoint has emitted
+/// several shapes over its life and a property created under an older one is
+/// still in the database:
+///
+///   - `{ categories: { Tag: [url, ...] }, unsorted: [url, ...] }`  (current)
+///   - `{ categories: { Tag: [{ url, ... }, ...] } }`               (objects)
+///   - `{ categories: { Tag: [...], Unsorted: [...] } }`            (legacy
+///     bucket nested as an ordinary category — folded into [unsorted])
+///   - `{ Tag: [...] }`                                             (flat)
+class GalleryCategories {
+  /// Tag → photo URLs, in server order. Never contains the unsorted bucket.
+  final Map<String, List<String>> categories;
+
+  /// Photos on the property with no room tag.
+  final List<String> unsorted;
+
+  const GalleryCategories({
+    required this.categories,
+    required this.unsorted,
+  });
+
+  static const GalleryCategories empty =
+      GalleryCategories(categories: {}, unsorted: []);
+
+  /// The key older servers used for the untagged bucket, before `unsorted`
+  /// became a sibling of `categories`. Matched case-insensitively.
+  static const String _legacyUnsortedKey = 'unsorted';
+
+  factory GalleryCategories.fromJson(dynamic raw) {
+    if (raw is! Map) return empty;
+    final hasCategoriesKey = raw['categories'] is Map;
+    final cats = hasCategoriesKey ? raw['categories'] as Map : raw;
+
+    final out = <String, List<String>>{};
+    final unsorted = <String>[];
+
+    cats.forEach((k, v) {
+      final key = k.toString();
+      // A flat-shaped payload has `unsorted` sitting alongside the tags; don't
+      // mistake it for a room called "unsorted".
+      final isUnsorted = key.trim().toLowerCase() == _legacyUnsortedKey;
+      final urls = _urlList(v);
+      if (isUnsorted) {
+        unsorted.addAll(urls);
+      } else {
+        out[key] = urls;
+      }
+    });
+
+    // The modern shape. Read it only when `categories` was its own key —
+    // otherwise `cats` IS the root map and we already consumed it above.
+    if (hasCategoriesKey) {
+      unsorted.addAll(_urlList(raw[_legacyUnsortedKey]));
+    }
+
+    return GalleryCategories(
+      categories: out,
+      // The same photo can arrive from both the legacy nested bucket and the
+      // modern sibling key on a server mid-migration.
+      unsorted: unsorted.toSet().toList(),
+    );
+  }
+
+  /// Image URLs from the mobile property API are already absolute
+  /// (https://host/storage/...), so entries are used as-is — no host-prefixing.
+  static List<String> _urlList(dynamic v) {
+    if (v is! List) return const [];
+    final urls = <String>[];
+    for (final item in v) {
+      if (item is String) {
+        if (item.isNotEmpty) urls.add(item);
+      } else if (item is Map) {
+        final u = item['url'] ?? item['src'] ?? item['path'];
+        if (u is String && u.isNotEmpty) urls.add(u);
+      }
+    }
+    return urls;
+  }
+
+  int get totalCount =>
+      unsorted.length +
+      categories.values.fold<int>(0, (sum, v) => sum + v.length);
+}
+
+/// Response of `PUT /api/v1/mobile/properties/{id}/gallery/assign`.
+///
+/// The server answers every outcome — full success, partial, and the 422s —
+/// with the property's freshly recomputed [categories] and [availableTags], so
+/// a caller re-renders straight from this and never needs a follow-up GET.
+///
+/// [unknownImages] being non-empty alongside a positive [moved] is a *partial*
+/// success (HTTP 200): those URLs are no longer on this property, so the
+/// caller's list is stale. Show what moved, then refresh.
+class GalleryAssignResult {
+  final String message;
+  final int moved;
+  final List<String> unknownImages;
+
+  /// The tag the photos were filed under; `null` means they were moved back
+  /// to Unsorted.
+  final String? roomTag;
+  final GalleryCategories categories;
+  final List<String> availableTags;
+
+  const GalleryAssignResult({
+    required this.message,
+    required this.moved,
+    required this.unknownImages,
+    required this.roomTag,
+    required this.categories,
+    required this.availableTags,
+  });
+
+  bool get isPartial => moved > 0 && unknownImages.isNotEmpty;
+
+  factory GalleryAssignResult.fromJson(Map<String, dynamic> json) {
+    final moved = json['moved'];
+    return GalleryAssignResult(
+      message: json['message']?.toString() ?? 'Photos filed.',
+      moved: moved is num ? moved.toInt() : int.tryParse('$moved') ?? 0,
+      unknownImages: (json['unknown_images'] is List)
+          ? (json['unknown_images'] as List).map((e) => e.toString()).toList()
+          : const [],
+      roomTag: json['room_tag']?.toString(),
+      categories: GalleryCategories.fromJson(json['gallery_categories']),
+      availableTags: (json['available_tags'] is List)
+          ? (json['available_tags'] as List).map((e) => e.toString()).toList()
+          : const [],
+    );
+  }
+}

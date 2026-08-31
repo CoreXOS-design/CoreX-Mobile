@@ -1988,6 +1988,112 @@ class ApiService {
     throw ApiException(response.statusCode, 'Failed to load gallery tags');
   }
 
+  /// Files [images] under [roomTag], or moves them back to Unsorted when
+  /// [roomTag] is `null`.
+  ///
+  /// [images] are the photo URLs exactly as the API handed them over — the
+  /// server matches on them verbatim, so never normalise, re-encode or
+  /// host-strip them on the way back.
+  ///
+  /// The 200 body carries the property's recomputed `gallery_categories` and
+  /// `available_tags`, so the caller re-renders straight from the returned
+  /// [GalleryAssignResult] and needs no follow-up GET.
+  ///
+  /// Three failure modes, each separately actionable:
+  ///  * [TagValidationException] — 422 whose `errors.room_tag` says the tag
+  ///    isn't on this property. Carries the refreshed list; re-prompt against
+  ///    it rather than retrying the same tag.
+  ///  * [StaleGalleryImagesException] — 422 with `moved: 0` and a populated
+  ///    `unknown_images`: none of those URLs are on this property any more, so
+  ///    the caller's list is stale and needs re-fetching.
+  ///  * [ApiException] 403 — no access to the property, or an assistant
+  ///    account without property writes.
+  ///
+  /// A *partial* success is not an error: it arrives as a 200 with `moved > 0`
+  /// AND a populated `unknown_images` ([GalleryAssignResult.isPartial]), and is
+  /// returned normally so the caller can report what moved and refresh the rest.
+  Future<GalleryAssignResult> assignGalleryImages(
+      int propertyId, List<String> images, String? roomTag) async {
+    if (images.isEmpty) {
+      throw ApiException(422, 'Select at least one photo to file');
+    }
+    final response = await http
+        .put(
+          Uri.parse('$baseUrl/v1/mobile/properties/$propertyId/gallery/assign'),
+          headers: await _headers(),
+          // `room_tag: null` is meaningful — it is how photos are moved back
+          // to Unsorted — so the key is always sent, never omitted.
+          body: jsonEncode({'images': images, 'room_tag': roomTag}),
+        )
+        .timeout(_timeout);
+
+    await _handleUnauthorized(response.statusCode, response.body);
+
+    Map<String, dynamic>? body;
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map) body = Map<String, dynamic>.from(decoded);
+    } catch (_) {}
+
+    if (response.statusCode == 200) {
+      if (body == null) {
+        throw ApiException(200, "The server's response could not be read");
+      }
+      invalidateOverviewCache(propertyId);
+      return GalleryAssignResult.fromJson(body);
+    }
+
+    if (response.statusCode == 422) {
+      List<String>? available;
+      if (body?['available_tags'] is List) {
+        available =
+            (body!['available_tags'] as List).map((e) => e.toString()).toList();
+      }
+      final unknown = (body?['unknown_images'] is List)
+          ? (body!['unknown_images'] as List).map((e) => e.toString()).toList()
+          : const <String>[];
+      String? tagError;
+      if (body?['errors'] is Map) {
+        final e = (body!['errors'] as Map)['room_tag'];
+        if (e is List && e.isNotEmpty) tagError = e.first.toString();
+      }
+      String? message;
+      if (body?['message'] is String && (body!['message'] as String).isNotEmpty) {
+        message = body['message'] as String;
+      }
+
+      // Two unrelated failures share this status and need opposite handling —
+      // the same split [uploadPropertyImage] makes. `errors.room_tag` is the
+      // discriminator for the tag case: it is the only one a re-prompt can
+      // fix. Everything else with a populated `unknown_images` is a stale
+      // photo list, which no amount of re-tagging repairs.
+      if (tagError != null && available != null) {
+        throw TagValidationException(tagError, available);
+      }
+      if (unknown.isNotEmpty) {
+        throw StaleGalleryImagesException(
+          message ?? 'Those photos are no longer on this property',
+          unknown,
+          availableTags: available,
+        );
+      }
+      if (available != null) {
+        throw TagValidationException(
+            tagError ?? message ?? 'That room is not available on this property',
+            available);
+      }
+      throw ApiException(422, message ?? 'The server rejected that request');
+    }
+
+    if (response.statusCode == 403) {
+      throw ApiException(
+          403, "You don't have permission to edit this property's photos");
+    }
+
+    throw ApiException(
+        response.statusCode, _serverErrorMessage(response.body, 'file photos'));
+  }
+
   /// Best-effort MIME type for an outgoing multipart part, derived from the
   /// file extension. Without an explicit content-type the `http` package can
   /// send `application/octet-stream`, which some backends reject. Pass
@@ -2178,6 +2284,24 @@ class ApiService {
     if (status == 413) {
       throw ApiException(
           413, 'Image is too large to upload. Please try a smaller photo.');
+    }
+
+    // The photo is already on the server under this `client_upload_id`. That
+    // is a success from the queue's point of view — the bytes landed — so
+    // report it as a dedupe hit rather than a failure the agent has to retry
+    // forever. `room_tag` is not readable on this path; see
+    // [UploadedImage.duplicate].
+    if (status == 409) {
+      return const UploadedImage(url: '', duplicate: true);
+    }
+
+    // Not routed through [_handleUnauthorized]'s debounce on purpose: the
+    // background drainer replays this call unattended, and two queued photos
+    // failing in the same second would trip the "second 401 confirms expiry"
+    // rule on what may be one transient blip. The drainer stops the run and
+    // waits for the ordinary re-login flow instead — see [UploadService].
+    if (status == 401) {
+      throw ApiException(401, 'Your session has expired. Please sign in again.');
     }
 
     throw ApiException(status, 'Failed to upload image');
@@ -3314,6 +3438,26 @@ class ApiException implements Exception {
 class TagValidationException extends ApiException {
   final List<String> availableTags;
   TagValidationException(String message, this.availableTags)
+      : super(422, message);
+}
+
+/// Thrown by [ApiService.assignGalleryImages] when the server reports that
+/// none of the submitted URLs are on this property any more (`moved: 0` with a
+/// populated `unknown_images`).
+///
+/// This is a *stale list*, not a bad request: the photos were deleted or
+/// re-filed elsewhere since the caller last read the gallery. The fix is to
+/// re-fetch the property and drop the rows in [unknownImages] — retrying the
+/// same URLs can only fail the same way.
+class StaleGalleryImagesException extends ApiException {
+  final List<String> unknownImages;
+
+  /// Present when the server also sent a refreshed tag list; the tag itself
+  /// was not the problem, but there is no reason to throw the list away.
+  final List<String>? availableTags;
+
+  StaleGalleryImagesException(String message, this.unknownImages,
+      {this.availableTags})
       : super(422, message);
 }
 

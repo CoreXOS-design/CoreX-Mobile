@@ -1,23 +1,29 @@
+import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../models/gallery_tags.dart';
 import '../../services/api_service.dart';
 import '../../services/upload_queue.dart';
+import '../../services/upload_service.dart';
 import '../../theme.dart';
 import '../../utils/image_processing.dart';
 import '../../utils/image_upload.dart';
 import 'camera_info.dart';
 import 'multi_capture_camera.dart';
 
-/// Modal bottom sheet for uploading one or more photos to a property.
+/// Modal bottom sheet for adding photos to a property.
 ///
-/// On open it fetches the property's live tag list (not cached — tags change
-/// as the agent edits spaces). Users pick a tag (or "No tag"), queue up
-/// images from camera or gallery, then tap Upload which posts each image
-/// sequentially. If the server rejects a tag (422) the sheet refreshes its
-/// local tag list from the response and prompts the user to re-select.
+/// On open it fetches the property's live tag list (not cached — tags change as
+/// the agent edits spaces). The agent picks a room (or "No tag") and shoots;
+/// each photo is stamped with the selection live at that moment and handed to
+/// the durable [UploadQueue].
+///
+/// **This sheet does not upload.** [UploadService] does, on its own schedule,
+/// whether or not this sheet is open. That split is the point: uploading used
+/// to happen only while this sheet was on screen, so closing it stranded the
+/// batch — silently, for as long as the agent stayed away. Everything here is
+/// capture and visibility; the drain runs regardless.
 class GalleryUploadSheet extends StatefulWidget {
   final int propertyId;
   final String? initialTag;
@@ -28,8 +34,9 @@ class GalleryUploadSheet extends StatefulWidget {
     this.initialTag,
   });
 
-  /// Opens the sheet. Returns `true` if at least one image was uploaded
-  /// successfully — the caller can use that to refresh the property detail.
+  /// Opens the sheet. Returns `true` if at least one photo landed on the
+  /// server while it was open — the caller can use that to refresh the
+  /// property detail.
   static Future<bool?> show(
     BuildContext context, {
     required int propertyId,
@@ -56,6 +63,8 @@ class GalleryUploadSheet extends StatefulWidget {
 class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   final ApiService _api = ApiService();
   final ImagePicker _picker = ImagePicker();
+  final UploadQueue _queue = UploadQueue.instance;
+  final UploadService _uploader = UploadService.instance;
 
   GalleryTagsData? _tags;
   bool _loadingTags = true;
@@ -64,46 +73,33 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   // null means "No tag"
   String? _selectedTag;
 
-  /// All durable queue items for this property — both pending and failed.
-  /// Backed by [UploadQueue] so nothing is lost when the sheet closes.
-  final List<PendingUpload> _items = [];
-
-  /// Up to this many uploads run at once — bounded so we never fire the whole
-  /// batch at the server (or the radio) simultaneously.
-  static const int _maxConcurrent = 3;
-
-  /// Attempts per photo before it is marked failed (1 initial + retries).
-  static const int _maxAttempts = 3;
-
-  /// Ids currently mid-request, for the per-photo spinner.
-  final Set<String> _inFlight = {};
-
-  /// Set when a stale-tag 422 aborts the run so the summary is suppressed.
-  bool _cancelBatch = false;
-
-  /// Photos the server filed under something other than the tag we sent, as
-  /// "sent → filed" strings. Populated from the 201 body, reset per batch.
-  final List<String> _tagMismatches = [];
-
   /// True while picked photos are being downscaled/orientation-baked.
   bool _preparing = false;
 
-  final Random _rng = Random();
+  /// [UploadService.successCount] when the sheet opened. Anything above it on
+  /// close means the property changed and the caller should refetch — even if
+  /// the upload was driven by a background tick rather than by this sheet.
+  late final int _successesAtOpen;
 
-  bool _uploading = false;
-  int _uploadedCount = 0;
-  int _targetCount = 0;
-  bool _anySuccess = false;
+  /// The queue is the single source of truth for what is waiting; this sheet
+  /// keeps no parallel copy that could drift from it.
+  List<PendingUpload> get _items => _queue.cachedItemsFor(widget.propertyId);
+  List<PendingUpload> get _waiting => _items
+      .where((e) => e.state != PendingUploadState.failed)
+      .toList(growable: false);
+  List<PendingUpload> get _failed => _items
+      .where((e) => e.state == PendingUploadState.failed)
+      .toList(growable: false);
 
-  List<PendingUpload> get _pending =>
-      _items.where((e) => e.state == PendingUploadState.pending).toList();
-  List<PendingUpload> get _failed =>
-      _items.where((e) => e.state == PendingUploadState.failed).toList();
+  bool get _anySuccess => _uploader.successCount > _successesAtOpen;
 
   @override
   void initState() {
     super.initState();
     _selectedTag = widget.initialTag;
+    _successesAtOpen = _uploader.successCount;
+    _queue.addListener(_onChanged);
+    _uploader.addListener(_onChanged);
     _loadTags();
     _loadQueue();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -111,16 +107,22 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     });
   }
 
-  /// Restore any photos left over from a previous session (sheet closed or app
-  /// killed mid-upload) so the user can finish the batch.
+  @override
+  void dispose() {
+    _queue.removeListener(_onChanged);
+    _uploader.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  void _onChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// Warms the durable store so [_items] stops being empty; the listener
+  /// rebuilds us when it lands.
   Future<void> _loadQueue() async {
-    final items = await UploadQueue.instance.itemsFor(widget.propertyId);
-    if (!mounted) return;
-    setState(() {
-      _items
-        ..clear()
-        ..addAll(items);
-    });
+    await _queue.itemsFor(widget.propertyId);
+    if (mounted) setState(() {});
   }
 
   /// Downscale + orientation-bake each picked photo, then add it to the durable
@@ -131,6 +133,10 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   /// The bake has to happen here, before the photo becomes a queue item: the
   /// server's thumbnailer drops EXIF without rotating pixels, so anything that
   /// reaches it leaning on an orientation tag lands sideways on the web.
+  ///
+  /// [_selectedTag] is read *here*, per photo, and then belongs to the item.
+  /// This is the only moment the on-screen selection and the photo's room are
+  /// the same thing.
   Future<void> _enqueueAll(List<CapturedPhoto> photos) async {
     if (photos.isEmpty) return;
     if (mounted) setState(() => _preparing = true);
@@ -138,12 +144,11 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     for (final photo in photos) {
       final prepared = await prepareForUpload(photo);
       try {
-        final item = await UploadQueue.instance.enqueue(
+        await _queue.enqueue(
           propertyId: widget.propertyId,
           source: prepared.file,
           roomTag: _selectedTag,
         );
-        if (mounted) setState(() => _items.add(item));
       } catch (_) {
         // Couldn't copy into durable storage (e.g. storage full). Count it so
         // we can warn the user rather than losing the photo silently.
@@ -163,6 +168,10 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
       _showSnack(
           "Couldn't add $skipped photo${skipped == 1 ? '' : 's'} — device storage may be full");
     }
+    // Start moving straight away rather than waiting for the next tick. The
+    // agent is standing in the room; the sooner the count starts falling the
+    // sooner they can trust it.
+    unawaited(_uploader.flush());
   }
 
   Future<void> _loadTags() async {
@@ -176,7 +185,8 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
       setState(() {
         _tags = data;
         _loadingTags = false;
-        // Drop a pre-selected tag that is no longer valid
+        // Drop a pre-selected tag that is no longer valid. This touches the
+        // *selection only* — never the tag already stamped on a queued photo.
         if (_selectedTag != null &&
             !data.availableTags.contains(_selectedTag)) {
           _selectedTag = null;
@@ -197,44 +207,16 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     }
   }
 
-  /// Selects the tag stamped on photos added from here on, and re-tags any
-  /// already-queued photo whose stored tag the property no longer offers.
+  /// Selects the room stamped on photos added **from here on**, and nothing
+  /// else.
   ///
-  /// The re-tag half is what makes the stale-tag prompt actionable. A photo
-  /// carries the tag it was queued under (see [_enqueueAll]) and nothing at
-  /// drain time may overwrite it, or a chip selection that moves as the agent
-  /// works through the house files older photos in the wrong room. But when the
-  /// server rejects a tag as no longer on the property, that photo's stored tag
-  /// is unusable: every retry re-sends it, 422s again, and re-prompts — a loop
-  /// with no exit but deleting the photo, because nothing else in the sheet
-  /// writes [PendingUpload.roomTag] after enqueue.
-  ///
-  /// Re-tagging exactly the photos whose tag is gone breaks that loop and
-  /// cannot disturb a photo that is correctly filed.
-  Future<void> _selectTag(String? tag) async {
-    setState(() => _selectedTag = tag);
-    // Not loaded yet = no basis to call anything stale. A loaded-but-EMPTY list
-    // is different: it means the property has lost every space, so every tagged
-    // photo in the queue really is unfilable and needs moving to Unsorted.
-    final data = _tags;
-    if (data == null) return;
-    final available = data.availableTags;
-    // Never re-tag a photo mid-request: [_uploadOne] captured its tag before
-    // the attempt, so changing it here would leave the queue item disagreeing
-    // with what is actually on the wire.
-    final stale = _items
-        .where((e) =>
-            e.roomTag != null &&
-            !available.contains(e.roomTag) &&
-            !_inFlight.contains(e.id))
-        .toList();
-    if (stale.isEmpty) return;
-    for (final item in stale) {
-      item.roomTag = tag;
-      await UploadQueue.instance.setRoomTag(item.id, tag);
-    }
-    if (mounted) setState(() {});
-  }
+  /// It used to also rewrite the tag on every already-queued photo whose room
+  /// the property no longer offered. That was well-intentioned — a photo stuck
+  /// on a dead tag can only 422 forever — but it meant a single chip tap could
+  /// silently re-file a batch the agent shot twenty minutes ago, and tapping
+  /// "No tag" re-filed all of them to nothing. A queued photo's room is now
+  /// only ever changed one photo at a time, by name, through [_refile].
+  void _selectTag(String? tag) => setState(() => _selectedTag = tag);
 
   /// True when [item] is queued under a tag the property no longer offers, so
   /// uploading it as-is can only 422. Surfaced on the thumbnail.
@@ -242,6 +224,38 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     final data = _tags;
     if (data == null || item.roomTag == null) return false;
     return !data.availableTags.contains(item.roomTag);
+  }
+
+  /// Re-files one queued photo, by explicit choice, and kicks the queue.
+  ///
+  /// The escape hatch for a photo whose room has been deleted from the
+  /// property: without it every attempt 422s and the only way to clear the
+  /// queue is to throw the photo away.
+  Future<void> _refile(PendingUpload item) async {
+    final available = _tags?.availableTags ?? const <String>[];
+    final chosen = await showDialog<_RefileChoice>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text('File this photo under…',
+            style: TextStyle(color: AppTheme.textPrimary(ctx), fontSize: 16)),
+        children: [
+          for (final tag in available)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, _RefileChoice(tag)),
+              child: Text(tag,
+                  style: TextStyle(color: AppTheme.textPrimary(ctx))),
+            ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, const _RefileChoice(null)),
+            child: Text('Unsorted',
+                style: TextStyle(color: AppTheme.textSecondary(ctx))),
+          ),
+        ],
+      ),
+    );
+    if (chosen == null) return;
+    await _queue.setRoomTag(item.id, chosen.tag);
+    await _uploader.retry(item);
   }
 
   Future<void> _pickFromGallery() async {
@@ -287,216 +301,10 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     } catch (_) {/* user cancelled, ignore */}
   }
 
-  Future<void> _upload() async {
-    if (_uploading) return;
-    final pending = _pending;
-    if (pending.isEmpty) return;
-    await _runBatch(pending);
-  }
-
-  /// Upload [items] through a bounded worker pool with per-photo retry. A photo
-  /// leaves the queue only on a confirmed 2xx; everything else is retried or
-  /// marked failed so nothing is dropped silently.
-  Future<void> _runBatch(List<PendingUpload> items) async {
-    if (items.isEmpty) return;
-    setState(() {
-      _uploading = true;
-      _cancelBatch = false;
-      _uploadedCount = 0;
-      _targetCount = items.length;
-      _tagMismatches.clear();
-    });
-
-    final queue = List<PendingUpload>.from(items);
-    var next = 0;
-
-    // The event loop is single-threaded, so reading and bumping [next] between
-    // awaits is race-free — no two workers grab the same index.
-    Future<void> worker() async {
-      while (!_cancelBatch && next < queue.length) {
-        final item = queue[next++];
-        await _uploadOne(item);
-      }
-    }
-
-    final workers = _maxConcurrent < queue.length ? _maxConcurrent : queue.length;
-    await Future.wait(List.generate(workers, (_) => worker()));
-
-    if (!mounted) return;
-    setState(() => _uploading = false);
-    _announceBatchResult();
-  }
-
-  /// Uploads a single photo with up to [_maxAttempts] tries and exponential
-  /// backoff. Retries network errors, timeouts and transient non-2xx; treats
-  /// 403/413 (and a stale-tag 422) as terminal.
-  Future<void> _uploadOne(PendingUpload item) async {
-    // The tag is whatever was selected when THIS photo was queued
-    // (see [_enqueueAll]). Nothing at drain time may overwrite it: the chip
-    // selection moves as the agent works through the house, and stamping the
-    // current selection onto an older photo files it under the wrong room —
-    // or, when the selection has been cleared, under no room at all.
-    final String? sentTag = item.roomTag;
-    if (mounted) setState(() => _inFlight.add(item.id));
-    try {
-      for (var attempt = 1; attempt <= _maxAttempts; attempt++) {
-        if (_cancelBatch) return;
-        try {
-          // Retries re-send the same [sentTag], so a retry can never land the
-          // photo under a different room than the first attempt.
-          final result = await _api.uploadPropertyImage(
-              widget.propertyId, item.file, sentTag,
-              clientId: item.id);
-          // The 201 reports the tag the server ACTUALLY filed the photo under
-          // (null = unsorted). That is the only authoritative answer, so check
-          // it rather than assuming the request was honoured.
-          _verifyFiledTag(sent: sentTag, result: result);
-          await UploadQueue.instance.remove(item.id);
-          if (!mounted) return;
-          setState(() {
-            _items.remove(item);
-            _uploadedCount++;
-            _anySuccess = true;
-          });
-          return;
-        } on TagValidationException catch (e) {
-          // Stale tag — retrying won't help. Keep the photo queued, stop the
-          // whole batch, and prompt a re-select.
-          await UploadQueue.instance.markPending(item.id);
-          _cancelBatch = true;
-          if (!mounted) return;
-          setState(() {
-            _tags = (_tags ?? GalleryTagsData.empty(widget.propertyId))
-                .withAvailable(e.availableTags);
-            _selectedTag = null;
-          });
-          _showSnack('Some tags are no longer available — pick a tag to '
-              're-file those photos');
-          return;
-        } on ApiException catch (e) {
-          // A 422 reaching here is a validation failure on the FILE — a tag 422
-          // arrives as TagValidationException and is caught above. The same
-          // bytes cannot become valid on a second attempt, so retrying only
-          // delays the failure and burns the user's uplink three times over.
-          final terminal = e.statusCode == 403 ||
-              e.statusCode == 413 ||
-              e.statusCode == 422;
-          if (terminal || attempt >= _maxAttempts) {
-            await UploadQueue.instance.markFailed(item.id, e.message);
-            if (mounted) setState(() {});
-            return;
-          }
-          await _backoff(attempt);
-        } catch (e) {
-          // Network error / socket drop — retry unless we're out of attempts.
-          if (attempt >= _maxAttempts) {
-            await UploadQueue.instance
-                .markFailed(item.id, 'Upload failed — check your connection');
-            if (mounted) setState(() {});
-            return;
-          }
-          await _backoff(attempt);
-        }
-      }
-    } finally {
-      _inFlight.remove(item.id);
-      if (mounted) setState(() {});
-    }
-  }
-
-  /// Compares the tag we posted against the tag the server says it filed the
-  /// photo under, from the 201 body.
-  ///
-  /// The server matches case- and whitespace-insensitively and stores the
-  /// library's canonical casing, so "bedroom 2" coming back as "Bedroom 2" is
-  /// a match, not a drift. Anything else means the photo is not where the
-  /// agent put it — most importantly `filed == null`, which is the server
-  /// saying "unsorted" no matter what the UI showed.
-  ///
-  /// Two responses carry no usable answer and must be sat out rather than read
-  /// as "unsorted", or a correctly-filed photo gets reported as misfiled:
-  ///
-  ///  * a dedupe hit ([UploadedImage.duplicate]) — the server's fast path
-  ///    answers `room_tag: null` whatever the photo was really filed under, and
-  ///    that is the shape EVERY retried upload takes, so this would have cried
-  ///    wolf on exactly the batches that had a rough time on the network;
-  ///  * an unparseable body (empty [UploadedImage.url]) — we know nothing.
-  void _verifyFiledTag(
-      {required String? sent, required UploadedImage result}) {
-    if (result.duplicate || result.url.isEmpty) return;
-    final filed = result.roomTag;
-    String norm(String? s) => (s ?? '').trim().toLowerCase();
-    if (norm(sent) == norm(filed)) return;
-    _tagMismatches.add(
-      '${sent ?? "no tag"} → ${filed ?? "Unsorted"}',
-    );
-    debugPrint('Upload tag mismatch: sent room_tag=${sent ?? "(omitted)"} '
-        'but server filed it under ${filed ?? "(unsorted)"}');
-  }
-
-  /// Exponential backoff (~1s, 2s, 4s) with jitter to avoid a retry stampede.
-  Future<void> _backoff(int attempt) async {
-    final base = 1000 * (1 << (attempt - 1));
-    await Future.delayed(Duration(milliseconds: base + _rng.nextInt(500)));
-  }
-
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  void _announceBatchResult() {
-    if (_cancelBatch) return; // the re-select prompt was already shown
-    final failed = _failed.length;
-    final pending = _pending.length;
-    // A photo the server filed somewhere else is on the server but in the
-    // wrong place — the upload "succeeded", so nothing else here would say so.
-    // Folded into the success line rather than shown as a second snack: two
-    // queued snacks make the user wait out a "3 photos uploaded" to read the
-    // warning, and the warning is the half worth acting on.
-    final n = _tagMismatches.length;
-    final mismatch = n == 0
-        ? null
-        : n == 1
-            ? 'filed as ${_tagMismatches.first.split(' → ').last} — check the gallery'
-            : '$n filed under a different room — check the gallery';
-    if (failed == 0 && pending == 0 && _uploadedCount > 0) {
-      final uploaded =
-          '$_uploadedCount photo${_uploadedCount == 1 ? '' : 's'} uploaded';
-      _showSnack(mismatch == null ? uploaded : '$uploaded, $mismatch');
-      Navigator.of(context).pop(true);
-    } else if (mismatch != null) {
-      _showSnack('Some photos were $mismatch');
-    }
-    if (failed > 0) {
-      _showSnack(
-          "$failed photo${failed == 1 ? '' : 's'} didn't upload — tap Retry below");
-    }
-  }
-
-  Future<void> _retryFailed(PendingUpload item) async {
-    if (_uploading) return;
-    setState(() {
-      item.state = PendingUploadState.pending;
-      item.error = null;
-    });
-    await UploadQueue.instance.markPending(item.id);
-    await _runBatch([item]);
-  }
-
-  Future<void> _retryAllFailed() async {
-    if (_uploading) return;
-    final failed = _failed;
-    if (failed.isEmpty) return;
-    for (final item in failed) {
-      item.state = PendingUploadState.pending;
-      item.error = null;
-      await UploadQueue.instance.markPending(item.id);
-    }
-    if (!mounted) return;
-    setState(() {});
-    await _runBatch(_pending);
   }
 
   @override
@@ -507,24 +315,19 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
       maxChildSize: 0.95,
       expand: false,
       builder: (ctx, scrollCtrl) {
-        return PopScope(
-          canPop: true,
-          onPopInvokedWithResult: (didPop, _) {
-            // Result already returned via explicit pops; nothing to do here.
-          },
-          child: Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 16,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-            ),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeader(ctx),
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildHeader(ctx),
                 Expanded(
                   child: ListView(
                     controller: scrollCtrl,
@@ -543,15 +346,14 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                       _buildPickerButtons(),
                       if (_preparing) _buildPreparing(),
                       const SizedBox(height: 12),
-                      if (_pending.isNotEmpty) _buildQueueList(),
+                      if (_waiting.isNotEmpty) _buildQueueList(),
                       if (_failed.isNotEmpty) _buildFailedList(),
                     ],
                   ),
                 ),
                 const SizedBox(height: 8),
-                _buildUploadButton(),
+                _buildDoneButton(),
               ],
-              ),
             ),
           ),
         );
@@ -564,7 +366,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
       children: [
         Expanded(
           child: Text(
-            'Upload Photos',
+            'Add Photos',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w700,
@@ -601,36 +403,13 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   Widget _buildTagSection() {
     final tags = _tags;
     if (tags == null || tags.availableTags.isEmpty) {
-      // No spaces → nothing to pick between. Still offer the "No tag" chip if
-      // anything queued is carrying a tag the property no longer has: that
-      // photo can only 422, and without a chip to tap there is no way to
-      // re-file it and no way to finish the batch but deleting it.
-      final stranded = _items.any(_isStaleTag);
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              stranded
-                  ? 'This property has no spaces left — move these photos to '
-                      'Unsorted to upload them.'
-                  : 'This property has no spaces yet — photos will upload to Unsorted.',
-              style: TextStyle(
-                  fontSize: 13, color: AppTheme.textSecondary(context)),
-            ),
-            if (stranded) ...[
-              const SizedBox(height: 8),
-              _buildTagChip(
-                label: 'Move to Unsorted',
-                // No count: the chip is an action here, not a destination, and
-                // "Move to Unsorted · 12" reads as a quantity being moved.
-                count: 0,
-                selected: false,
-                onTap: () => _selectTag(null),
-              ),
-            ],
-          ],
+        child: Text(
+          'This property has no spaces yet — photos will upload to Unsorted, '
+          'and you can file them into rooms later.',
+          style:
+              TextStyle(fontSize: 13, color: AppTheme.textSecondary(context)),
         ),
       );
     }
@@ -657,6 +436,9 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           spacing: 8,
           runSpacing: 8,
           children: [
+            // Whatever the server lists, in the server's order. There is no
+            // hard-coded room vocabulary here — the Spaces editor now offers
+            // around fifty space types and the list grows without a release.
             ...tags.availableTags.map((t) => _buildTagChip(
                   label: t,
                   count: tags.tagCounts[t] ?? 0,
@@ -719,70 +501,71 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   }
 
   Widget _buildPickerButtons() {
+    final busy = _preparing;
     return Row(
       children: [
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: (_uploading || _preparing) ? null : _pickFromBurst,
+            onPressed: busy ? null : _pickFromBurst,
             icon: const Icon(Icons.burst_mode, size: 18),
             label: const FittedBox(
                 fit: BoxFit.scaleDown, child: Text('Multi Capture')),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.brand,
-              side: BorderSide(color: AppTheme.surface2(context)),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radius)),
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-            ),
+            style: _pickerStyle(),
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: (_uploading || _preparing) ? null : _pickFromOsCamera,
+            onPressed: busy ? null : _pickFromOsCamera,
             icon: const Icon(Icons.photo_camera, size: 18),
-            label: const FittedBox(
-                fit: BoxFit.scaleDown, child: Text('Native')),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.brand,
-              side: BorderSide(color: AppTheme.surface2(context)),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radius)),
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-            ),
+            label:
+                const FittedBox(fit: BoxFit.scaleDown, child: Text('Native')),
+            style: _pickerStyle(),
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: (_uploading || _preparing) ? null : _pickFromGallery,
+            onPressed: busy ? null : _pickFromGallery,
             icon: const Icon(Icons.photo_library, size: 18),
-            label: const FittedBox(
-                fit: BoxFit.scaleDown, child: Text('Gallery')),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.brand,
-              side: BorderSide(color: AppTheme.surface2(context)),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radius)),
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-            ),
+            label:
+                const FittedBox(fit: BoxFit.scaleDown, child: Text('Gallery')),
+            style: _pickerStyle(),
           ),
         ),
       ],
     );
   }
 
+  ButtonStyle _pickerStyle() => OutlinedButton.styleFrom(
+        foregroundColor: AppTheme.brand,
+        side: BorderSide(color: AppTheme.surface2(context)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTheme.radius)),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+      );
+
   Widget _buildQueueList() {
-    final pending = _pending;
+    final waiting = _waiting;
+    final uploading = waiting.any((e) => e.state == PendingUploadState.uploading);
+    final String status;
+    if (uploading) {
+      status = 'Uploading… ${waiting.length} to go';
+    } else if (_uploader.isOffline) {
+      // Never dress a queued photo up as an uploaded one. Offline means the
+      // bytes are still on this phone, and the copy has to say so.
+      status = '${waiting.length} waiting — no connection';
+    } else {
+      status = '${waiting.length} waiting to upload';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 8, bottom: 6),
           child: Text(
-            _uploading
-                ? 'Uploaded $_uploadedCount of $_targetCount…'
-                : '${pending.length} selected',
+            status,
             style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -793,11 +576,11 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
           height: 90,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: pending.length,
+            itemCount: waiting.length,
             separatorBuilder: (_, __) => const SizedBox(width: 8),
             itemBuilder: (_, i) {
-              final item = pending[i];
-              final inFlight = _inFlight.contains(item.id);
+              final item = waiting[i];
+              final inFlight = item.state == PendingUploadState.uploading;
               final stale = _isStaleTag(item);
               return Stack(
                 children: [
@@ -809,33 +592,38 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                   // Each photo goes up under the tag it was queued with, which
                   // is not necessarily the chip currently lit. Show it per
                   // photo, or the sheet gives no way to tell where anything is
-                  // headed. Red = a tag the property no longer offers; tap any
-                  // chip to re-file those.
+                  // headed. Red = a tag the property no longer offers; tap to
+                  // re-file that one photo.
                   Positioned(
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 4, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: stale
-                            ? Colors.redAccent.withValues(alpha: 0.9)
-                            : Colors.black54,
-                        borderRadius: const BorderRadius.only(
-                          bottomLeft: Radius.circular(AppTheme.radius),
-                          bottomRight: Radius.circular(AppTheme.radius),
+                    child: GestureDetector(
+                      onTap: stale ? () => _refile(item) : null,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: stale
+                              ? Colors.redAccent.withValues(alpha: 0.9)
+                              : Colors.black54,
+                          borderRadius: const BorderRadius.only(
+                            bottomLeft: Radius.circular(AppTheme.radius),
+                            bottomRight: Radius.circular(AppTheme.radius),
+                          ),
                         ),
-                      ),
-                      child: Text(
-                        item.roomTag ?? 'Unsorted',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white),
+                        child: Text(
+                          stale
+                              ? '${item.roomTag} — tap to re-file'
+                              : (item.roomTag ?? 'Unsorted'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white),
+                        ),
                       ),
                     ),
                   ),
@@ -856,16 +644,12 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                         ),
                       ),
                     ),
-                  if (!_uploading)
+                  if (!inFlight)
                     Positioned(
                       top: 2,
                       right: 2,
                       child: InkWell(
-                        onTap: () async {
-                          await UploadQueue.instance.remove(item.id);
-                          if (!mounted) return;
-                          setState(() => _items.remove(item));
-                        },
+                        onTap: () => _queue.remove(item.id),
                         child: Container(
                           decoration: const BoxDecoration(
                             color: Colors.black54,
@@ -908,6 +692,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
   }
 
   Widget _buildFailedList() {
+    final failed = _failed;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -917,29 +702,34 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
             children: [
               Expanded(
                 child: Text(
-                  "${_failed.length} photo${_failed.length == 1 ? '' : 's'} didn't upload — tap to retry",
+                  "${failed.length} photo${failed.length == 1 ? '' : 's'} didn't upload",
                   style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                       color: Colors.redAccent),
                 ),
               ),
-              if (!_uploading && _failed.length > 1)
+              if (failed.length > 1)
                 TextButton(
-                  onPressed: _retryAllFailed,
+                  onPressed: () =>
+                      _uploader.retryAllFor(widget.propertyId),
                   child: const Text('Retry all'),
                 ),
             ],
           ),
         ),
-        ..._failed.map(
+        // The server's own message, verbatim. A rejected photo that says only
+        // "failed" leaves the agent guessing at a cause the server already
+        // named.
+        ...failed.map(
           (f) => Container(
             margin: const EdgeInsets.only(bottom: 6),
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: AppTheme.surface(context),
               borderRadius: BorderRadius.circular(AppTheme.radius),
-              border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
+              border:
+                  Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
             ),
             child: Row(
               children: [
@@ -955,13 +745,24 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary(context)),
+                        fontSize: 12, color: AppTheme.textSecondary(context)),
                   ),
                 ),
-                TextButton(
-                  onPressed: _uploading ? null : () => _retryFailed(f),
-                  child: const Text('Retry'),
+                if (_isStaleTag(f))
+                  TextButton(
+                    onPressed: () => _refile(f),
+                    child: const Text('Re-file'),
+                  )
+                else
+                  TextButton(
+                    onPressed: () => _uploader.retry(f),
+                    child: const Text('Retry'),
+                  ),
+                IconButton(
+                  tooltip: 'Discard',
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  color: AppTheme.textMuted(context),
+                  onPressed: () => _queue.remove(f.id),
                 ),
               ],
             ),
@@ -971,25 +772,39 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
     );
   }
 
-  Widget _buildUploadButton() {
-    final count = _pending.length;
-    final canUpload = !_uploading && !_preparing && count > 0;
-    return SizedBox(
-      width: double.infinity,
-      height: 48,
-      child: ElevatedButton(
-        onPressed: canUpload ? _upload : null,
-        child: _uploading
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white),
-              )
-            : Text(count == 0
-                ? 'Upload'
-                : 'Upload $count photo${count == 1 ? '' : 's'}'),
-      ),
+  Widget _buildDoneButton() {
+    final waiting = _waiting.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (waiting > 0)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              // The reassurance the old flow never gave: closing this sheet is
+              // safe, because nothing about the upload depends on it being open.
+              'Photos keep uploading in the background — you can close this.',
+              textAlign: TextAlign.center,
+              style:
+                  TextStyle(fontSize: 12, color: AppTheme.textMuted(context)),
+            ),
+          ),
+        SizedBox(
+          height: 48,
+          child: ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(_anySuccess),
+            child: Text(waiting == 0 ? 'Done' : 'Done — $waiting uploading'),
+          ),
+        ),
+      ],
     );
   }
 }
+
+/// Wrapper so a dialog can return "Unsorted" (`null`) distinctly from
+/// "dismissed" (also `null` out of [showDialog]).
+class _RefileChoice {
+  final String? tag;
+  const _RefileChoice(this.tag);
+}
+

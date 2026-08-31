@@ -33,6 +33,7 @@ import 'screens/splash_screen.dart';
 import 'services/app_update_service.dart';
 import 'services/client_auth_service.dart';
 import 'services/messaging_service.dart';
+import 'services/upload_service.dart';
 import 'utils/app_time.dart';
 import 'widgets/update_available_dialog.dart';
 
@@ -269,6 +270,11 @@ class _AppBootstrapState extends State<AppBootstrap> with WidgetsBindingObserver
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _checkForUpdate();
+    // Property photos left in the durable queue upload themselves from here
+    // on — on start, on resume and on a timer — instead of waiting for someone
+    // to open the property's gallery. It no-ops while signed out (no token) and
+    // while the queue is empty, so starting it this early costs nothing.
+    UploadService.instance.start();
   }
 
   @override
