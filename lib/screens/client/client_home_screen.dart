@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -11,8 +10,6 @@ import '../../models/seller_models.dart';
 import '../../providers/client_matches_provider.dart';
 import '../../providers/client_session_provider.dart';
 import '../../providers/seller_listings_provider.dart';
-import '../../services/image_cache.dart';
-import '../../services/image_cache_diagnostics.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../widgets/client/client_bottom_nav.dart';
@@ -26,6 +23,7 @@ import 'client_profile_screen.dart';
 import 'client_property_screen.dart';
 import 'client_seller_listings_screen.dart';
 import 'client_testimonials_screen.dart';
+import '../../widgets/corex_photo.dart';
 
 class ClientHomeScreen extends StatefulWidget {
   const ClientHomeScreen({super.key});
@@ -329,17 +327,13 @@ class _MatchedCard extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   if (r.thumbnail != null && r.thumbnail!.isNotEmpty)
-                    CachedNetworkImage(
-                      imageUrl: r.thumbnail!,
-                      cacheManager: CoreXImageCache.manager,
-                      memCacheWidth: CoreXImageCache.thumbPx(context, 190),
-                      errorListener: (e) =>
-                          ImageCacheDiagnostics.recordFailure(r.thumbnail!, e),
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => Container(
+                    CoreXPhoto.thumb(
+                      url: r.thumbnail!,
+                      logicalWidth: 190,
+                      placeholder: (_) => Container(
                         color: CorexTokens.surfaceTop(context),
                       ),
-                      errorWidget: (_, __, ___) => Container(
+                      errorWidget: (_) => Container(
                         color: CorexTokens.surfaceTop(context),
                         child: Icon(TablerIcons.photo_off,
                             color: CorexTokens.textTertiary(context)),
@@ -538,20 +532,17 @@ class _MyListingsCard extends StatelessWidget {
     if (thumb != null && thumb.isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(10),
-        child: CachedNetworkImage(
-          imageUrl: thumb,
-          cacheManager: CoreXImageCache.manager,
-          memCacheWidth: CoreXImageCache.thumbPx(context, 60),
-          errorListener: (e) => ImageCacheDiagnostics.recordFailure(thumb, e),
+        child: CoreXPhoto.thumb(
+          url: thumb,
+          logicalWidth: 60,
           width: 60,
           height: 60,
-          fit: BoxFit.cover,
-          placeholder: (_, __) => Container(
+          placeholder: (_) => Container(
             width: 60,
             height: 60,
             color: CorexTokens.surfaceTop(context),
           ),
-          errorWidget: (_, __, ___) => _iconBox(context, t),
+          errorWidget: (_) => _iconBox(context, t),
         ),
       );
     }

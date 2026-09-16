@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/image_cache.dart';
 import '../services/image_cache_diagnostics.dart';
 import '../theme.dart';
 
@@ -90,11 +91,12 @@ class _ImageCacheDetailsSheetState extends State<_ImageCacheDetailsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final muted = TextStyle(fontSize: 12, color: AppTheme.textSecondary(context));
+    final muted =
+        TextStyle(fontSize: 12, color: AppTheme.textSecondary(context));
     return SafeArea(
       child: ConstrainedBox(
-        constraints:
-            BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.85),
         child: FutureBuilder<ImageCacheReport>(
           future: _report,
           builder: (ctx, snap) {
@@ -128,7 +130,10 @@ class _ImageCacheDetailsSheetState extends State<_ImageCacheDetailsSheet> {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       'Property photos are kept on this device after the first '
-                      'download so galleries open without re-fetching.',
+                      'download so galleries open without re-fetching. Lists '
+                      'and grids store small thumbnails; only photos opened '
+                      'full-screen are kept at full size, and only the most '
+                      'recent few dozen.',
                       style: muted,
                     ),
                   ),
@@ -149,12 +154,16 @@ class _ImageCacheDetailsSheetState extends State<_ImageCacheDetailsSheet> {
                             warn: !r.healthy),
                         _row(context, 'Photos on disk',
                             '${r.fileCount} files · ${ImageCacheReport.formatBytes(r.fileBytes)}'),
+                        _row(context, 'Of which full-size',
+                            '${r.fullFileCount} files · ${ImageCacheReport.formatBytes(r.fullFileBytes)} (viewer only, keeps last ${CoreXImageCache.fullObjectCap})'),
                         _row(context, 'Cache folder',
                             r.fileDirExists ? 'present' : 'not created yet'),
                         _row(context, 'Temp storage writable',
                             r.tempWritable ? 'yes' : 'NO',
                             warn: !r.tempWritable),
-                        _row(context, 'Cache index (sqlite)',
+                        _row(
+                            context,
+                            'Cache index (sqlite)',
                             r.dbExists
                                 ? ImageCacheReport.formatBytes(r.dbBytes)
                                 : 'not created yet'),
@@ -248,7 +257,8 @@ class _ImageCacheDetailsSheetState extends State<_ImageCacheDetailsSheet> {
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
-                color: warn ? Colors.orangeAccent : AppTheme.textPrimary(context),
+                color:
+                    warn ? Colors.orangeAccent : AppTheme.textPrimary(context),
               ),
             ),
           ),

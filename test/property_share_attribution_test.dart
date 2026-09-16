@@ -165,7 +165,9 @@ void main() {
     expect(calls, isEmpty);
   });
 
-  testWidgets('the listing agent sharing their own listing skips the chooser',
+  testWidgets(
+      'the listing agent sharing their own listing still gets the chooser '
+      '(mirrors the web; agents mostly share their own listings)',
       (tester) async {
     final calls = _mockShare(tester);
     await _pump(tester,
@@ -174,9 +176,15 @@ void main() {
 
     await tester.tap(shareButton);
     await tester.pumpAndSettle();
+    expect(chooserTitle, findsOneWidget);
+    // Both rows name the same person — that is the point: the choice is
+    // still offered, and picking "My details" still attributes to them.
+    expect(find.text('Thandi Nkosi'), findsNWidgets(2));
 
-    expect(chooserTitle, findsNothing);
-    expect(calls.single['text'], contains('?agent=listing'));
+    await tester.tap(find.text('My details'));
+    await tester.pumpAndSettle();
+
+    expect(calls.single['text'], contains('$_previewUrl?agent=9'));
   });
 
   testWidgets('an assistant never gets the "My details" option (AT-267)',

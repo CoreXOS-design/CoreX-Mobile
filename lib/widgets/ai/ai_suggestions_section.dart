@@ -4,6 +4,7 @@ import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../config/env.dart';
 import '../../services/ai_api.dart';
+import '../corex_photo.dart';
 import '../../services/api_service.dart';
 import 'ai_badge.dart';
 
@@ -547,12 +548,12 @@ class _SourceImagesSheet extends StatelessWidget {
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(6),
-                          child: Image.network(
-                            _resolveUrl(s.imagePath),
+                          child: CoreXPhoto.thumb(
+                            url: _resolveUrl(s.imagePath),
+                            logicalWidth: 110,
                             width: 110,
                             height: 90,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
+                            errorWidget: (_) => Container(
                               width: 110,
                               height: 90,
                               color: theme.colorScheme.surfaceContainerHighest,

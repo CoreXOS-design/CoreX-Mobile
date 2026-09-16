@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
@@ -8,8 +7,6 @@ import '../../models/seller_models.dart';
 import '../../providers/client_session_provider.dart';
 import '../../services/api_service.dart' show ApiException;
 import '../../services/client_auth_service.dart';
-import '../../services/image_cache.dart';
-import '../../services/image_cache_diagnostics.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../widgets/corex/corex_card.dart';
@@ -17,6 +14,7 @@ import '../../widgets/corex/corex_scaffold.dart';
 import '../auth/client/client_agency_picker_screen.dart';
 import 'client_seller_common.dart';
 import 'client_seller_insights_screen.dart';
+import '../../widgets/corex_photo.dart';
 
 /// Opens the seller dashboard from a nav entry. Deep-links straight into the
 /// insights detail when the client has exactly one listing; otherwise shows the
@@ -330,20 +328,17 @@ class _Thumb extends StatelessWidget {
     if (url == null || url!.isEmpty) return placeholder;
     return ClipRRect(
       borderRadius: radius,
-      child: CachedNetworkImage(
-        imageUrl: url!,
-        cacheManager: CoreXImageCache.manager,
-        memCacheWidth: CoreXImageCache.thumbPx(context, 76),
-        errorListener: (e) => ImageCacheDiagnostics.recordFailure(url!, e),
+      child: CoreXPhoto.thumb(
+        url: url!,
+        logicalWidth: 76,
         width: 76,
         height: 76,
-        fit: BoxFit.cover,
-        placeholder: (_, __) => Container(
+        placeholder: (_) => Container(
           width: 76,
           height: 76,
           color: CorexTokens.surfaceTop(context),
         ),
-        errorWidget: (_, __, ___) => placeholder,
+        errorWidget: (_) => placeholder,
       ),
     );
   }

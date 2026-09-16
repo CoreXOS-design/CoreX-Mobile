@@ -21,6 +21,11 @@ class _FakeApi extends ApiService {
   GalleryTagsData? galleryTags;
 
   GalleryAssignResult? assignResult;
+  String? lastAssignedRoomTag;
+
+  GalleryTagsData? addTagResult;
+  ApiException? addTagError;
+  String? lastAddedTag;
   ApiException? assignError;
 
   TagReorderResult? tagReorderResult;
@@ -69,8 +74,16 @@ class _FakeApi extends ApiService {
   @override
   Future<GalleryAssignResult> assignGalleryImages(
       int propertyId, List<String> images, String? roomTag) async {
+    lastAssignedRoomTag = roomTag;
     if (assignError != null) throw assignError!;
     return assignResult!;
+  }
+
+  @override
+  Future<GalleryTagsData> addGalleryTag(int propertyId, String tag) async {
+    lastAddedTag = tag;
+    if (addTagError != null) throw addTagError!;
+    return addTagResult!;
   }
 
   @override
@@ -319,6 +332,104 @@ void main() {
     expect(find.text('1 photo selected'), findsNothing);
     // Unsorted emptied out — its chip and section both drop off.
     expect(find.textContaining('Unsorted'), findsNothing);
+  });
+
+  testWidgets(
+      '"New custom tag…" in the File-under picker creates the tag and files '
+      'the selection under the server\'s spelling of it', (tester) async {
+    _useTallViewport(tester);
+    final api = _FakeApi()
+      ..property = _seededProperty(
+        unsorted: ['https://x/d.jpg'],
+        galleryTags: const ['Kitchen'],
+      )
+      ..galleryTags = GalleryTagsData.fromJson({
+        'property_id': 7,
+        'available_tags': ['Kitchen'],
+        'tag_counts': {'Kitchen': 0},
+        'untagged_count': 1,
+      })
+      // The server normalises the typed name; the assign must use *its*
+      // spelling, or it 422s as an unknown tag a moment after creating it.
+      ..addTagResult = GalleryTagsData.fromJson({
+        'property_id': 7,
+        'available_tags': ['Kitchen', 'Sea View'],
+        'tag_counts': {'Kitchen': 0, 'Sea View': 0},
+        'untagged_count': 1,
+      })
+      ..assignResult = GalleryAssignResult.fromJson({
+        'message': "1 photo(s) filed under 'Sea View'.",
+        'moved': 1,
+        'unknown_images': [],
+        'room_tag': 'Sea View',
+        'gallery_categories': {
+          'categories': {
+            'Kitchen': [],
+            'Sea View': ['https://x/d.jpg'],
+          },
+          'unsorted': [],
+        },
+        'available_tags': ['Kitchen', 'Sea View'],
+      });
+
+    await tester.pumpWidget(_wrap(PropertyGalleryScreen(propertyId: 7, api: api)));
+    await _settle(tester);
+
+    await tester.tap(find.byKey(const ValueKey('photo-cell-https://x/d.jpg')));
+    await tester.pump();
+    await tester.tap(find.text('File under…'));
+    await _settle(tester);
+
+    await tester.tap(find.widgetWithText(ListTile, 'New custom tag…'));
+    await _settle(tester);
+    expect(find.text('Add custom tag'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), '  sea view ');
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Add'));
+    await _settle(tester);
+
+    expect(api.lastAddedTag, 'sea view');
+    expect(api.lastAssignedRoomTag, 'Sea View');
+    expect(find.text("1 photo(s) filed under 'Sea View'."), findsOneWidget);
+    expect(find.text('1 photo selected'), findsNothing);
+    // The new room is now a section of its own.
+    expect(find.text('Sea View'), findsWidgets);
+  });
+
+  testWidgets(
+      'cancelling the custom-tag prompt returns to the picker with the '
+      'selection intact', (tester) async {
+    _useTallViewport(tester);
+    final api = _FakeApi()
+      ..property = _seededProperty(
+        unsorted: ['https://x/d.jpg'],
+        galleryTags: const ['Kitchen'],
+      )
+      ..galleryTags = GalleryTagsData.fromJson({
+        'property_id': 7,
+        'available_tags': ['Kitchen'],
+        'tag_counts': {'Kitchen': 0},
+        'untagged_count': 1,
+      });
+
+    await tester.pumpWidget(_wrap(PropertyGalleryScreen(propertyId: 7, api: api)));
+    await _settle(tester);
+
+    await tester.tap(find.byKey(const ValueKey('photo-cell-https://x/d.jpg')));
+    await tester.pump();
+    await tester.tap(find.text('File under…'));
+    await _settle(tester);
+    await tester.tap(find.widgetWithText(ListTile, 'New custom tag…'));
+    await _settle(tester);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await _settle(tester);
+
+    // Back in the picker, nothing created, nothing filed.
+    expect(find.widgetWithText(ListTile, 'New custom tag…'), findsOneWidget);
+    expect(api.lastAddedTag, isNull);
+    expect(api.lastAssignedRoomTag, isNull);
+    expect(find.text('1 photo selected'), findsOneWidget);
   });
 
   testWidgets(

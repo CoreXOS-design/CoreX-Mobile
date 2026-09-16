@@ -11,6 +11,7 @@ import 'p24_location_picker.dart';
 import 'property_option_dropdown.dart';
 import 'spaces_editor_section.dart';
 import '../../models/space.dart';
+import '../../widgets/properties/add_custom_tag_dialog.dart';
 import '../../widgets/properties/property_gallery.dart';
 
 class PropertyEditScreen extends StatefulWidget {
@@ -868,6 +869,7 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
             onAssigned: _adoptAssignResult,
             onReordered: _adoptReorderResult,
             onTagsReordered: _adoptTagReorderResult,
+            onTagAdded: _adoptAddedTag,
             onRefreshRequested: _loadProperty,
             // Only ever called from a space section header, always with that
             // space's name 2014 so the sheet opens locked to it rather than
@@ -989,77 +991,16 @@ class _PropertyEditScreenState extends State<PropertyEditScreen> {
   }
 
   Future<void> _showAddTagDialog() async {
-    final controller = TextEditingController();
-    String? errorText;
-    bool busy = false;
+    final added = await showAddCustomTagDialog(context,
+        api: _api, propertyId: widget.propertyId);
+    if (added == null || !mounted) return;
+    setState(() => _liveTags = added.tags);
+  }
 
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
-        return AlertDialog(
-          backgroundColor: AppTheme.surface(context),
-          title: const Text('Add custom tag'),
-          content: TextField(
-            controller: controller,
-            maxLength: 40,
-            autofocus: true,
-            decoration: InputDecoration(
-              hintText: 'e.g. Sea View',
-              errorText: errorText,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: busy ? null : () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: busy
-                  ? null
-                  : () async {
-                      final input = controller.text.trim();
-                      if (input.isEmpty) {
-                        setLocal(() => errorText = 'Tag cannot be empty');
-                        return;
-                      }
-                      setLocal(() {
-                        busy = true;
-                        errorText = null;
-                      });
-                      try {
-                        final updated =
-                            await _api.addGalleryTag(widget.propertyId, input);
-                        if (!mounted) return;
-                        setState(() => _liveTags = updated);
-                        if (ctx.mounted) Navigator.of(ctx).pop();
-                      } on ApiException catch (e) {
-                        setLocal(() {
-                          busy = false;
-                          errorText = e.statusCode == 422
-                              ? (e.message.toLowerCase().contains('exist')
-                                  ? 'Tag already exists'
-                                  : e.message)
-                              : e.message;
-                        });
-                      } catch (e) {
-                        setLocal(() {
-                          busy = false;
-                          errorText = e.toString();
-                        });
-                      }
-                    },
-              child: busy
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Text('Add'),
-            ),
-          ],
-        );
-      }),
-    );
+  /// A tag the gallery invented from its "File under…" picker. Adopt the
+  /// refreshed list so the Custom Tags manager below shows it straight away.
+  void _adoptAddedTag(GalleryTagsData tags) {
+    setState(() => _liveTags = tags);
   }
 
   Future<void> _confirmDeleteTag(String tag) async {

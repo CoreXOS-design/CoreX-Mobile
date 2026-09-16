@@ -1,12 +1,10 @@
 import 'dart:io';
-import 'package:cached_network_image/cached_network_image.dart';
+import '../../widgets/corex_photo.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../widgets/ui/content_width.dart';
 import '../../models/rental_inspections.dart';
 import '../../services/api_service.dart';
-import '../../services/image_cache.dart';
-import '../../services/image_cache_diagnostics.dart';
 import '../../theme.dart';
 import '../../utils/image_processing.dart';
 import '../../utils/image_upload.dart';
@@ -691,15 +689,10 @@ class _SectionCard extends StatelessWidget {
                 onTap: () => onTapImage(i),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-                  child: CachedNetworkImage(
-                    imageUrl: url,
-                    cacheManager: CoreXImageCache.manager,
-                    memCacheWidth: CoreXImageCache.thumbPx(
-                        context, MediaQuery.sizeOf(context).width / 3),
-                    errorListener: (e) =>
-                        ImageCacheDiagnostics.recordFailure(url, e),
-                    fit: BoxFit.cover,
-                    placeholder: (ctx, _) => Container(
+                  child: CoreXPhoto.thumb(
+                    url: url,
+                    logicalWidth: MediaQuery.sizeOf(context).width / 3,
+                    placeholder: (ctx) => Container(
                       color: AppTheme.surface2(ctx),
                       child: const Center(
                         child: SizedBox(
@@ -709,7 +702,7 @@ class _SectionCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    errorWidget: (ctx, _, __) => Container(
+                    errorWidget: (ctx) => Container(
                       color: AppTheme.surface2(ctx),
                       child: Icon(Icons.broken_image_outlined,
                           color: AppTheme.textMuted(ctx)),
@@ -788,17 +781,15 @@ class _FullScreenImageViewerState extends State<_FullScreenImageViewer> {
           minScale: 1,
           maxScale: 4,
           child: Center(
-            child: CachedNetworkImage(
-              imageUrl: widget.images[i],
-              cacheManager: CoreXImageCache.manager,
-              memCacheWidth: CoreXImageCache.thumbPx(
-                  context, MediaQuery.sizeOf(context).width),
-              errorListener: (e) =>
-                  ImageCacheDiagnostics.recordFailure(widget.images[i], e),
-              fit: BoxFit.contain,
-              placeholder: (_, __) =>
+            // Full-size original: this is the one place a photo is inspected
+            // and pinch-zoomed, so the 500px thumb won't do. Goes into the
+            // small full-size store, not the thumbnail working set.
+            child: CoreXPhoto.full(
+              url: widget.images[i],
+              logicalWidth: MediaQuery.sizeOf(context).width,
+              placeholder: (_) =>
                   const Center(child: CircularProgressIndicator(color: Colors.white)),
-              errorWidget: (_, __, ___) => const Center(
+              errorWidget: (_) => const Center(
                 child: Icon(Icons.broken_image_outlined,
                     color: Colors.white54, size: 48),
               ),

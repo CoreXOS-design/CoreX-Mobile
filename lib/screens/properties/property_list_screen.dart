@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../utils/display_text.dart';
@@ -10,14 +9,13 @@ import '../../models/visibility.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/property_provider.dart';
 import '../../providers/visibility_provider.dart';
-import '../../services/image_cache.dart';
-import '../../services/image_cache_diagnostics.dart';
 import '../../widgets/agent_filter_bar.dart';
 import '../../widgets/ui/list_row.dart';
 import '../../widgets/ui/status_chip.dart';
 import 'property_create_screen.dart';
 import 'property_edit_screen.dart';
 import 'property_overview_screen.dart';
+import '../../widgets/corex_photo.dart';
 
 /// Active listings first, everything else after, each group keeping the order
 /// the server sent.
@@ -456,6 +454,12 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
             selected: context.watch<VisibilityProvider>().propertiesFilter,
             onChanged: _onAgentFilterChanged,
           ),
+          // Scope switch (Mine → All) reloads over a non-empty list. Without
+          // this the old rows just sit there until the new payload lands and
+          // the toggle looks dead — the only "loading" state below is the
+          // empty-list spinner.
+          if (provider.isLoading && all.isNotEmpty)
+            const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: provider.isLoading && all.isEmpty
                 ? const Center(child: CircularProgressIndicator())
@@ -590,19 +594,13 @@ class _PropertyCard extends StatelessWidget {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(14),
                     child: property.thumbnail != null
-                        ? CachedNetworkImage(
-                            imageUrl: property.thumbnail!,
-                            cacheManager: CoreXImageCache.manager,
-                            memCacheWidth:
-                                CoreXImageCache.thumbPx(context, 76),
-                            errorListener: (e) =>
-                                ImageCacheDiagnostics.recordFailure(
-                                    property.thumbnail!, e),
+                        ? CoreXPhoto.thumb(
+                            url: property.thumbnail!,
+                            logicalWidth: 76,
                             width: 76,
                             height: 76,
-                            fit: BoxFit.cover,
-                            placeholder: (_, __) => _placeholder(context),
-                            errorWidget: (_, __, ___) => _placeholder(context),
+                            placeholder: (_) => _placeholder(context),
+                            errorWidget: (_) => _placeholder(context),
                           )
                         : _placeholder(context),
                   ),

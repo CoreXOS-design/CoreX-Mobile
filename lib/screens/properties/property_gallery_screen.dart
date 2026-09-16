@@ -1,14 +1,14 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/gallery_tags.dart';
 import '../../models/property.dart';
 import '../../services/api_service.dart';
 import '../../services/image_cache.dart';
-import '../../services/image_cache_diagnostics.dart';
 import '../../theme.dart';
 import '../../widgets/ui/content_width.dart';
 import 'gallery_upload_sheet.dart';
+import '../../widgets/properties/add_custom_tag_dialog.dart';
+import '../../widgets/corex_photo.dart';
 
 /// Full-screen photo manager for a property — the "too many photos for a
 /// tab" answer to [PropertyGallery] (`widgets/properties/property_gallery.dart`),
@@ -208,6 +208,13 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
                 ),
               const Divider(height: 1),
               ListTile(
+                leading: Icon(Icons.add, color: AppTheme.brand),
+                title: Text('New custom tag…',
+                    style: TextStyle(
+                        color: AppTheme.brand, fontWeight: FontWeight.w600)),
+                onTap: () => Navigator.pop(ctx, const _RoomChoice.newTag()),
+              ),
+              ListTile(
                 leading: Icon(Icons.inbox_outlined,
                     color: AppTheme.textSecondary(ctx)),
                 title: Text('Move to Unsorted',
@@ -221,9 +228,30 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
     );
   }
 
+  /// [_pickRoom], plus the "New custom tag…" hand-off: prompts for a name,
+  /// creates the tag, and answers with it as an ordinary choice. Backing out
+  /// of the name prompt returns the agent to the picker rather than dropping
+  /// the whole filing — the selection is still there, only the name was
+  /// abandoned.
+  Future<_RoomChoice?> _chooseRoom(List<String> tags) async {
+    while (true) {
+      final choice = await _pickRoom(tags);
+      if (choice == null || !mounted) return null;
+      if (!choice.isNewTag) return choice;
+      final added = await showAddCustomTagDialog(context,
+          api: _api, propertyId: widget.propertyId);
+      if (!mounted) return null;
+      if (added == null) continue;
+      // Adopt the server's list now, not after the assign: the tag exists
+      // whether or not the filing that follows goes through.
+      setState(() => _liveTags = added.tags);
+      return _RoomChoice(added.tag);
+    }
+  }
+
   Future<void> _fileSelection() async {
     if (_selected.isEmpty || _assigning) return;
-    final choice = await _pickRoom(_tags);
+    final choice = await _chooseRoom(_tags);
     if (choice == null || !mounted) return;
     await _assign(choice.tag);
   }
@@ -260,7 +288,7 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
       if (!mounted) return;
       setState(() => _assigning = false);
       _snack(e.message);
-      final retry = await _pickRoom(e.availableTags);
+      final retry = await _chooseRoom(e.availableTags);
       if (retry == null || !mounted) return;
       await _assign(retry.tag);
     } on StaleGalleryImagesException catch (e) {
@@ -1280,22 +1308,15 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-            // Cached to disk — the whole point of this screen is browsing a
-            // property's photos repeatedly (filtering, reordering, coming
-            // back to it later), and none of that should re-download
-            // anything Flutter's in-memory-only Image.network already
-            // fetched once this session, let alone last time the property
-            // was open.
-            child: CachedNetworkImage(
-              imageUrl: url,
-              cacheManager: CoreXImageCache.manager,
+            // Server thumbnail, cached to disk — the whole point of this
+            // screen is browsing a property's photos repeatedly (filtering,
+            // reordering, coming back to it later), and none of that should
+            // re-download anything, let alone the full-size originals.
+            child: CoreXPhoto.thumb(
+              url: url,
               // Three columns: decode at cell size, not camera size.
-              memCacheWidth: CoreXImageCache.thumbPx(
-                  context, MediaQuery.sizeOf(context).width / 3),
-              errorListener: (e) =>
-                  ImageCacheDiagnostics.recordFailure(url, e),
-              fit: BoxFit.cover,
-              placeholder: (ctx, _) => Container(
+              logicalWidth: MediaQuery.sizeOf(context).width / 3,
+              placeholder: (ctx) => Container(
                 color: AppTheme.surface2(ctx),
                 child: const Center(
                   child: SizedBox(
@@ -1305,7 +1326,7 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
                   ),
                 ),
               ),
-              errorWidget: (ctx, _, __) => Container(
+              errorWidget: (ctx) => Container(
                 color: AppTheme.surface2(ctx),
                 child: Icon(Icons.broken_image_outlined,
                     color: AppTheme.textMuted(ctx)),
@@ -1372,15 +1393,11 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
               border: Border.all(color: AppTheme.brand, width: 2),
               borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
             ),
-            child: CachedNetworkImage(
-              imageUrl: url,
-              cacheManager: CoreXImageCache.manager,
-              memCacheWidth: CoreXImageCache.thumbPx(context, 96),
-              fit: BoxFit.cover,
-              placeholder: (ctx, _) =>
-                  Container(color: AppTheme.surface2(ctx)),
-              errorWidget: (ctx, _, __) =>
-                  Container(color: AppTheme.surface2(ctx)),
+            child: CoreXPhoto.thumb(
+              url: url,
+              logicalWidth: 96,
+              placeholder: (ctx) => Container(color: AppTheme.surface2(ctx)),
+              errorWidget: (ctx) => Container(color: AppTheme.surface2(ctx)),
             ),
           ),
         ),
@@ -1415,7 +1432,15 @@ class _DragPhoto {
 
 class _RoomChoice {
   final String? tag;
-  const _RoomChoice(this.tag);
+
+  /// The agent picked "New custom tag…" — the caller prompts for a name,
+  /// creates it, and files under that. Never sent to the server as-is.
+  final bool isNewTag;
+
+  const _RoomChoice(this.tag) : isNewTag = false;
+  const _RoomChoice.newTag()
+      : tag = null,
+        isNewTag = true;
 }
 
 class _GalleryErrorState extends StatelessWidget {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../theme/corex_accent_theme.dart';
+import '../corex_photo.dart';
 import '../../theme/corex_tokens.dart';
 import 'corex_card.dart';
 import 'corex_chip.dart';
@@ -38,14 +39,14 @@ class CorexTodayFocus extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             child: thumbnailUrl == null
                 ? Icon(TablerIcons.home_2, color: t.accent, size: 26)
-                : Image.network(
-                    thumbnailUrl!,
-                    fit: BoxFit.cover,
+                : CoreXPhoto.thumb(
+                    url: thumbnailUrl!,
+                    logicalWidth: 64,
                     width: 64,
                     height: 64,
                     // Fall back to the placeholder icon if the thumbnail fails
                     // to load, rather than showing a blank accent box.
-                    errorBuilder: (_, __, ___) =>
+                    errorWidget: (_) =>
                         Icon(TablerIcons.home_2, color: t.accent, size: 26),
                   ),
           ),

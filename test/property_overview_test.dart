@@ -58,9 +58,21 @@ class _FakeApi extends ApiService {
   Property? property;
   GalleryTagsData? galleryTags;
 
+  /// Fails the next [propertyFailures] `getProperty` calls, then serves
+  /// [property]. Models the dropped/timed-out request that used to render
+  /// as "0 photos".
+  int propertyFailures = 0;
+  int propertyCalls = 0;
+
   @override
-  Future<Property> getProperty(int id) async =>
-      property ?? Property(id: id, address: '');
+  Future<Property> getProperty(int id) async {
+    propertyCalls++;
+    if (propertyFailures > 0) {
+      propertyFailures--;
+      throw ApiException(0, 'Request timed out');
+    }
+    return property ?? Property(id: id, address: '');
+  }
 
   @override
   Future<GalleryTagsData> getGalleryTags(int id) async =>
@@ -616,6 +628,129 @@ void main() {
       await _openTab(tester, 'Gallery');
       expect(find.text('0 photos'), findsOneWidget);
       expect(find.text('Not sorted into rooms yet'), findsOneWidget);
+    });
+
+    testWidgets('counts photos that only the master list knows about',
+        (tester) async {
+      // Photos uploaded from the web create form land in gallery_images
+      // with no gallery_categories entry at all. The card must count them
+      // rather than report "0 photos" for a property with a full gallery.
+      _useTallViewport(tester);
+      final api = _FakeApi()
+        ..overview = _baseOverview()
+        ..property = Property(
+          id: 7,
+          address: '',
+          galleryImages: const [
+            'https://x/a.jpg',
+            'https://x/b.jpg',
+            'https://x/c.jpg',
+          ],
+          galleryCategories: null,
+        );
+
+      await tester.pumpWidget(_wrap(
+        PropertyOverviewScreen(propertyId: 7, api: api),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(_tabLabels(tester), contains('Gallery · 3'));
+      await _openTab(tester, 'Gallery');
+      expect(find.text('3 photos'), findsOneWidget);
+      expect(find.text('Not sorted into rooms yet'), findsOneWidget);
+    });
+
+    testWidgets('does not double-count a photo present in both a room and '
+        'the master list', (tester) async {
+      _useTallViewport(tester);
+      final api = _FakeApi()
+        ..overview = _baseOverview()
+        ..property = Property(
+          id: 7,
+          address: '',
+          galleryImages: const ['https://x/a.jpg', 'https://x/b.jpg'],
+          galleryCategories: {
+            'categories': {
+              'Kitchen': ['https://x/a.jpg'],
+            },
+            'unsorted': ['https://x/b.jpg'],
+          },
+        );
+
+      await tester.pumpWidget(_wrap(
+        PropertyOverviewScreen(propertyId: 7, api: api),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(_tabLabels(tester), contains('Gallery · 2'));
+    });
+
+    testWidgets('a transient fetch failure is retried once, silently',
+        (tester) async {
+      _useTallViewport(tester);
+      final api = _FakeApi()
+        ..overview = _baseOverview()
+        ..propertyFailures = 1
+        ..property = Property(
+          id: 7,
+          address: '',
+          galleryImages: const ['https://x/a.jpg'],
+        );
+
+      await tester.pumpWidget(_wrap(
+        PropertyOverviewScreen(propertyId: 7, api: api),
+      ));
+      await tester.pumpAndSettle();
+      // The first attempt has failed; the retry waits out its short delay.
+      expect(api.propertyCalls, 1);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(api.propertyCalls, 2);
+      expect(_tabLabels(tester), contains('Gallery · 1'));
+      await _openTab(tester, 'Gallery');
+      expect(find.text('1 photo'), findsOneWidget);
+    });
+
+    testWidgets('a persistent fetch failure shows an error with Retry, '
+        'never "0 photos"', (tester) async {
+      _useTallViewport(tester);
+      final api = _FakeApi()
+        ..overview = _baseOverview()
+        ..propertyFailures = 2
+        ..property = Property(
+          id: 7,
+          address: '',
+          galleryImages: const ['https://x/a.jpg', 'https://x/b.jpg'],
+        );
+
+      await tester.pumpWidget(_wrap(
+        PropertyOverviewScreen(propertyId: 7, api: api),
+      ));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      // Bounded: one retry and then it stops — this is not a poller.
+      expect(api.propertyCalls, 2);
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(api.propertyCalls, 2);
+      // No count on the tab while we don't actually know it.
+      expect(_tabLabels(tester), contains('Gallery'));
+      expect(_tabLabels(tester), isNot(contains('Gallery · 0')));
+
+      await _openTab(tester, 'Gallery');
+      expect(find.text('0 photos'), findsNothing);
+      expect(find.text('Request timed out'), findsOneWidget);
+      // The manager does its own fetch, so it stays reachable.
+      expect(find.text('Open Gallery Manager'), findsOneWidget);
+
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('2 photos'), findsOneWidget);
+      expect(_tabLabels(tester), contains('Gallery · 2'));
     });
   });
 

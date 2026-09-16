@@ -4,62 +4,150 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// The one disk cache every property photo goes through.
+/// The disk caches every property photo goes through.
 ///
-/// `DefaultCacheManager` keeps 200 objects for 30 days. A single large
-/// property is ~90 photos and an agent works several at once, so the default
-/// thrashes: the gallery an agent opened this morning is evicted by the ones
-/// they browsed this afternoon, and "cached" stops meaning anything. This
-/// budget is sized for a working set of a couple of thousand thumbnails —
-/// tens of MB, not a concern on any phone that can install the app — and a
-/// quarter's staleness, after which a photo is re-validated, not deleted.
+/// There are two, because the size problem is entirely about *which bytes*
+/// get written, not how many:
 ///
-/// Every `CachedNetworkImage` / `CachedNetworkImageProvider` must pass
-/// [manager], or it silently lands in the default store with the default
-/// limits and the Settings "Image cache" numbers won't include it.
+/// * [manager] — the working set. Every grid cell, list row, preview strip
+///   and hero loads the server's **500px thumbnail** (see [thumbUrl]) through
+///   this one. A thumb is ~30–60 KB against ~300 KB–1.5 MB for the 2560px
+///   original the app used to cache for the same 76dp cell, so a 20-photo
+///   property is about 1 MB on disk instead of 30. Sized for a couple of
+///   thousand thumbs and a quarter's staleness — the 200/30d default thrashed
+///   on one 92-photo property.
+/// * [full] — originals, only for the full-screen viewer and the client
+///   carousel, where the user is actually looking at one photo at a time and
+///   pinch-zooming a 500px thumb would look broken. Small and short-lived on
+///   purpose: it holds the last few dozen photos someone opened full-size,
+///   not every photo they scrolled past.
+///
+/// Every `CachedNetworkImage` / `CachedNetworkImageProvider` must go through
+/// one of these (in practice via `CoreXPhoto`), or it silently lands in the
+/// default store with the default limits and the Settings "Image cache"
+/// numbers won't include it.
 class CoreXImageCache {
   CoreXImageCache._();
 
-  /// Also the on-disk folder name under the temp directory and the sqlite
-  /// index name — `ImageCacheDiagnostics` reads both by this key.
+  /// Thumbnail store. Also the on-disk folder name under the temp directory
+  /// and the sqlite index name — `ImageCacheDiagnostics` reads both by key.
   static const String key = 'corexImages';
 
+  /// Full-resolution store, same layout under its own key.
+  static const String fullKey = 'corexImagesFull';
+
+  /// Every store, for diagnostics that walk the disk.
+  static const List<String> keys = [key, fullKey];
+
+  /// Most originals the [full] store keeps before evicting the oldest. At
+  /// the storer's 2560px/q85 that is a worst case of ~40 MB, typically far
+  /// less — and it only fills with photos someone opened full-screen.
+  static const int fullObjectCap = 40;
+
   static final CacheManager manager = _CoreXCacheManager();
+  static final CacheManager full = _CoreXFullCacheManager();
 
   /// Decoded-bitmap width for a thumbnail cell: its logical size at the
   /// device's pixel ratio. Without this a 3-column grid decodes every cell at
   /// full camera resolution (~12MP × 4 bytes each) — fine for six photos,
-  /// a memory-pressure kill on iPad for ninety.
+  /// a memory-pressure kill on iPad for ninety. `ResizeImage` never upscales,
+  /// so asking for more pixels than a 500px thumb has is harmless.
   static int thumbPx(BuildContext context, double logicalSize) =>
       (logicalSize * MediaQuery.devicePixelRatioOf(context)).ceil();
 
-  /// Drops [urls] from disk and from the in-memory decode cache — for photos
-  /// the user just deleted, so a re-add at the same URL can't show the old
-  /// bytes.
+  static final RegExp _propertyImage = RegExp(
+    r'^(.*/storage/properties/\d+/)([^/]+)\.(jpe?g|png|webp)$',
+    caseSensitive: false,
+  );
+
+  /// The server-side thumbnail for a property photo URL.
+  ///
+  /// Mirrors `PropertyThumbnailService::thumbRelPath` on the backend:
+  /// `…/storage/properties/{id}/{stem}.{jpg|png|webp}` becomes
+  /// `…/storage/properties/{id}/thumbs/{stem}.jpg` (always JPEG, 500px on
+  /// the long edge, generated at upload and by the backfill command). Any
+  /// other URL — an avatar, an agency logo, an external image, a URL that is
+  /// already a thumb — comes back unchanged, so callers can apply this
+  /// blindly. A query string is preserved.
+  ///
+  /// The thumb is a *guess* about what's on the server: a property whose
+  /// photos predate the backfill has none, and `CoreXPhoto` falls back to
+  /// the original when the thumb 404s.
+  static String thumbUrl(String url) {
+    final q = url.indexOf('?');
+    final path = q < 0 ? url : url.substring(0, q);
+    final query = q < 0 ? '' : url.substring(q);
+    final m = _propertyImage.firstMatch(path);
+    if (m == null) return url;
+    final dir = m.group(1)!;
+    if (dir.toLowerCase().endsWith('/thumbs/')) return url;
+    return '${dir}thumbs/${m.group(2)}.jpg$query';
+  }
+
+  /// Drops [urls] — thumb and original — from disk and from the in-memory
+  /// decode cache, for photos the user just deleted, so a re-add at the same
+  /// URL can't show the old bytes.
   static Future<void> evict(Iterable<String> urls) async {
     for (final u in urls) {
-      try {
-        // flutter_cache_manager 3.4.1 removes the index row but opens the
-        // file by its *relative* path when deleting, so the bytes stay on
-        // disk (verified: 55 files survived an emptyCache). Resolve the real
-        // file first and delete it ourselves.
-        final info = await manager.getFileFromCache(u);
-        await CachedNetworkImage.evictFromCache(u, cacheManager: manager);
-        if (info != null && await info.file.exists()) await info.file.delete();
-      } catch (_) {
-        // Best effort: an evict that fails leaves a stale file, not a bug.
-      }
+      final thumb = thumbUrl(u);
+      await _evictOne(manager, thumb);
+      if (thumb != u) await _evictOne(manager, u);
+      await _evictOne(full, u);
     }
   }
 
-  /// Empties the index, then removes the folder itself — see [evict] for why
-  /// `emptyCache()` alone leaves every file behind.
-  static Future<void> clear() async {
-    await manager.emptyCache();
+  static Future<void> _evictOne(CacheManager from, String url) async {
     try {
-      final dir = Directory('${(await getTemporaryDirectory()).path}/$key');
-      if (await dir.exists()) await dir.delete(recursive: true);
+      // flutter_cache_manager 3.4.1 removes the index row but opens the
+      // file by its *relative* path when deleting, so the bytes stay on
+      // disk (verified: 55 files survived an emptyCache). Resolve the real
+      // file first and delete it ourselves.
+      final info = await from.getFileFromCache(url);
+      await CachedNetworkImage.evictFromCache(url, cacheManager: from);
+      if (info != null && await info.file.exists()) await info.file.delete();
+    } catch (_) {
+      // Best effort: an evict that fails leaves a stale file, not a bug.
+    }
+  }
+
+  /// Bump when what the stores *contain* changes shape, so an upgraded
+  /// install purges once instead of carrying the old contents until they age
+  /// out. Generation 2 = thumbnails in [manager]; before it, every 2560px
+  /// original lived there and would have sat on disk for up to 90 days.
+  static const int generation = 2;
+  static const String _generationPref = 'corex_image_cache_generation';
+
+  /// One-time purge on the first launch after a [generation] bump. Cheap
+  /// when nothing's changed (one prefs read) and never throws — it runs from
+  /// the post-first-frame callback, where an exception reads as a crash.
+  static Future<void> migrate() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getInt(_generationPref) == generation) return;
+      await clear();
+      await prefs.setInt(_generationPref, generation);
+      debugPrint('[imageCache] purged for generation $generation');
+    } catch (e) {
+      debugPrint('[imageCache] migrate failed: $e');
+    }
+  }
+
+  /// Empties both indexes, then removes the folders themselves — see
+  /// [_evictOne] for why `emptyCache()` alone leaves every file behind.
+  static Future<void> clear() async {
+    for (final m in [manager, full]) {
+      try {
+        await m.emptyCache();
+      } catch (_) {}
+    }
+    try {
+      final temp = (await getTemporaryDirectory()).path;
+      for (final k in keys) {
+        final dir = Directory('$temp/$k');
+        if (await dir.exists()) await dir.delete(recursive: true);
+      }
     } catch (_) {}
   }
 }
@@ -76,5 +164,14 @@ class _CoreXCacheManager extends CacheManager with ImageCacheManager {
           CoreXImageCache.key,
           stalePeriod: const Duration(days: 90),
           maxNrOfCacheObjects: 2000,
+        ));
+}
+
+class _CoreXFullCacheManager extends CacheManager with ImageCacheManager {
+  _CoreXFullCacheManager()
+      : super(Config(
+          CoreXImageCache.fullKey,
+          stalePeriod: const Duration(days: 14),
+          maxNrOfCacheObjects: CoreXImageCache.fullObjectCap,
         ));
 }

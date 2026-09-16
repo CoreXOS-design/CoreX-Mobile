@@ -1,14 +1,12 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:tabler_icons/tabler_icons.dart';
 
 import '../../models/client_models.dart';
-import '../../services/image_cache.dart';
-import '../../services/image_cache_diagnostics.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../corex/corex_card.dart';
 import 'reaction_bar.dart';
+import '../corex_photo.dart';
 
 class ClientPropertyCard extends StatelessWidget {
   final ClientMatchResult result;
@@ -43,18 +41,13 @@ class ClientPropertyCard extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   if (result.thumbnail != null && result.thumbnail!.isNotEmpty)
-                    CachedNetworkImage(
-                      imageUrl: result.thumbnail!,
-                      cacheManager: CoreXImageCache.manager,
-                      memCacheWidth: CoreXImageCache.thumbPx(
-                          context, MediaQuery.sizeOf(context).width),
-                      errorListener: (e) => ImageCacheDiagnostics
-                          .recordFailure(result.thumbnail!, e),
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => Container(
+                    CoreXPhoto.thumb(
+                      url: result.thumbnail!,
+                      logicalWidth: MediaQuery.sizeOf(context).width,
+                      placeholder: (_) => Container(
                         color: CorexTokens.surfaceTop(context),
                       ),
-                      errorWidget: (_, __, ___) => Container(
+                      errorWidget: (_) => Container(
                         color: CorexTokens.surfaceTop(context),
                         child: Icon(TablerIcons.photo_off,
                             color: CorexTokens.textTertiary(context)),

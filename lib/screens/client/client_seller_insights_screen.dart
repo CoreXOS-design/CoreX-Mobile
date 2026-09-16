@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
@@ -9,8 +8,6 @@ import '../../models/seller_models.dart';
 import '../../providers/client_session_provider.dart';
 import '../../services/api_service.dart' show ApiException;
 import '../../services/client_auth_service.dart';
-import '../../services/image_cache.dart';
-import '../../services/image_cache_diagnostics.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../widgets/corex/corex_card.dart';
@@ -19,6 +16,7 @@ import '../../widgets/corex/corex_kpi_tile.dart';
 import '../../widgets/corex/corex_scaffold.dart';
 import '../auth/client/client_agency_picker_screen.dart';
 import 'client_seller_common.dart';
+import '../../widgets/corex_photo.dart';
 
 /// The full seller dashboard for one listing — mirrors the CoreX seller live
 /// page layout. Pull-to-refresh re-calls the insights endpoint.
@@ -191,20 +189,13 @@ class _ClientSellerInsightsScreenState
               borderRadius: BorderRadius.circular(10),
               child: AspectRatio(
                 aspectRatio: 16 / 9,
-                child: CachedNetworkImage(
-                  imageUrl: p.thumbnail!,
-                  cacheManager: CoreXImageCache.manager,
-                  // Decode at a bounded resolution — full-res property photos
-                  // can OOM-crash the decoder on low-heap devices.
-                  memCacheWidth: CoreXImageCache.thumbPx(
-                      context, MediaQuery.sizeOf(context).width),
-                  errorListener: (e) =>
-                      ImageCacheDiagnostics.recordFailure(p.thumbnail!, e),
-                  fit: BoxFit.cover,
-                  placeholder: (_, __) => Container(
+                child: CoreXPhoto.thumb(
+                  url: p.thumbnail!,
+                  logicalWidth: MediaQuery.sizeOf(context).width,
+                  placeholder: (_) => Container(
                     color: CorexTokens.surfaceTop(context),
                   ),
-                  errorWidget: (_, __, ___) => Container(
+                  errorWidget: (_) => Container(
                     color: CorexTokens.surfaceTop(context),
                     child: Icon(TablerIcons.photo_off,
                         color: CorexTokens.textTertiary(context)),

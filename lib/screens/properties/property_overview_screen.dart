@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -13,8 +12,6 @@ import '../../models/property_drive.dart';
 import '../../models/property_overview.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
-import '../../services/image_cache.dart';
-import '../../services/image_cache_diagnostics.dart';
 import '../../theme.dart';
 import '../../utils/app_time.dart';
 import '../../utils/display_text.dart';
@@ -24,6 +21,7 @@ import 'property_drive_card.dart';
 import 'property_edit_screen.dart';
 import 'property_gallery_screen.dart';
 import 'rental_inspections_screen.dart';
+import '../../widgets/corex_photo.dart';
 
 class PropertyOverviewScreen extends StatefulWidget {
   final int propertyId;
@@ -54,7 +52,28 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
   /// from a separate [ApiService.getProperty] call; the full grid lives in
   /// [PropertyGalleryScreen], which does its own fetch when opened.
   GalleryCategories _gallery = GalleryCategories.empty;
+
+  /// The property's flat master photo list (`gallery_images`). Photos
+  /// uploaded from the web's create form land here WITHOUT a
+  /// `gallery_categories` entry, so a card that only counted rooms +
+  /// unsorted read "0 photos" for a property with dozens. Unioned with the
+  /// room map for the count and preview, the same way the manager's
+  /// `_allUrls` does.
+  List<String> _galleryMaster = const [];
   bool _galleryLoading = true;
+
+  /// Set when the gallery fetch failed and there is nothing to show. Rendered
+  /// as an explicit error + Retry — never as "0 photos", which is what a
+  /// swallowed timeout used to look like, indistinguishable from an empty
+  /// gallery until the agent opened the manager (whose own fetch succeeded)
+  /// and came back.
+  String? _galleryError;
+  bool _galleryLoaded = false;
+
+  /// Bumped per [_loadGallery] call so a slow, older response can't land on
+  /// top of a newer one (pull-to-refresh and "back from the manager" both
+  /// re-fetch, and can overlap an in-flight fetch from screen open).
+  int _galleryRequest = 0;
 
   bool _loading = true;
   bool _sending = false;
@@ -113,15 +132,18 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
 
   Future<void> _loadComplianceAndContacts() async {
     final results = await Future.wait([
-      _api.getPropertyCompliance(widget.propertyId).then<Object?>(
-          (v) => v, onError: (_) => null),
-      _api.getPropertyContacts(widget.propertyId).then<Object?>(
-          (v) => v, onError: (_) => null),
+      _api
+          .getPropertyCompliance(widget.propertyId)
+          .then<Object?>((v) => v, onError: (_) => null),
+      _api
+          .getPropertyContacts(widget.propertyId)
+          .then<Object?>((v) => v, onError: (_) => null),
       // Drive is supplementary: a failure here must leave the rest of the
       // screen intact. Keep the error rather than dropping it — the section
       // still renders and offers a Retry.
-      _api.getPropertyDocuments(widget.propertyId).then<Object?>(
-          (v) => v, onError: (e) => e),
+      _api
+          .getPropertyDocuments(widget.propertyId)
+          .then<Object?>((v) => v, onError: (e) => e),
     ]);
     if (!mounted) return;
     setState(() {
@@ -188,20 +210,64 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
   /// protection) are [PropertyGalleryScreen]'s own concern; it does a
   /// complete fetch of its own when opened, so this screen doesn't need to
   /// carry state it never renders.
+  ///
+  /// The screen fires this alongside compliance, contacts and Drive the
+  /// moment the overview lands, so on a slow link it's one of five requests
+  /// racing the 15s timeout. A transient failure gets exactly ONE quiet
+  /// retry (bounded — see the loop/storm guard rule; this must never turn
+  /// into a poller). If that fails too the card shows an error with Retry,
+  /// keeping any photos it already had.
   Future<void> _loadGallery() async {
-    try {
-      final property = await _api.getProperty(widget.propertyId);
-      if (!mounted) return;
+    final request = ++_galleryRequest;
+    if (mounted && !_galleryLoaded) {
       setState(() {
-        _gallery = GalleryCategories.fromJson(property.galleryCategories);
-        _galleryLoading = false;
+        _galleryLoading = true;
+        _galleryError = null;
       });
-    } catch (_) {
-      // Non-fatal, same as compliance/contacts — the tab keeps whatever it
-      // last had and the agent can pull-to-refresh.
-      if (mounted) setState(() => _galleryLoading = false);
     }
+    Object? failure;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final property = await _api.getProperty(widget.propertyId);
+        // A newer fetch has been started since — its result wins.
+        if (!mounted || request != _galleryRequest) return;
+        setState(() {
+          _gallery = GalleryCategories.fromJson(property.galleryCategories);
+          _galleryMaster = property.galleryImages;
+          _galleryLoading = false;
+          _galleryLoaded = true;
+          _galleryError = null;
+        });
+        return;
+      } catch (e) {
+        failure = e;
+        if (attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 800));
+          if (!mounted || request != _galleryRequest) return;
+        }
+      }
+    }
+    if (!mounted || request != _galleryRequest) return;
+    setState(() {
+      _galleryLoading = false;
+      // Keep the last good gallery if there is one; only surface the error
+      // when there's nothing else to show.
+      if (!_galleryLoaded) {
+        _galleryError = failure is ApiException
+            ? failure.message
+            : "Couldn't load photos — check your connection";
+      }
+    });
   }
+
+  /// Every photo on the property, de-duplicated, in the order the manager
+  /// shows them: unsorted first, then each room, then anything only the
+  /// master list knows about.
+  List<String> get _allGalleryUrls => <String>{
+        ..._gallery.unsorted,
+        for (final urls in _gallery.categories.values) ...urls,
+        ..._galleryMaster,
+      }.toList();
 
   Future<void> _openGalleryUpload({String? initialTag}) async {
     final uploaded = await GalleryUploadSheet.show(
@@ -327,8 +393,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : _ErrorState(
-                  message: _error!,
-                  onRetry: () => _load(forceRefresh: true)),
+                  message: _error!, onRetry: () => _load(forceRefresh: true)),
         ),
       );
     }
@@ -359,7 +424,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
       ),
       DetailTab(
         label: 'Gallery',
-        count: _galleryLoading ? null : _gallery.totalCount,
+        count: _galleryLoaded ? _allGalleryUrls.length : null,
         children: _galleryTab(),
       ),
       DetailTab(
@@ -418,9 +483,8 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
   /// Appends `?agent=…` to the preview URL, keeping any query it already has.
   static String _withAgent(String base, String agent) {
     final uri = Uri.parse(base);
-    return uri
-        .replace(queryParameters: {...uri.queryParameters, 'agent': agent})
-        .toString();
+    return uri.replace(
+        queryParameters: {...uri.queryParameters, 'agent': agent}).toString();
   }
 
   /// Whose contact block the live-preview page renders — the web's share
@@ -430,10 +494,13 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
   /// server-side in `PropertyController::livePreview()`; this only builds the
   /// same query string, so the app and web can never disagree on attribution.
   ///
-  /// Returns null when the user dismisses the sheet. Skips the sheet when
-  /// there's nothing to choose: assistants never front a listing, an unknown
-  /// session can't be attributed, and the listing agent sharing their own
-  /// listing gets the same page either way.
+  /// Returns null when the user dismisses the sheet. Skips the sheet only when
+  /// there is nobody to choose: assistants never front a listing, and an
+  /// unknown session can't be attributed. The listing agent sharing their own
+  /// listing still gets the sheet — both options resolve to the same contact
+  /// block, but the web shows the chooser to every non-assistant and agents
+  /// expect the same step here (it was reported as "the share modal never
+  /// appears" because agents mostly share their own listings).
   Future<String?> _attributedPreviewUrl(PropertyOverview p) async {
     final base = (p.livePreviewUrl ?? '').trim();
     if (base.isEmpty) return null;
@@ -443,7 +510,6 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
     final myId = auth?.currentUserId;
     if (myId == null || auth!.isAssistant) return listingUrl;
     final agent = p.agent;
-    if (agent?.id != null && agent!.id == myId) return listingUrl;
 
     final choice = await showModalBottomSheet<String>(
       context: context,
@@ -593,7 +659,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
   /// room filter chips, a dedicated reorder-rooms sheet); this tab is now
   /// just its front door.
   List<Widget> _galleryTab() {
-    if (_galleryLoading) {
+    if (_galleryLoading && !_galleryLoaded) {
       return [
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 24),
@@ -601,12 +667,25 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
         ),
       ];
     }
-    final total = _gallery.totalCount;
+    if (_galleryError != null && !_galleryLoaded) {
+      // The manager does its own fetch, so it stays reachable even while
+      // this summary can't load — the agent isn't locked out of their photos
+      // by one dropped request.
+      return [
+        _ErrorState(message: _galleryError!, onRetry: _loadGallery),
+        Center(
+          child: TextButton.icon(
+            icon: const Icon(Icons.photo_library_outlined, size: 16),
+            label: const Text('Open Gallery Manager'),
+            onPressed: _openGalleryManager,
+          ),
+        ),
+      ];
+    }
+    final all = _allGalleryUrls;
+    final total = all.length;
     final roomCount = _gallery.categories.keys.length;
-    final preview = <String>[
-      ..._gallery.unsorted,
-      for (final urls in _gallery.categories.values) ...urls,
-    ].take(8).toList();
+    final preview = all.take(8).toList();
 
     return [
       Container(
@@ -651,21 +730,17 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
                       ClipRRect(
                         borderRadius:
                             BorderRadius.circular(AppTheme.radiusSmall),
-                        child: CachedNetworkImage(
-                          imageUrl: url,
-                          cacheManager: CoreXImageCache.manager,
-                          memCacheWidth: CoreXImageCache.thumbPx(context, 64),
-                          errorListener: (e) =>
-                              ImageCacheDiagnostics.recordFailure(url, e),
+                        child: CoreXPhoto.thumb(
+                          url: url,
+                          logicalWidth: 64,
                           width: 64,
                           height: 64,
-                          fit: BoxFit.cover,
-                          placeholder: (_, __) => Container(
+                          placeholder: (_) => Container(
                             width: 64,
                             height: 64,
                             color: AppTheme.surface2(context),
                           ),
-                          errorWidget: (_, __, ___) => Container(
+                          errorWidget: (_) => Container(
                             width: 64,
                             height: 64,
                             color: AppTheme.surface2(context),
@@ -750,70 +825,74 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
     final hasImage = (p.coverImage ?? '').isNotEmpty;
     return ClipRRect(
       borderRadius: BorderRadius.circular(AppTheme.radius),
-      child: Container(
+      child: SizedBox(
         height: 220,
-        decoration: BoxDecoration(
-          color: AppTheme.surface2(context),
-          image: hasImage
-              ? DecorationImage(
-                  // Disk-cached — this hero repaints every time the
-                  // property is opened, and shouldn't refetch the same
-                  // cover photo each time.
-                  image: CachedNetworkImageProvider(
-                    p.coverImage!,
-                    cacheManager: CoreXImageCache.manager,
-                    maxWidth: CoreXImageCache.thumbPx(
-                        context, MediaQuery.sizeOf(context).width),
-                  ),
-                  fit: BoxFit.cover,
-                  colorFilter: ColorFilter.mode(
-                      Colors.black.withValues(alpha: 0.35), BlendMode.darken),
-                )
-              : null,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(color: AppTheme.surface2(context)),
+            if (hasImage)
+              // The server's 500px thumb, darkened behind the title. It's a
+              // backdrop, not a photo the agent inspects — and the original
+              // via a DecorationImage used to cost the full 1–1.5 MB on
+              // disk *plus* a resized copy, every property opened.
+              ColorFiltered(
+                colorFilter: ColorFilter.mode(
+                    Colors.black.withValues(alpha: 0.35), BlendMode.darken),
+                child: CoreXPhoto.thumb(
+                  url: p.coverImage!,
+                  logicalWidth: MediaQuery.sizeOf(context).width,
+                  placeholder: (_) => const SizedBox.shrink(),
+                  errorWidget: (_) => const SizedBox.shrink(),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if ((p.status ?? '').isNotEmpty) _statusPill(p.status!),
+                  Row(
+                    children: [
+                      if ((p.status ?? '').isNotEmpty) _statusPill(p.status!),
+                      const Spacer(),
+                      if (p.daysOnMarket != null)
+                        _chip('${p.daysOnMarket} days on market'),
+                    ],
+                  ),
                   const Spacer(),
-                  if (p.daysOnMarket != null)
-                    _chip('${p.daysOnMarket} days on market'),
+                  Text(
+                    p.title ?? 'Untitled',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    [p.suburb, p.city]
+                        .where((e) => (e ?? '').isNotEmpty)
+                        .join(', '),
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    p.priceDisplay ?? '',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ],
               ),
-              const Spacer(),
-              Text(
-                p.title ?? 'Untitled',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                [p.suburb, p.city].where((e) => (e ?? '').isNotEmpty).join(', '),
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.85),
-                  fontSize: 13,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                p.priceDisplay ?? '',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -848,9 +927,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
       ),
       child: Text(text,
           style: const TextStyle(
-              color: Colors.white,
-              fontSize: 11,
-              fontWeight: FontWeight.w600)),
+              color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
     );
   }
 
@@ -864,12 +941,10 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
       if (p.beds != null) (value: '${p.beds}', label: 'Beds'),
       if (p.baths != null) (value: '${p.baths}', label: 'Baths'),
       if (p.garages != null) (value: '${p.garages}', label: 'Garages'),
-      if ((p.sizeM2 ?? '').isNotEmpty)
-        (value: p.sizeM2!, label: 'Floor m²'),
+      if ((p.sizeM2 ?? '').isNotEmpty) (value: p.sizeM2!, label: 'Floor m²'),
       if ((p.erfSizeM2 ?? '').isNotEmpty)
         (value: p.erfSizeM2!, label: 'Erf m²'),
-      if (p.photosCount != null)
-        (value: '${p.photosCount}', label: 'Photos'),
+      if (p.photosCount != null) (value: '${p.photosCount}', label: 'Photos'),
       if ((p.mandateType ?? '').isNotEmpty)
         (value: p.mandateType!, label: 'Mandate'),
     ];
@@ -880,8 +955,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
     const perRow = 4;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width =
-            (constraints.maxWidth - spacing * (perRow - 1)) / perRow;
+        final width = (constraints.maxWidth - spacing * (perRow - 1)) / perRow;
         return Wrap(
           spacing: spacing,
           runSpacing: spacing,
@@ -942,7 +1016,9 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
   Widget _description(String text) {
     const limit = 220;
     final isLong = text.length > limit;
-    final shown = !isLong || _descExpanded ? text : '${text.substring(0, limit).trimRight()}…';
+    final shown = !isLong || _descExpanded
+        ? text
+        : '${text.substring(0, limit).trimRight()}…';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -959,8 +1035,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               foregroundColor: AppTheme.brand,
             ),
-            onPressed: () =>
-                setState(() => _descExpanded = !_descExpanded),
+            onPressed: () => setState(() => _descExpanded = !_descExpanded),
             child: Text(_descExpanded ? 'Show less' : 'Read more'),
           ),
       ],
@@ -1239,7 +1314,9 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
       return ClipRRect(
         borderRadius: BorderRadius.circular(28),
         child: Image.network(c.photoUrl!,
-            width: 48, height: 48, fit: BoxFit.cover,
+            width: 48,
+            height: 48,
+            fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => _initialsAvatar(c.name)),
       );
     }
@@ -1408,8 +1485,18 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
     final dt = DateTime.tryParse(iso);
     if (dt == null) return iso;
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
     ];
     final l = dt.toLocal();
     return '${l.day} ${months[l.month - 1]} ${l.year}';
@@ -1536,12 +1623,10 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
                       ? const SizedBox(
                           width: 16,
                           height: 16,
-                          child:
-                              CircularProgressIndicator(strokeWidth: 2))
+                          child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.send, size: 18),
                   label: const Text('Send Authority to Market'),
-                  onPressed:
-                      (c.ready && !_sending) ? _sendToMarket : null,
+                  onPressed: (c.ready && !_sending) ? _sendToMarket : null,
                 ),
               ),
               if (!c.ready)
@@ -1550,8 +1635,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
                   child: Text(
                     'Resolve the items above to enable sending to market.',
                     style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary(context)),
+                        fontSize: 12, color: AppTheme.textSecondary(context)),
                   ),
                 ),
             ],
@@ -1594,8 +1678,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
                     child: Text(
                       'by $by',
                       style: TextStyle(
-                          color: AppTheme.textSecondary(context),
-                          fontSize: 12),
+                          color: AppTheme.textSecondary(context), fontSize: 12),
                     ),
                   ),
               ],
@@ -1758,12 +1841,8 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                  gate.passed
-                      ? Icons.check_circle
-                      : Icons.error_outline,
-                  size: 18,
-                  color: color),
+              Icon(gate.passed ? Icons.check_circle : Icons.error_outline,
+                  size: 18, color: color),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
@@ -1818,9 +1897,7 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
           const SizedBox(width: 6),
           Text('${p.count}/${p.required} photos',
               style: TextStyle(
-                  color: color,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700)),
+                  color: color, fontSize: 12, fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -1868,14 +1945,12 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
                   child: SizedBox(
                       width: 20,
                       height: 20,
-                      child:
-                          CircularProgressIndicator(strokeWidth: 2)),
+                      child: CircularProgressIndicator(strokeWidth: 2)),
                 ),
               )
             else if (contacts.isEmpty)
               Text('No contacts linked yet.',
-                  style:
-                      TextStyle(color: AppTheme.textSecondary(context)))
+                  style: TextStyle(color: AppTheme.textSecondary(context)))
             else
               for (var i = 0; i < contacts.length; i++) ...[
                 if (i > 0) const Divider(height: 18),
@@ -1955,8 +2030,8 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
               if ((c.ficaStatus ?? '').isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: _ficaBadge(c.ficaStatus,
-                      c.ficaStatus?.toLowerCase() == 'approved'),
+                  child: _ficaBadge(
+                      c.ficaStatus, c.ficaStatus?.toLowerCase() == 'approved'),
                 ),
             ],
           ),

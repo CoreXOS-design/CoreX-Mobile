@@ -136,8 +136,10 @@ void main() {
       if (kDebugMode) unawaited(_dropFirstFrameBreadcrumb());
       unawaited(_initDeferredServices());
       // One greppable COREX_IMAGE_CACHE line — the only evidence an iOS build
-      // gives us that the photo cache's storage plumbing works there.
-      unawaited(ImageCacheDiagnostics.logStartupSelfTest());
+      // gives us that the photo cache's storage plumbing works there. Runs
+      // after the one-time migration so the numbers it prints are post-purge.
+      unawaited(CoreXImageCache.migrate()
+          .then((_) => ImageCacheDiagnostics.logStartupSelfTest()));
     });
   }, (error, stack) {
     debugPrint('[zone] uncaught: $error\n$stack');
@@ -254,7 +256,8 @@ class AppBootstrap extends StatefulWidget {
   State<AppBootstrap> createState() => _AppBootstrapState();
 }
 
-class _AppBootstrapState extends State<AppBootstrap> with WidgetsBindingObserver {
+class _AppBootstrapState extends State<AppBootstrap>
+    with WidgetsBindingObserver {
   bool _splashDone = false;
   bool _brandingPulled = false;
 

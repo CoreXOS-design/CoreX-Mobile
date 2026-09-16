@@ -1074,6 +1074,7 @@ class _PropertyCreateScreenState extends State<PropertyCreateScreen> {
             onAssigned: _adoptAssignResult,
             onReordered: _adoptReorderResult,
             onTagsReordered: _adoptTagReorderResult,
+            onTagAdded: (tags) => setState(() => _liveTags = tags),
             onRefreshRequested: _refreshProperty,
             // Only ever called from a space section header, always with that
             // space's name 2014 so the sheet opens locked to it rather than

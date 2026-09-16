@@ -4,6 +4,7 @@ import '../../widgets/ui/content_width.dart';
 import '../../models/core_match.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
+import '../../widgets/corex_photo.dart';
 import '../contacts/contact_show_screen.dart';
 import 'core_match_edit_screen.dart';
 import 'core_matches_common.dart';
@@ -759,10 +760,10 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
               width: 64,
               height: 64,
               child: r.thumbnail != null && r.thumbnail!.isNotEmpty
-                  ? Image.network(
-                      r.thumbnail!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
+                  ? CoreXPhoto.thumb(
+                      url: r.thumbnail!,
+                      logicalWidth: 64,
+                      errorWidget: (_) => Container(
                         color: AppTheme.surface2(context),
                         child: Icon(Icons.home_rounded,
                             color: AppTheme.textMuted(context)),
