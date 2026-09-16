@@ -12,7 +12,11 @@ workflows:
         # Codemagic env-var group holding CERTIFICATE_PRIVATE_KEY (the RSA key
         # used to create/reuse the iOS distribution certificate).
         - ios_signing
-      flutter: stable
+      # Pinned to the version the app is developed and tested against. An
+      # unpinned "stable" moved to >=3.41 under us and deprecated
+      # ReorderableListView.onReorder (see property_gallery.dart); the next
+      # such change could break the store build with no local repro.
+      flutter: 3.38.7
       xcode: latest
       cocoapods: default
       vars:

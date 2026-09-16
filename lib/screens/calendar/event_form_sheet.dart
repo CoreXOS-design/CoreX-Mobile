@@ -8,6 +8,7 @@ import '../../providers/dashboard_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
 import '../../utils/app_time.dart';
+import '../../widgets/corex_photo.dart';
 
 /// Full "Add / Edit Event" flow — at parity with the web add-event panel.
 ///
@@ -1332,10 +1333,10 @@ class _PropertyResultTile extends StatelessWidget {
               height: 48,
               child: property.thumbnail != null &&
                       property.thumbnail!.isNotEmpty
-                  ? Image.network(
-                      property.thumbnail!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _thumbFallback(context),
+                  ? CoreXPhoto.thumb(
+                      url: property.thumbnail!,
+                      logicalWidth: 48,
+                      errorWidget: (_) => _thumbFallback(context),
                     )
                   : _thumbFallback(context),
             ),

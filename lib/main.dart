@@ -129,6 +129,12 @@ void main() {
       debugPrint('[firebase] init failed: $e');
     }
 
+    // Started — not awaited, nothing may block runApp (see the 1.0.9(15)
+    // launch-crash rejection) — before the first frame, so the one-time purge
+    // is done before the first screen's photos start writing into the folders
+    // it deletes. Never throws.
+    final imageCacheMigrated = CoreXImageCache.migrate();
+
     runApp(const CoreXApp());
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -138,7 +144,7 @@ void main() {
       // One greppable COREX_IMAGE_CACHE line — the only evidence an iOS build
       // gives us that the photo cache's storage plumbing works there. Runs
       // after the one-time migration so the numbers it prints are post-purge.
-      unawaited(CoreXImageCache.migrate()
+      unawaited(imageCacheMigrated
           .then((_) => ImageCacheDiagnostics.logStartupSelfTest()));
     });
   }, (error, stack) {

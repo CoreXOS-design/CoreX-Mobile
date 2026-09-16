@@ -450,9 +450,10 @@ class _PropertyGalleryState extends State<PropertyGallery> {
             physics: const NeverScrollableScrollPhysics(),
             buildDefaultDragHandles: false,
             itemCount: liveTags.length,
-            // Codemagic runs unpinned stable (>=3.41) where onReorder is deprecated in
-            // favour of onReorderItem; that callback does not exist on the 3.38.7 used
-            // locally, so keep onReorder until the local toolchain is upgraded.
+            // Flutter >=3.41 deprecates onReorder in favour of onReorderItem;
+            // that callback does not exist on the 3.38.7 used locally and now
+            // pinned in codemagic.yaml, so keep onReorder until the toolchain
+            // is upgraded everywhere at once.
             // ignore: deprecated_member_use
             onReorder: (oldIndex, newIndex) =>
                 _reorderTags(liveTags, oldIndex, newIndex),
