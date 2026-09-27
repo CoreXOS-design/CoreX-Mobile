@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../utils/sheet_insets.dart';
 
 import '../../theme/corex_tokens.dart';
 
@@ -24,7 +25,7 @@ Future<String?> showNotForMeSheet(BuildContext context,
           left: 20,
           right: 20,
           top: 4,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+          bottom: sheetBottomInset(ctx) + 16,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,

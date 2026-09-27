@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../utils/sheet_insets.dart';
 import '../models/branding.dart';
 import '../models/visibility.dart';
 import '../theme.dart';
@@ -29,8 +30,7 @@ class AgentFilterBar extends StatelessWidget {
     if (!module.canPickAgent) return const SizedBox.shrink();
 
     final sel = selected;
-    final selectedAgentId =
-        sel is SpecificAgentFilter ? sel.agentId : null;
+    final selectedAgentId = sel is SpecificAgentFilter ? sel.agentId : null;
     final hasAgents = module.agents.isNotEmpty;
 
     return Padding(
@@ -201,7 +201,8 @@ class _AgentPicker extends StatelessWidget {
             children: [
               Icon(Icons.person_search_rounded,
                   size: 18,
-                  color: active ? brand.button : AppTheme.textSecondary(context)),
+                  color:
+                      active ? brand.button : AppTheme.textSecondary(context)),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -211,9 +212,8 @@ class _AgentPicker extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: active
-                        ? brand.button
-                        : AppTheme.textPrimary(context),
+                    color:
+                        active ? brand.button : AppTheme.textPrimary(context),
                   ),
                 ),
               ),
@@ -268,15 +268,12 @@ class _AgentPickerSheetState extends State<_AgentPickerSheet> {
     final q = _query.trim().toLowerCase();
     final filtered = q.isEmpty
         ? widget.agents
-        : widget.agents
-            .where((a) => a.name.toLowerCase().contains(q))
-            .toList();
+        : widget.agents.where((a) => a.name.toLowerCase().contains(q)).toList();
 
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.surface(context),
-        borderRadius:
-            const BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: SafeArea(
         top: false,
@@ -285,7 +282,7 @@ class _AgentPickerSheetState extends State<_AgentPickerSheet> {
             left: 20,
             right: 20,
             top: 16,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            bottom: sheetBottomInset(context) + 16,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -332,13 +329,11 @@ class _AgentPickerSheetState extends State<_AgentPickerSheet> {
                       color: selected
                           ? brand.button.withValues(alpha: 0.14)
                           : AppTheme.surface2(context),
-                      borderRadius:
-                          BorderRadius.circular(AppTheme.radius),
+                      borderRadius: BorderRadius.circular(AppTheme.radius),
                       child: InkWell(
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.radius),
-                        onTap: () => Navigator.pop(
-                            context, _PickResult(agentId: a.id)),
+                        borderRadius: BorderRadius.circular(AppTheme.radius),
+                        onTap: () =>
+                            Navigator.pop(context, _PickResult(agentId: a.id)),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 14, vertical: 12),
@@ -370,8 +365,8 @@ class _AgentPickerSheetState extends State<_AgentPickerSheet> {
               if (widget.selectedAgentId != null) ...[
                 const SizedBox(height: 12),
                 TextButton.icon(
-                  onPressed: () => Navigator.pop(
-                      context, const _PickResult(cleared: true)),
+                  onPressed: () =>
+                      Navigator.pop(context, const _PickResult(cleared: true)),
                   icon: const Icon(Icons.close_rounded, size: 18),
                   label: const Text('Clear agent filter'),
                 ),

@@ -12,30 +12,47 @@ class CorexCard extends StatelessWidget {
   final EdgeInsetsGeometry padding;
   final VoidCallback? onTap;
 
+  /// Corner radius. Defaults to the card radius; tiles pass the smaller
+  /// [CorexTokens.radiusTile] so a grid of them doesn't read as over-rounded.
+  final double? radius;
+
+  /// Deepens the soft shadow. For the one hero card on a screen, not for
+  /// everything — the depth only reads if most cards sit lower.
+  final bool elevated;
+
   const CorexCard({
     super.key,
     required this.child,
     this.accent = false,
     this.padding = const EdgeInsets.all(16),
     this.onTap,
+    this.radius,
+    this.elevated = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = CorexAccentTheme.of(context);
-    final borderRadius = BorderRadius.circular(CorexTokens.radius);
-    final isLight = Theme.of(context).brightness == Brightness.light;
+    final r = radius ?? CorexTokens.radiusCard;
+    final borderRadius = BorderRadius.circular(r);
 
-    final Border? edge = accent
+    // The hairline is what actually defines the card edge in dark mode, so
+    // it's no longer light-mode-only the way it was.
+    final Border edge = accent
         ? Border(left: BorderSide(color: theme.accent, width: 2))
-        : (isLight
-            ? Border.all(color: Colors.black.withValues(alpha: 0.08))
-            : null);
+        : Border.all(color: CorexTokens.surfaceBorder(context));
 
-    final decoration = BoxDecoration(
+    final surface = BoxDecoration(
       gradient: CorexTokens.surfaceGradient(context),
       borderRadius: borderRadius,
       border: edge,
+    );
+
+    // Shadows have to live OUTSIDE the ClipRRect. Painted on the clipped box
+    // they fall entirely outside its bounds and get cut away — which is why
+    // this card has never actually cast one.
+    final shadow = BoxDecoration(
+      borderRadius: borderRadius,
       boxShadow: [
         if (accent)
           BoxShadow(
@@ -44,36 +61,14 @@ class CorexCard extends StatelessWidget {
             blurRadius: 24,
             spreadRadius: -10,
           ),
-        BoxShadow(
-          color: Colors.black
-              .withValues(alpha: isLight ? 0.06 : 0.30),
-          offset: Offset(0, isLight ? 2 : 1),
-          blurRadius: isLight ? 6 : 0,
-        ),
+        ...CorexTokens.cardShadow(context, strong: elevated),
       ],
     );
 
-    Widget body = Stack(
-      children: [
-        Padding(padding: padding, child: child),
-        Positioned(
-          top: 0,
-          left: accent ? 2 : 0,
-          right: 0,
-          child: Container(
-            height: 1,
-            decoration: BoxDecoration(
-              color: (isLight ? Colors.white : Colors.white)
-                  .withValues(alpha: isLight ? 0.0 : 0.05),
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(accent ? 0 : CorexTokens.radius),
-                topRight: const Radius.circular(CorexTokens.radius),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
+    // The 1 px inner top highlight that used to sit here is gone: the card
+    // now carries a hairline border on all four sides, and the two together
+    // read as a double line along the top edge.
+    Widget body = Padding(padding: padding, child: child);
 
     if (onTap != null) {
       body = Material(
@@ -87,9 +82,12 @@ class CorexCard extends StatelessWidget {
       );
     }
 
-    return ClipRRect(
-      borderRadius: borderRadius,
-      child: DecoratedBox(decoration: decoration, child: body),
+    return DecoratedBox(
+      decoration: shadow,
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: DecoratedBox(decoration: surface, child: body),
+      ),
     );
   }
 }

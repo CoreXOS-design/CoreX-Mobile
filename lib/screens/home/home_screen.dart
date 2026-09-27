@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -10,7 +8,6 @@ import '../../providers/auth_provider.dart';
 import '../../providers/notifications_provider.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
-import '../../widgets/corex/corex_app_bar.dart';
 import '../../widgets/corex/corex_bottom_nav.dart';
 import '../../widgets/corex/corex_drawer.dart';
 import '../../widgets/corex/corex_ellie_card.dart';
@@ -25,6 +22,17 @@ import '../my_agent_qr_screen.dart';
 import '../portal_leads/portal_leads_screen.dart';
 import '../properties/property_list_screen.dart';
 import '../real_estate_hub_screen.dart';
+
+/// Bounds for a Workspace tile's height. The grid flexes between them so Home
+/// fills the screen exactly and never scrolls; exported so the layout test
+/// pins the same numbers the screen uses instead of re-deriving them.
+///
+/// The floor is what a tile needs once it has dropped its count line and
+/// tightened its chip — padding (28) + chip (30) + gap (10) + label (~19).
+/// [CorexModuleTile] sheds those itself as it gets shorter, so the grid can
+/// go this low without overflowing and never needs a scroll of its own.
+const double kHomeModuleTileMinHeight = 92;
+const double kHomeModuleTileMaxHeight = 132;
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -42,80 +50,48 @@ class HomeScreen extends StatelessWidget {
         backgroundColor: CorexTokens.pageBase(context),
         drawer: const CorexDrawer(),
         body: Container(
-          decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
+          decoration:
+              BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
           child: ContentSafeArea(
             bottom: false,
             child: Column(
               children: [
-                Builder(
-                  builder: (ctx) => CorexAppBar(
-                    // No avatar badge — the account lives on the "Me" tab.
-                    unreadBadge: unread,
-                    onMenuTap: () => Scaffold.of(ctx).openDrawer(),
-                    onBellTap: () => _push(ctx, const NotificationsScreen()),
-                    onQrTap: () => _push(ctx, const MyAgentQrScreen()),
-                  ),
-                ),
+                // Home is a single screen — it never scrolls. Everything above
+                // the grid takes its natural height and the grid absorbs
+                // whatever is left, so the page ends exactly at the nav.
                 Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, box) {
-                      // The page is sized to fit rather than scrolled: gaps
-                      // tighten on shorter devices and the module grid absorbs
-                      // whatever slack is left. 640 is roughly the body height
-                      // of a 6.1" phone once the app bar and bottom nav are
-                      // taken out, so anything at or above that keeps the full
-                      // spacing.
-                      final density = (box.maxHeight / 640).clamp(0.65, 1.0);
-                      double gap(double v) => v * density;
-
-                      return Padding(
-                        padding: EdgeInsets.fromLTRB(16, gap(4), 16, gap(12)),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (agencyName != null) ...[
-                              Text(
-                                agencyName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: CorexTokens.textTertiary(context),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 0.2,
-                                ),
-                              ),
-                              SizedBox(height: gap(6)),
-                            ],
-                            Text(
-                              'Good ${_timeOfDay()}, $firstName.',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: CorexTokens.textPrimary(context),
-                                fontSize: 24,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.4,
-                              ),
-                            ),
-                            SizedBox(height: gap(18)),
-                            CorexEllieCard(
-                              onTap: () => _push(context, const EllieScreen()),
-                            ),
-                            SizedBox(height: gap(16)),
-                            const CorexNextAppointment(),
-                            SizedBox(height: gap(22)),
-                            _sectionHeader(
-                              'Workspace',
-                              onAll: () =>
-                                  _push(context, const RealEstateHubScreen()),
-                            ),
-                            SizedBox(height: gap(12)),
-                            Expanded(child: _moduleGrid(context)),
-                          ],
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Builder(
+                          builder: (ctx) => _Header(
+                            agencyName: agencyName,
+                            greeting: 'Good ${_timeOfDay()}, $firstName',
+                            unread: unread,
+                            onMenuTap: () => Scaffold.of(ctx).openDrawer(),
+                            onBellTap: () =>
+                                _push(ctx, const NotificationsScreen()),
+                            onQrTap: () => _push(ctx, const MyAgentQrScreen()),
+                          ),
                         ),
-                      );
-                    },
+                        const SizedBox(height: 16),
+                        const CorexNextAppointment(),
+                        const SizedBox(height: 12),
+                        CorexEllieCard(
+                          onTap: () => _push(context, const EllieScreen()),
+                        ),
+                        const SizedBox(height: 18),
+                        _sectionHeader(
+                          'Workspace',
+                          onAll: () =>
+                              _push(context, const RealEstateHubScreen()),
+                        ),
+                        const SizedBox(height: 12),
+                        Expanded(child: _moduleGrid(context)),
+                      ],
+                    ),
                   ),
                 ),
                 CorexBottomNav(
@@ -134,6 +110,10 @@ class HomeScreen extends StatelessWidget {
     return Builder(
       builder: (context) {
         final t = CorexAccentTheme.of(context);
+        final isLight = Theme.of(context).brightness == Brightness.light;
+        // Link text on the page background, so it needs the readable variant
+        // in light mode like every other accent-coloured label.
+        final linkColour = isLight ? t.accentText : t.accent;
         return Row(
           children: [
             Text(
@@ -147,19 +127,21 @@ class HomeScreen extends StatelessWidget {
             const Spacer(),
             InkWell(
               onTap: onAll,
+              borderRadius: BorderRadius.circular(8),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                 child: Row(
                   children: [
                     Text(
                       'All',
                       style: TextStyle(
-                        color: t.accent,
+                        color: linkColour,
                         fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    Icon(TablerIcons.arrow_right, size: 14, color: t.accent),
+                    const SizedBox(width: 2),
+                    Icon(TablerIcons.arrow_right, size: 14, color: linkColour),
                   ],
                 ),
               ),
@@ -171,6 +153,11 @@ class HomeScreen extends StatelessWidget {
   }
 
   Widget _moduleGrid(BuildContext context) {
+    final unreadLeads = context.watch<PortalLeadsProvider>().totalUnread;
+
+    // Only Portal Leads has a count the home screen already holds. The other
+    // three would need a list fetch each to show one, so they stay label-only
+    // rather than showing a stale or invented number.
     final modules = <_ModuleSpec>[
       _ModuleSpec(
         icon: TablerIcons.building_skyscraper,
@@ -185,50 +172,57 @@ class HomeScreen extends StatelessWidget {
       _ModuleSpec(
         icon: TablerIcons.heart_handshake,
         label: 'Core Matches',
+        useMoneyAccent: true,
         builder: () => const CoreMatchesListScreen(),
       ),
       _ModuleSpec(
         icon: TablerIcons.target_arrow,
         label: 'Portal Leads',
-        dot: context.watch<PortalLeadsProvider>().totalUnread > 0,
+        dot: unreadLeads > 0,
+        subtitle: unreadLeads > 0 ? '$unreadLeads unread' : null,
+        useMoneyAccent: true,
         builder: () => const PortalLeadsScreen(),
       ),
     ];
 
-    const spacing = 10.0;
-    const columns = 3;
-    // Tallest a tile may get (square) and the shortest it can be before the
-    // icon + label stack stops fitting.
-    const idealTileHeight = 94.0;
+    const spacing = 12.0;
+    const rows = 2;
 
+    // The grid is the page's shock absorber: it takes whatever height is left
+    // once the cards above have had theirs, so Home ends exactly at the nav
+    // and never scrolls. Height is driven by the space available, not by tile
+    // width — deriving it from width overflowed by 2 px at 360 dp.
     return LayoutBuilder(
       builder: (context, box) {
-        final rows = (modules.length / columns).ceil();
-        final tileWidth = (box.maxWidth - spacing * (columns - 1)) / columns;
-        final maxTileHeight = tileWidth;
-        final minTileHeight = math.min(idealTileHeight, maxTileHeight);
         final free = box.maxHeight - spacing * (rows - 1);
-        final tileHeight =
-            (free / rows).clamp(minTileHeight, maxTileHeight);
+        final tileHeight = (free / rows).clamp(
+          kHomeModuleTileMinHeight,
+          kHomeModuleTileMaxHeight,
+        );
 
-        return GridView.count(
+        return GridView.builder(
           padding: EdgeInsets.zero,
-          // Squeezed below the floor only on unusually short screens — the
-          // grid scrolls on its own there rather than overflowing the page.
-          physics: const ClampingScrollPhysics(),
-          crossAxisCount: columns,
-          crossAxisSpacing: spacing,
-          mainAxisSpacing: spacing,
-          childAspectRatio: tileWidth / tileHeight,
-          children: [
-            for (final m in modules)
-              CorexModuleTile(
-                icon: m.icon,
-                label: m.label,
-                dot: m.dot,
-                onTap: () => _push(context, m.builder()),
-              ),
-          ],
+          // Never scrolls — that's the whole point of Home being one screen.
+          // The tiles shrink to fit instead.
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: modules.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: spacing,
+            mainAxisSpacing: spacing,
+            mainAxisExtent: tileHeight,
+          ),
+          itemBuilder: (context, i) {
+            final m = modules[i];
+            return CorexModuleTile(
+              icon: m.icon,
+              label: m.label,
+              dot: m.dot,
+              subtitle: m.subtitle,
+              useMoneyAccent: m.useMoneyAccent,
+              onTap: () => _push(context, m.builder()),
+            );
+          },
         );
       },
     );
@@ -275,11 +269,189 @@ class _ModuleSpec {
   final IconData icon;
   final String label;
   final bool dot;
+  final String? subtitle;
+  final bool useMoneyAccent;
   final Widget Function() builder;
   _ModuleSpec({
     required this.icon,
     required this.label,
     required this.builder,
     this.dot = false,
+    this.subtitle,
+    this.useMoneyAccent = false,
   });
+}
+
+/// Home header: menu, greeting block, QR and notifications.
+///
+/// Replaces [CorexAppBar] on this screen only — the greeting moves up onto
+/// the same row as the actions instead of sitting in a band beneath them,
+/// which buys back a card's worth of vertical space.
+class _Header extends StatelessWidget {
+  final String? agencyName;
+  final String greeting;
+  final int unread;
+  final VoidCallback onMenuTap;
+  final VoidCallback onBellTap;
+  final VoidCallback onQrTap;
+
+  const _Header({
+    required this.agencyName,
+    required this.greeting,
+    required this.unread,
+    required this.onMenuTap,
+    required this.onBellTap,
+    required this.onQrTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Two rows, not one. Sharing a row with three 42 px buttons left the
+    // greeting about 170 px, so "Good afternoon, <name>" ellipsised mid-name
+    // — the one word on the screen that has to survive. On its own row it has
+    // the full width, and a long name still gets FittedBox as a backstop.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            _IconButton(
+              icon: TablerIcons.menu_2,
+              tooltip: 'Menu',
+              onTap: onMenuTap,
+            ),
+            const Spacer(),
+            _IconButton(
+              icon: TablerIcons.qrcode,
+              tooltip: 'My QR code',
+              onTap: onQrTap,
+            ),
+            const SizedBox(width: 8),
+            _IconButton(
+              icon: TablerIcons.bell,
+              tooltip: 'Notifications',
+              badge: unread,
+              onTap: onBellTap,
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        if (agencyName != null) ...[
+          Text(
+            agencyName!,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: CorexTokens.textSecondary(context),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+        ],
+        // Scales down instead of clipping when the name is long or the user
+        // has a large text scale; it never grows past the set size.
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            greeting,
+            maxLines: 1,
+            style: TextStyle(
+              color: CorexTokens.textPrimary(context),
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 42 px boxed icon button — the header's answer to Studio's card language.
+class _IconButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final int badge;
+  final VoidCallback onTap;
+
+  const _IconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.badge = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CorexAccentTheme.of(context);
+    final radius = BorderRadius.circular(13);
+
+    return Semantics(
+      button: true,
+      label: badge > 0 ? '$tooltip, $badge unread' : tooltip,
+      child: Tooltip(
+        message: tooltip,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: CorexTokens.surfaceGradient(context),
+                borderRadius: radius,
+                border: Border.all(color: CorexTokens.surfaceBorder(context)),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                borderRadius: radius,
+                child: InkWell(
+                  borderRadius: radius,
+                  onTap: onTap,
+                  child: SizedBox(
+                    width: 42,
+                    height: 42,
+                    child: Icon(
+                      icon,
+                      size: 19,
+                      color: CorexTokens.textPrimary(context),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (badge > 0)
+              Positioned(
+                top: -5,
+                right: -5,
+                child: Container(
+                  constraints: const BoxConstraints(minWidth: 18),
+                  height: 18,
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  decoration: BoxDecoration(
+                    color: t.accentMoney,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    // Deliberately not capped at "9+" — the cockpit rules ban
+                    // that badge; a real number or nothing.
+                    '$badge',
+                    style: TextStyle(
+                      // Picked from the fill's luminance, so a dark agency
+                      // "money" colour still gets legible digits.
+                      color: t.onMoney,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      height: 1.0,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }

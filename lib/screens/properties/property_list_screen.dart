@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../utils/sheet_insets.dart';
 import '../../utils/display_text.dart';
 import '../../widgets/ui/content_width.dart';
 import '../../models/branding.dart';
@@ -11,6 +12,7 @@ import '../../providers/property_provider.dart';
 import '../../providers/visibility_provider.dart';
 import '../../widgets/agent_filter_bar.dart';
 import '../../widgets/ui/list_row.dart';
+import '../../widgets/ui/scope_loading.dart';
 import '../../widgets/ui/status_chip.dart';
 import 'property_create_screen.dart';
 import 'property_overview_screen.dart';
@@ -175,7 +177,7 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                 left: 16,
                 right: 16,
                 top: 16,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+                bottom: sheetBottomInset(ctx) + 16,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -247,8 +249,7 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                           _chipGroup(
                             options: listingTypes,
                             selected: listingType,
-                            onSelected: (v) =>
-                                setSheet(() => listingType = v),
+                            onSelected: (v) => setSheet(() => listingType = v),
                           ),
                           const SizedBox(height: 16),
                         ],
@@ -356,8 +357,8 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
                   top: 8,
                   right: 6,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 5, vertical: 1),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
                       color: AppTheme.brand,
                       shape: BoxShape.circle,
@@ -391,94 +392,106 @@ class _PropertyListScreenState extends State<PropertyListScreen> {
       body: ContentSafeArea(
         top: false,
         child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (v) => setState(() => _search = v),
-              decoration: InputDecoration(
-                hintText: 'Search by address',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _search.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _search = '');
-                        },
-                      )
-                    : null,
-                filled: true,
-                fillColor: AppTheme.surface(context),
-                contentPadding:
-                    const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radius),
-                  borderSide: BorderSide(color: AppTheme.borderColor(context)),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radius),
-                  borderSide: BorderSide(color: AppTheme.borderColor(context)),
-                ),
-              ),
-            ),
-          ),
-          if (_activeFilterCount > 0)
+          children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Row(
-                children: [
-                  Text(
-                    '${filtered.length} of ${all.length} match',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textSecondary(context),
-                    ),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (v) => setState(() => _search = v),
+                decoration: InputDecoration(
+                  hintText: 'Search by address',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _search.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _search = '');
+                          },
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: AppTheme.surface(context),
+                  contentPadding:
+                      const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppTheme.radius),
+                    borderSide:
+                        BorderSide(color: AppTheme.borderColor(context)),
                   ),
-                  const Spacer(),
-                  TextButton.icon(
-                    icon: const Icon(Icons.close, size: 14),
-                    label: const Text('Clear filters'),
-                    style:
-                        TextButton.styleFrom(foregroundColor: AppTheme.brand),
-                    onPressed: _clearFilters,
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppTheme.radius),
+                    borderSide:
+                        BorderSide(color: AppTheme.borderColor(context)),
                   ),
-                ],
+                ),
               ),
             ),
-          AgentFilterBar(
-            noun: 'Properties',
-            module: context.watch<VisibilityProvider>().properties,
-            selected: context.watch<VisibilityProvider>().propertiesFilter,
-            onChanged: _onAgentFilterChanged,
-          ),
-          // Scope switch (Mine → All) reloads over a non-empty list. Without
-          // this the old rows just sit there until the new payload lands and
-          // the toggle looks dead — the only "loading" state below is the
-          // empty-list spinner.
-          if (provider.isLoading && all.isNotEmpty)
-            const LinearProgressIndicator(minHeight: 2),
-          Expanded(
-            child: provider.isLoading && all.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : all.isEmpty
-                    ? _buildEmpty()
-                    : filtered.isEmpty
-                        ? _buildNoMatches()
-                        : RefreshIndicator(
-                            onRefresh: _refresh,
-                            child: ListView.builder(
-                              padding: const EdgeInsets.all(16),
-                              itemCount: filtered.length,
-                              itemBuilder: (context, index) => _PropertyCard(
-                                property: filtered[index],
-                                currentUserId: currentUserId,
+            if (_activeFilterCount > 0)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      '${filtered.length} of ${all.length} match',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary(context),
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      icon: const Icon(Icons.close, size: 14),
+                      label: const Text('Clear filters'),
+                      style:
+                          TextButton.styleFrom(foregroundColor: AppTheme.brand),
+                      onPressed: _clearFilters,
+                    ),
+                  ],
+                ),
+              ),
+            AgentFilterBar(
+              noun: 'Properties',
+              module: context.watch<VisibilityProvider>().properties,
+              selected: context.watch<VisibilityProvider>().propertiesFilter,
+              onChanged: _onAgentFilterChanged,
+            ),
+            // Scope switch (Mine → All) reloads over a non-empty list. A bare
+            // 2 px bar under the filter bar was too easy to miss across the
+            // couple of seconds the All fetch takes, so it's now labelled and
+            // the stale rows below are dimmed — the list shouldn't read as
+            // current while it's being replaced.
+            if (provider.isLoading && all.isNotEmpty)
+              ScopeLoadingBanner(
+                label: scopeLoadingLabel(
+                  context.watch<VisibilityProvider>().propertiesFilter,
+                  'properties',
+                ),
+              ),
+            Expanded(
+              child: provider.isLoading && all.isEmpty
+                  ? const Center(child: CircularProgressIndicator())
+                  : all.isEmpty
+                      ? _buildEmpty()
+                      : filtered.isEmpty
+                          ? _buildNoMatches()
+                          : DimWhileLoading(
+                              loading: provider.isLoading,
+                              child: RefreshIndicator(
+                                onRefresh: _refresh,
+                                child: ListView.builder(
+                                  padding: const EdgeInsets.all(16),
+                                  itemCount: filtered.length,
+                                  itemBuilder: (context, index) =>
+                                      _PropertyCard(
+                                    property: filtered[index],
+                                    currentUserId: currentUserId,
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
-          ),
-        ],
+            ),
+          ],
         ),
       ),
     );
@@ -574,7 +587,8 @@ class _PropertyCard extends StatelessWidget {
             onTap: () async {
               await Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => PropertyOverviewScreen(propertyId: property.id),
+                  builder: (_) =>
+                      PropertyOverviewScreen(propertyId: property.id),
                 ),
               );
               if (context.mounted) {
@@ -621,15 +635,21 @@ class _PropertyCard extends StatelessWidget {
                         Row(
                           children: [
                             if (property.beds != null) ...[
-                              _Stat(icon: Icons.bed_rounded, value: '${property.beds}'),
+                              _Stat(
+                                  icon: Icons.bed_rounded,
+                                  value: '${property.beds}'),
                               const SizedBox(width: 12),
                             ],
                             if (property.baths != null) ...[
-                              _Stat(icon: Icons.bathtub_rounded, value: '${property.baths}'),
+                              _Stat(
+                                  icon: Icons.bathtub_rounded,
+                                  value: '${property.baths}'),
                               const SizedBox(width: 12),
                             ],
                             if (property.garages != null)
-                              _Stat(icon: Icons.garage_rounded, value: '${property.garages}'),
+                              _Stat(
+                                  icon: Icons.garage_rounded,
+                                  value: '${property.garages}'),
                           ],
                         ),
                       ],

@@ -10,11 +10,11 @@ void main() {
     ));
     await tester.pump();
 
-    // The wordmark is revealed letter-by-letter, so assert on individual
-    // glyphs rather than the joined string.
+    // The wordmark is one Text now — the letter-by-letter reveal is gone, so
+    // assert on the joined string plus the tagline beneath it.
     expect(find.byType(SplashScreen), findsOneWidget);
-    expect(find.text('C'), findsOneWidget);
-    expect(find.text('X'), findsOneWidget);
+    expect(find.text('CoreX'), findsOneWidget);
+    expect(find.text('YOUR REAL ESTATE OS'), findsOneWidget);
 
     // Drive the staggered animation (1.7s) plus the chained 350ms post-delay
     // timer to completion. The timer is scheduled by a microtask that only

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../utils/sheet_insets.dart';
 import '../../models/gallery_tags.dart';
 import '../../services/api_service.dart';
 import '../../services/photo_telemetry.dart';
@@ -450,7 +451,7 @@ class _GalleryUploadSheetState extends State<GalleryUploadSheet> {
             left: 16,
             right: 16,
             top: 16,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+            bottom: sheetBottomInset(ctx) + 16,
           ),
           child: SafeArea(
             top: false,

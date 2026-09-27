@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../utils/sheet_insets.dart';
 import '../../models/dashboard_data.dart';
 import '../../providers/dashboard_provider.dart';
 import '../../services/api_service.dart';
@@ -72,7 +73,8 @@ class _TaskEditFormState extends State<_TaskEditForm> {
       initialTime: TimeOfDay.fromDateTime(initial),
     );
     if (time == null) return;
-    setState(() => _dueDate = DateTime(date.year, date.month, date.day, time.hour, time.minute));
+    setState(() => _dueDate =
+        DateTime(date.year, date.month, date.day, time.hour, time.minute));
   }
 
   Future<void> _save() async {
@@ -85,7 +87,8 @@ class _TaskEditFormState extends State<_TaskEditForm> {
         'status': _status,
         if (_dueDate != null) 'due_date': _dueDate!.toUtc().toIso8601String(),
         'send_reminder': _sendReminder,
-        if (_description.text.trim().isNotEmpty) 'description': _description.text.trim(),
+        if (_description.text.trim().isNotEmpty)
+          'description': _description.text.trim(),
       });
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -102,98 +105,101 @@ class _TaskEditFormState extends State<_TaskEditForm> {
 
   @override
   Widget build(BuildContext context) {
-    final pad = MediaQuery.of(context).viewInsets.bottom;
+    final pad = sheetBottomInset(context);
     return Padding(
       padding: EdgeInsets.only(bottom: pad),
       child: SafeArea(
         child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Edit task', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _title,
-              decoration: const InputDecoration(labelText: 'Title'),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _status,
-              decoration: const InputDecoration(labelText: 'Status'),
-              items: const [
-                DropdownMenuItem(value: 'todo', child: Text('To Do')),
-                DropdownMenuItem(value: 'in_progress', child: Text('In Progress')),
-                DropdownMenuItem(value: 'awaiting', child: Text('Awaiting')),
-                DropdownMenuItem(value: 'done', child: Text('Done')),
-              ],
-              onChanged: (v) => setState(() => _status = v ?? 'todo'),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _priority,
-              decoration: const InputDecoration(labelText: 'Priority'),
-              items: const [
-                DropdownMenuItem(value: 'low', child: Text('Low')),
-                DropdownMenuItem(value: 'normal', child: Text('Normal')),
-                DropdownMenuItem(value: 'high', child: Text('High')),
-                DropdownMenuItem(value: 'critical', child: Text('Critical')),
-              ],
-              onChanged: (v) => setState(() => _priority = v ?? 'normal'),
-            ),
-            const SizedBox(height: 12),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.event),
-              title: Text(_dueDate == null
-                  ? 'No due date'
-                  : 'Due: ${_dueDate!.year}-${_dueDate!.month.toString().padLeft(2, '0')}-${_dueDate!.day.toString().padLeft(2, '0')} '
-                      '${_dueDate!.hour.toString().padLeft(2, '0')}:${_dueDate!.minute.toString().padLeft(2, '0')}'),
-              trailing: _dueDate == null
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.clear),
-                      onPressed: () => setState(() => _dueDate = null),
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Edit task', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _title,
+                decoration: const InputDecoration(labelText: 'Title'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _status,
+                decoration: const InputDecoration(labelText: 'Status'),
+                items: const [
+                  DropdownMenuItem(value: 'todo', child: Text('To Do')),
+                  DropdownMenuItem(
+                      value: 'in_progress', child: Text('In Progress')),
+                  DropdownMenuItem(value: 'awaiting', child: Text('Awaiting')),
+                  DropdownMenuItem(value: 'done', child: Text('Done')),
+                ],
+                onChanged: (v) => setState(() => _status = v ?? 'todo'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _priority,
+                decoration: const InputDecoration(labelText: 'Priority'),
+                items: const [
+                  DropdownMenuItem(value: 'low', child: Text('Low')),
+                  DropdownMenuItem(value: 'normal', child: Text('Normal')),
+                  DropdownMenuItem(value: 'high', child: Text('High')),
+                  DropdownMenuItem(value: 'critical', child: Text('Critical')),
+                ],
+                onChanged: (v) => setState(() => _priority = v ?? 'normal'),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.event),
+                title: Text(_dueDate == null
+                    ? 'No due date'
+                    : 'Due: ${_dueDate!.year}-${_dueDate!.month.toString().padLeft(2, '0')}-${_dueDate!.day.toString().padLeft(2, '0')} '
+                        '${_dueDate!.hour.toString().padLeft(2, '0')}:${_dueDate!.minute.toString().padLeft(2, '0')}'),
+                trailing: _dueDate == null
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () => setState(() => _dueDate = null),
+                      ),
+                onTap: _pickDue,
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Send reminder'),
+                value: _sendReminder,
+                onChanged: (v) => setState(() => _sendReminder = v),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _description,
+                maxLines: 3,
+                decoration: const InputDecoration(labelText: 'Description'),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed:
+                          _saving ? null : () => Navigator.of(context).pop(),
+                      child: const Text('Cancel'),
                     ),
-              onTap: _pickDue,
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Send reminder'),
-              value: _sendReminder,
-              onChanged: (v) => setState(() => _sendReminder = v),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _description,
-              maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Description'),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _saving ? null : () => Navigator.of(context).pop(),
-                    child: const Text('Cancel'),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: _saving ? null : _save,
-                    child: _saving
-                        ? const SizedBox(
-                            width: 16, height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Save'),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _saving ? null : _save,
+                      child: _saving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Text('Save'),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }

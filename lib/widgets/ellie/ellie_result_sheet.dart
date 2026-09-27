@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../utils/sheet_insets.dart';
 
 import '../../services/ai_api.dart';
 import '../../utils/app_time.dart';
@@ -68,7 +69,9 @@ class _EllieResultSheetState extends State<EllieResultSheet> {
       return when.isEmpty ? 'Scheduled: $title' : 'Scheduled: $title — $when';
     }
     if (r.failed) return r.message;
-    if (r.unknown) return r.message.isEmpty ? "I didn't catch that." : r.message;
+    if (r.unknown) {
+      return r.message.isEmpty ? "I didn't catch that." : r.message;
+    }
     return r.message;
   }
 
@@ -106,7 +109,7 @@ class _EllieResultSheetState extends State<EllieResultSheet> {
     final r = widget.result;
     final created = r.created && r.eventId != null;
     final color = Theme.of(context).colorScheme;
-    final pad = MediaQuery.of(context).viewInsets.bottom;
+    final pad = sheetBottomInset(context);
 
     return Padding(
       padding: EdgeInsets.only(bottom: pad),
@@ -174,9 +177,7 @@ class _EllieResultSheetState extends State<EllieResultSheet> {
                       size: 18,
                       color: created
                           ? Colors.green
-                          : (r.failed
-                              ? Colors.orange
-                              : color.onSurfaceVariant),
+                          : (r.failed ? Colors.orange : color.onSurfaceVariant),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -213,7 +214,8 @@ class _EllieResultSheetState extends State<EllieResultSheet> {
                             ? const SizedBox(
                                 width: 14,
                                 height: 14,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
                               )
                             : const Icon(TablerIcons.arrow_back_up, size: 18),
                         label: const Text('Undo'),

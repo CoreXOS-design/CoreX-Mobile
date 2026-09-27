@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../utils/sheet_insets.dart';
 import '../../models/calendar_form.dart' show AttendeeSearchResult;
 import '../../models/contact_notes_testimonials.dart';
 import '../../services/api_service.dart';
@@ -104,7 +105,8 @@ class ContactNotesTestimonialsSectionState
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   // --- Notes ---
@@ -134,10 +136,11 @@ class ContactNotesTestimonialsSectionState
     setState(() => _notes = [optimistic, ..._notes]);
 
     try {
-      final created =
-          await widget.api.createContactNote(widget.contactId, type: type, body: body);
+      final created = await widget.api
+          .createContactNote(widget.contactId, type: type, body: body);
       if (!mounted) return;
-      setState(() => _notes = [created, ..._notes.where((n) => n.id != tempId)]);
+      setState(
+          () => _notes = [created, ..._notes.where((n) => n.id != tempId)]);
     } on ContactSubresourceStaleException {
       if (!mounted) return;
       setState(() => _notes = _notes.where((n) => n.id != tempId).toList());
@@ -178,13 +181,15 @@ class ContactNotesTestimonialsSectionState
       createdAt: n.createdAt,
       updatedAt: DateTime.now(),
     );
-    setState(() => _notes = _notes.map((x) => x.id == n.id ? updated : x).toList());
+    setState(
+        () => _notes = _notes.map((x) => x.id == n.id ? updated : x).toList());
 
     try {
       final saved = await widget.api
           .updateContactNote(widget.contactId, n.id, type: type, body: body);
       if (!mounted) return;
-      setState(() => _notes = _notes.map((x) => x.id == n.id ? saved : x).toList());
+      setState(
+          () => _notes = _notes.map((x) => x.id == n.id ? saved : x).toList());
     } on ContactSubresourceStaleException {
       if (!mounted) return;
       setState(() => _notes = _notes.map((x) => x.id == n.id ? n : x).toList());
@@ -271,12 +276,14 @@ class ContactNotesTestimonialsSectionState
         agentId: agentId,
       );
       if (!mounted) return;
-      setState(() => _testimonials =
-          [created, ..._testimonials.where((t) => t.id != tempId)]);
+      setState(() => _testimonials = [
+            created,
+            ..._testimonials.where((t) => t.id != tempId)
+          ]);
     } on ContactSubresourceStaleException {
       if (!mounted) return;
-      setState(
-          () => _testimonials = _testimonials.where((t) => t.id != tempId).toList());
+      setState(() =>
+          _testimonials = _testimonials.where((t) => t.id != tempId).toList());
       _toast('This contact could not be found — refreshing.');
       await refresh();
     } on ApiException catch (e) {
@@ -288,8 +295,8 @@ class ContactNotesTestimonialsSectionState
       _toast(e.message);
     } catch (e) {
       if (!mounted) return;
-      setState(
-          () => _testimonials = _testimonials.where((t) => t.id != tempId).toList());
+      setState(() =>
+          _testimonials = _testimonials.where((t) => t.id != tempId).toList());
       _toast('Could not add testimonial: $e');
     }
   }
@@ -329,8 +336,8 @@ class ContactNotesTestimonialsSectionState
       createdAt: t.createdAt,
       updatedAt: DateTime.now(),
     );
-    setState(
-        () => _testimonials = _testimonials.map((x) => x.id == t.id ? updated : x).toList());
+    setState(() => _testimonials =
+        _testimonials.map((x) => x.id == t.id ? updated : x).toList());
 
     try {
       final saved = await widget.api.updateContactTestimonial(
@@ -342,12 +349,12 @@ class ContactNotesTestimonialsSectionState
         agentId: agentId,
       );
       if (!mounted) return;
-      setState(() =>
-          _testimonials = _testimonials.map((x) => x.id == t.id ? saved : x).toList());
+      setState(() => _testimonials =
+          _testimonials.map((x) => x.id == t.id ? saved : x).toList());
     } on ContactSubresourceStaleException {
       if (!mounted) return;
-      setState(
-          () => _testimonials = _testimonials.map((x) => x.id == t.id ? t : x).toList());
+      setState(() => _testimonials =
+          _testimonials.map((x) => x.id == t.id ? t : x).toList());
       _toast('This testimonial is out of date — refreshing.');
       await refresh();
     } on ApiException catch (e) {
@@ -359,8 +366,8 @@ class ContactNotesTestimonialsSectionState
       _toast(e.message);
     } catch (e) {
       if (!mounted) return;
-      setState(
-          () => _testimonials = _testimonials.map((x) => x.id == t.id ? t : x).toList());
+      setState(() => _testimonials =
+          _testimonials.map((x) => x.id == t.id ? t : x).toList());
       _toast('Could not update testimonial: $e');
     }
   }
@@ -370,7 +377,8 @@ class ContactNotesTestimonialsSectionState
     if (confirmed != true || !mounted) return;
 
     final prev = _testimonials;
-    setState(() => _testimonials = _testimonials.where((x) => x.id != t.id).toList());
+    setState(() =>
+        _testimonials = _testimonials.where((x) => x.id != t.id).toList());
     try {
       await widget.api.deleteContactTestimonial(widget.contactId, t.id);
     } on ContactSubresourceStaleException {
@@ -478,7 +486,8 @@ class ContactNotesTestimonialsSectionState
         child: Text(
           text,
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, color: AppTheme.textSecondary(context)),
+          style:
+              TextStyle(fontSize: 13, color: AppTheme.textSecondary(context)),
         ),
       );
 
@@ -494,7 +503,8 @@ class ContactNotesTestimonialsSectionState
         child: Row(
           children: [
             Expanded(
-              child: Text(_error!, style: const TextStyle(fontSize: 12, color: _kDanger)),
+              child: Text(_error!,
+                  style: const TextStyle(fontSize: 12, color: _kDanger)),
             ),
             TextButton(onPressed: refresh, child: const Text('Retry')),
           ],
@@ -525,7 +535,8 @@ class ContactNotesTestimonialsSectionState
           label,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color),
+          style: TextStyle(
+              fontSize: 11, fontWeight: FontWeight.w600, color: color),
         ),
       );
 
@@ -557,7 +568,9 @@ class ContactNotesTestimonialsSectionState
                 ),
               ),
               if (rel != null)
-                Text(rel, style: TextStyle(fontSize: 11, color: AppTheme.textMuted(context))),
+                Text(rel,
+                    style: TextStyle(
+                        fontSize: 11, color: AppTheme.textMuted(context))),
             ],
           ),
           if (n.type != null) ...[
@@ -566,17 +579,21 @@ class ContactNotesTestimonialsSectionState
           ],
           if (n.body != null && n.body!.isNotEmpty) ...[
             const SizedBox(height: 6),
-            Text(n.body!, style: TextStyle(fontSize: 13, color: AppTheme.textPrimary(context))),
+            Text(n.body!,
+                style: TextStyle(
+                    fontSize: 13, color: AppTheme.textPrimary(context))),
           ],
           if (_canEdit) ...[
             const SizedBox(height: 4),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton(onPressed: () => _editNote(n), child: const Text('Edit')),
+                TextButton(
+                    onPressed: () => _editNote(n), child: const Text('Edit')),
                 TextButton(
                   onPressed: () => _deleteNote(n),
-                  child: const Text('Delete', style: TextStyle(color: _kDanger)),
+                  child:
+                      const Text('Delete', style: TextStyle(color: _kDanger)),
                 ),
               ],
             ),
@@ -591,7 +608,8 @@ class ContactNotesTestimonialsSectionState
     final meta = [
       'By ${t.userName.isNotEmpty ? t.userName : 'Unknown'}',
       if (rel != null) rel,
-      if (t.agentName != null && t.agentName!.isNotEmpty) 'About ${t.agentName}',
+      if (t.agentName != null && t.agentName!.isNotEmpty)
+        'About ${t.agentName}',
     ].join(' · ');
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -608,7 +626,9 @@ class ContactNotesTestimonialsSectionState
             children: [
               Expanded(
                 child: Text(
-                  t.displayName?.isNotEmpty == true ? t.displayName! : 'Anonymous',
+                  t.displayName?.isNotEmpty == true
+                      ? t.displayName!
+                      : 'Anonymous',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -628,7 +648,9 @@ class ContactNotesTestimonialsSectionState
               children: [
                 for (var i = 1; i <= 5; i++)
                   Icon(
-                    t.rating! >= i ? Icons.star_rounded : Icons.star_border_rounded,
+                    t.rating! >= i
+                        ? Icons.star_rounded
+                        : Icons.star_border_rounded,
                     size: 14,
                     color: _kStar,
                   ),
@@ -636,19 +658,25 @@ class ContactNotesTestimonialsSectionState
             ),
           ],
           const SizedBox(height: 6),
-          Text(t.body, style: TextStyle(fontSize: 13, color: AppTheme.textPrimary(context))),
+          Text(t.body,
+              style: TextStyle(
+                  fontSize: 13, color: AppTheme.textPrimary(context))),
           const SizedBox(height: 6),
-          Text(meta, style: TextStyle(fontSize: 11, color: AppTheme.textMuted(context))),
+          Text(meta,
+              style:
+                  TextStyle(fontSize: 11, color: AppTheme.textMuted(context))),
           if (_canEdit) ...[
             const SizedBox(height: 4),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton(
-                    onPressed: () => _editTestimonial(t), child: const Text('Edit')),
+                    onPressed: () => _editTestimonial(t),
+                    child: const Text('Edit')),
                 TextButton(
                   onPressed: () => _deleteTestimonial(t),
-                  child: const Text('Delete', style: TextStyle(color: _kDanger)),
+                  child:
+                      const Text('Delete', style: TextStyle(color: _kDanger)),
                 ),
               ],
             ),
@@ -682,13 +710,14 @@ class _NoteFormSheetState extends State<_NoteFormSheet> {
     super.dispose();
   }
 
-  bool get _valid => (_type != null && _type!.isNotEmpty) || _body.text.trim().isNotEmpty;
+  bool get _valid =>
+      (_type != null && _type!.isNotEmpty) || _body.text.trim().isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.initialType != null || widget.initialBody != null;
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(bottom: sheetBottomInset(context)),
       child: Container(
         decoration: BoxDecoration(
           color: AppTheme.surface(context),
@@ -713,7 +742,8 @@ class _NoteFormSheetState extends State<_NoteFormSheet> {
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: Icon(Icons.close, color: AppTheme.textSecondary(context)),
+                    icon: Icon(Icons.close,
+                        color: AppTheme.textSecondary(context)),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
@@ -727,7 +757,8 @@ class _NoteFormSheetState extends State<_NoteFormSheet> {
                     ChoiceChip(
                       label: Text(t),
                       selected: _type == t,
-                      onSelected: (sel) => setState(() => _type = sel ? t : null),
+                      onSelected: (sel) =>
+                          setState(() => _type = sel ? t : null),
                     ),
                 ],
               ),
@@ -827,13 +858,14 @@ class _TestimonialFormSheetState extends State<_TestimonialFormSheet> {
   Widget build(BuildContext context) {
     final isEdit = widget.initialBody != null;
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(bottom: sheetBottomInset(context)),
       child: Container(
         decoration: BoxDecoration(
           color: AppTheme.surface(context),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
         ),
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.85),
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
         child: SafeArea(
           top: false,
@@ -854,25 +886,30 @@ class _TestimonialFormSheetState extends State<_TestimonialFormSheet> {
                     ),
                     const Spacer(),
                     IconButton(
-                      icon: Icon(Icons.close, color: AppTheme.textSecondary(context)),
+                      icon: Icon(Icons.close,
+                          color: AppTheme.textSecondary(context)),
                       onPressed: () => Navigator.of(context).pop(),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
-                _StarPicker(rating: _rating, onChanged: (r) => setState(() => _rating = r)),
+                _StarPicker(
+                    rating: _rating,
+                    onChanged: (r) => setState(() => _rating = r)),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _body,
                   minLines: 2,
                   maxLines: 5,
-                  decoration: const InputDecoration(hintText: 'What did they say?'),
+                  decoration:
+                      const InputDecoration(hintText: 'What did they say?'),
                   onChanged: (_) => setState(() {}),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _displayName,
-                  decoration: const InputDecoration(hintText: 'Display name (optional)'),
+                  decoration: const InputDecoration(
+                      hintText: 'Display name (optional)'),
                 ),
                 const SizedBox(height: 12),
                 _agentId == null
@@ -937,7 +974,9 @@ class _StarPicker extends StatelessWidget {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
             icon: Icon(
-              (rating ?? 0) >= i ? Icons.star_rounded : Icons.star_border_rounded,
+              (rating ?? 0) >= i
+                  ? Icons.star_rounded
+                  : Icons.star_border_rounded,
               color: (rating ?? 0) >= i ? _kStar : AppTheme.textMuted(context),
             ),
             // Tapping the currently-selected star clears the rating.
@@ -1021,8 +1060,9 @@ class _AgentPickerSheetState extends State<_AgentPickerSheet> {
         color: AppTheme.surface(context),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      constraints:
+          BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
+      padding: EdgeInsets.only(bottom: sheetBottomInset(context)),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1041,7 +1081,8 @@ class _AgentPickerSheetState extends State<_AgentPickerSheet> {
                 const Spacer(),
                 IconButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  icon: Icon(Icons.close, color: AppTheme.textSecondary(context)),
+                  icon:
+                      Icon(Icons.close, color: AppTheme.textSecondary(context)),
                 ),
               ],
             ),

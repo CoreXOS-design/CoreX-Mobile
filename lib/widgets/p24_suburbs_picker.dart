@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../utils/sheet_insets.dart';
 import '../models/p24_location.dart';
 import '../services/api_service.dart';
 import '../theme.dart';
@@ -85,8 +86,9 @@ class _P24SuburbsPickerState extends State<P24SuburbsPicker> {
     final n = widget.initialIds.length;
     for (var i = 0; i < n; i++) {
       final id = widget.initialIds[i];
-      final name =
-          i < widget.initialNames.length ? widget.initialNames[i] : 'Suburb $id';
+      final name = i < widget.initialNames.length
+          ? widget.initialNames[i]
+          : 'Suburb $id';
       _selected[id] = name;
     }
   }
@@ -331,7 +333,7 @@ class _P24SearchSheetState extends State<_P24SearchSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+    final viewInsets = sheetBottomInset(context);
     return Padding(
       padding: EdgeInsets.only(bottom: viewInsets),
       child: SizedBox(
@@ -511,7 +513,7 @@ class _P24SuburbsMultiSheetState extends State<_P24SuburbsMultiSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+    final viewInsets = sheetBottomInset(context);
     return Padding(
       padding: EdgeInsets.only(bottom: viewInsets),
       child: SizedBox(
@@ -543,9 +545,8 @@ class _P24SuburbsMultiSheetState extends State<_P24SuburbsMultiSheet> {
                   ),
                   TextButton(
                     onPressed: _done,
-                    child: Text(_picked.isEmpty
-                        ? 'Done'
-                        : 'Add ${_picked.length}'),
+                    child: Text(
+                        _picked.isEmpty ? 'Done' : 'Add ${_picked.length}'),
                   ),
                 ],
               ),
@@ -609,8 +610,7 @@ class _P24SuburbsMultiSheetState extends State<_P24SuburbsMultiSheet> {
           subtitle: preexisting
               ? Text('Already added',
                   style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary(context)))
+                      fontSize: 11, color: AppTheme.textSecondary(context)))
               : null,
         );
       },

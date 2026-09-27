@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../utils/sheet_insets.dart';
 import '../../models/space.dart';
 import '../../services/ai_consent.dart';
 import '../../services/api_service.dart';
@@ -243,7 +244,7 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                   left: 16,
                   right: 16,
                   top: 16,
-                  bottom: MediaQuery.of(ctx2).viewInsets.bottom + 16,
+                  bottom: sheetBottomInset(ctx2) + 16,
                 ),
                 child: SafeArea(
                   top: false,
@@ -342,7 +343,8 @@ class SpacesEditorSectionState extends State<SpacesEditorSection> {
                                         label: Text(titleCaseLabel(f)),
                                         selected: selected,
                                         onSelected: (_) => toggle(f),
-                                        backgroundColor: AppTheme.surface2(context),
+                                        backgroundColor:
+                                            AppTheme.surface2(context),
                                         selectedColor: AppTheme.brand,
                                         checkmarkColor: Colors.white,
                                         labelStyle: TextStyle(

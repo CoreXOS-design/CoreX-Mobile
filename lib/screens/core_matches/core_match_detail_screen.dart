@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../utils/sheet_insets.dart';
 import '../../widgets/ui/content_width.dart';
 import '../../models/core_match.dart';
 import '../../services/api_service.dart';
@@ -63,8 +64,7 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
       _showOtherAgents = value;
     });
     try {
-      final d = await _api.getCoreMatch(widget.matchId,
-          showOtherAgents: value);
+      final d = await _api.getCoreMatch(widget.matchId, showOtherAgents: value);
       if (!mounted) return;
       setState(() {
         _detail = d;
@@ -167,7 +167,8 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
               child: const Text('Cancel')),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              style: TextButton.styleFrom(foregroundColor: kReactionNotInterested),
+              style:
+                  TextButton.styleFrom(foregroundColor: kReactionNotInterested),
               child: const Text('Delete')),
         ],
       ),
@@ -228,7 +229,7 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
               left: 16,
               right: 16,
               top: 16,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+              bottom: sheetBottomInset(ctx) + 16,
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -334,8 +335,8 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
       );
       return;
     }
-    final ok = await launchUrl(Uri.parse(url),
-        mode: LaunchMode.externalApplication);
+    final ok =
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not open $url')),
@@ -356,8 +357,8 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
               leading: Container(
                 width: 10,
                 height: 10,
-                decoration:
-                    BoxDecoration(color: statusColor(s), shape: BoxShape.circle),
+                decoration: BoxDecoration(
+                    color: statusColor(s), shape: BoxShape.circle),
               ),
               title: Text(s),
               trailing: selected
@@ -425,9 +426,8 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
       );
     }
     final d = _detail!;
-    final results = _hideHidden
-        ? d.results.where((r) => !r.hidden).toList()
-        : d.results;
+    final results =
+        _hideHidden ? d.results.where((r) => !r.hidden).toList() : d.results;
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -586,8 +586,12 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
   Widget _filterChips(CoreMatch m) {
     final chips = <String>[];
     if (m.priceMin != null || m.priceMax != null) {
-      final lo = m.priceMin == null ? '' : 'R${CoreMatchSummary.fmtPrice(m.priceMin!)}';
-      final hi = m.priceMax == null ? '' : 'R${CoreMatchSummary.fmtPrice(m.priceMax!)}';
+      final lo = m.priceMin == null
+          ? ''
+          : 'R${CoreMatchSummary.fmtPrice(m.priceMin!)}';
+      final hi = m.priceMax == null
+          ? ''
+          : 'R${CoreMatchSummary.fmtPrice(m.priceMax!)}';
       chips.add('$lo–$hi');
     }
     if (m.bedsMin != null) chips.add('${m.bedsMin}+ beds');
@@ -875,7 +879,9 @@ class _CoreMatchDetailScreenState extends State<CoreMatchDetailScreen> {
           IconButton(
             tooltip: r.hidden ? 'Unhide' : 'Hide',
             icon: Icon(
-              r.hidden ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+              r.hidden
+                  ? Icons.visibility_rounded
+                  : Icons.visibility_off_rounded,
               size: 18,
               color: AppTheme.textSecondary(context),
             ),
@@ -964,7 +970,7 @@ class _HideReasonSheetState extends State<_HideReasonSheet> {
         left: 16,
         right: 16,
         top: 12,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        bottom: sheetBottomInset(context) + 16,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1026,8 +1032,7 @@ class _HideReasonSheetState extends State<_HideReasonSheet> {
                 child: SizedBox(
                   height: 48,
                   child: OutlinedButton(
-                    onPressed:
-                        _busy ? null : () => Navigator.of(context).pop(),
+                    onPressed: _busy ? null : () => Navigator.of(context).pop(),
                     child: const Text('Cancel'),
                   ),
                 ),

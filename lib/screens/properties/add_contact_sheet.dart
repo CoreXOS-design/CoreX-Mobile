@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../utils/sheet_insets.dart';
 import '../../models/contact.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
@@ -47,7 +48,7 @@ const List<String> _roleSuggestions = [
 class _AddContactSheetState extends State<AddContactSheet> {
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final bottomInset = sheetBottomInset(context);
     return DefaultTabController(
       length: 2,
       child: Padding(
@@ -55,8 +56,7 @@ class _AddContactSheetState extends State<AddContactSheet> {
         child: Container(
           decoration: BoxDecoration(
             color: AppTheme.surface(context),
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(20)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           constraints: BoxConstraints(
             maxHeight: MediaQuery.of(context).size.height * 0.9,
@@ -67,40 +67,40 @@ class _AddContactSheetState extends State<AddContactSheet> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const SizedBox(height: 10),
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.textMuted(context),
-                  borderRadius: BorderRadius.circular(2),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.textMuted(context),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Add contact',
-                      style: TextStyle(
-                          fontSize: 17, fontWeight: FontWeight.w700)),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Add contact',
+                        style: TextStyle(
+                            fontSize: 17, fontWeight: FontWeight.w700)),
+                  ),
                 ),
-              ),
-              const TabBar(
-                tabs: [
-                  Tab(text: 'Pick existing'),
-                  Tab(text: 'New contact'),
-                ],
-              ),
-              Flexible(
-                child: TabBarView(
-                  children: [
-                    _PickExistingTab(
-                        propertyId: widget.propertyId, api: widget.api),
-                    _NewContactTab(
-                        propertyId: widget.propertyId, api: widget.api),
+                const TabBar(
+                  tabs: [
+                    Tab(text: 'Pick existing'),
+                    Tab(text: 'New contact'),
                   ],
                 ),
-              ),
-            ],
+                Flexible(
+                  child: TabBarView(
+                    children: [
+                      _PickExistingTab(
+                          propertyId: widget.propertyId, api: widget.api),
+                      _NewContactTab(
+                          propertyId: widget.propertyId, api: widget.api),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -254,9 +254,7 @@ class _PickExistingTabState extends State<_PickExistingTab> {
                             dense: true,
                             selected: sel,
                             leading: Icon(
-                              sel
-                                  ? Icons.check_circle
-                                  : Icons.person_outline,
+                              sel ? Icons.check_circle : Icons.person_outline,
                               color: sel ? AppTheme.brand : null,
                             ),
                             title: Text(c.fullName),
@@ -442,11 +440,10 @@ class _NewContactTabState extends State<_NewContactTab> {
             DropdownButtonFormField<int>(
               initialValue: _typeId,
               isExpanded: true,
-              decoration:
-                  const InputDecoration(labelText: 'Contact type'),
+              decoration: const InputDecoration(labelText: 'Contact type'),
               items: _types
-                  .map((t) => DropdownMenuItem(
-                      value: t.id, child: Text(t.name)))
+                  .map(
+                      (t) => DropdownMenuItem(value: t.id, child: Text(t.name)))
                   .toList(),
               onChanged: (v) => setState(() => _typeId = v),
             ),
@@ -472,5 +469,4 @@ class _NewContactTabState extends State<_NewContactTab> {
   }
 }
 
-String _msg(Object e) =>
-    e is ApiException ? e.message : 'Something went wrong';
+String _msg(Object e) => e is ApiException ? e.message : 'Something went wrong';

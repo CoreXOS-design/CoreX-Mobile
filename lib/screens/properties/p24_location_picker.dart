@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../utils/sheet_insets.dart';
 import '../../models/p24_location.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
@@ -239,8 +240,7 @@ class _P24LocationPickerState extends State<P24LocationPicker> {
             children: required
                 ? const [
                     TextSpan(
-                        text: ' *',
-                        style: TextStyle(color: Colors.redAccent)),
+                        text: ' *', style: TextStyle(color: Colors.redAccent)),
                   ]
                 : const [],
           ),
@@ -340,7 +340,7 @@ class _P24SearchSheetState extends State<_P24SearchSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+    final viewInsets = sheetBottomInset(context);
     return Padding(
       padding: EdgeInsets.only(bottom: viewInsets),
       child: SizedBox(

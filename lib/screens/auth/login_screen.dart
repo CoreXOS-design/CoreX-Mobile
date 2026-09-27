@@ -44,8 +44,7 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen>
-    with WidgetsBindingObserver {
+class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   static const _genericError = 'Email or password is incorrect.';
 
   final _emailCtl = TextEditingController();
@@ -71,7 +70,8 @@ class _LoginScreenState extends State<LoginScreen>
   /// worst case is a tap that fails with a message.
   FingerprintSupport _fingerprint = FingerprintSupport.notOffered;
 
-  bool get _fingerprintAvailable => _fingerprint != FingerprintSupport.notOffered;
+  bool get _fingerprintAvailable =>
+      _fingerprint != FingerprintSupport.notOffered;
 
   @override
   void initState() {
@@ -153,7 +153,7 @@ class _LoginScreenState extends State<LoginScreen>
         // moment later gets them in without a password.
         setState(() => _error =
             "Couldn't reach CoreX just now. Check your connection and tap "
-            'Unlock with fingerprint again.');
+                'Unlock with fingerprint again.');
       case BiometricUnlock.cancelled:
         if (!auto) {
           setState(
@@ -404,11 +404,12 @@ class _LoginScreenState extends State<LoginScreen>
       child: Scaffold(
         backgroundColor: CorexTokens.pageBase(context),
         body: Container(
-          decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
+          decoration:
+              BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
           child: SafeArea(
             child: Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 28),
+                padding: const EdgeInsets.symmetric(horizontal: 22),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 380),
                   child: Form(
@@ -418,196 +419,223 @@ class _LoginScreenState extends State<LoginScreen>
                     // — required for the "save password?" prompt fired from
                     // [_submit] to carry both.
                     child: AutofillGroup(
+                      // The form sits on a raised surface rather than loose on
+                      // the page — the same card language as the home screen,
+                      // so signing in and landing on Home feel continuous.
                       child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const SizedBox(height: 12),
-                        const Center(child: CorexMonogram()),
-                        const SizedBox(height: 24),
-                        _Wordmark(accent: t.accent),
-                        const SizedBox(height: 14),
-                        Center(
-                          child: Text(
-                            'YOUR REAL ESTATE OS',
-                            style: TextStyle(
-                              color: CorexTokens.textSecondary(context),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 2.4,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              gradient: CorexTokens.surfaceGradient(context),
+                              borderRadius: BorderRadius.circular(
+                                  CorexTokens.radiusCard + 2),
+                              border: Border.all(
+                                  color: CorexTokens.surfaceBorder(context)),
+                              boxShadow:
+                                  CorexTokens.cardShadow(context, strong: true),
                             ),
-                          ),
-                        ),
-                        const SizedBox(height: 32),
-                        _input(
-                          controller: _emailCtl,
-                          hint: 'Email',
-                          icon: TablerIcons.mail,
-                          keyboardType: TextInputType.emailAddress,
-                          autofillHints: const [
-                            AutofillHints.username,
-                            AutofillHints.email,
-                          ],
-                          textInputAction: TextInputAction.next,
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) {
-                              return 'Enter your email';
-                            }
-                            if (!v.contains('@')) {
-                              return 'Enter a valid email';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        _input(
-                          controller: _passwordCtl,
-                          hint: 'Password',
-                          icon: TablerIcons.lock,
-                          obscure: _obscure,
-                          autofillHints: const [AutofillHints.password],
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) => _submit(),
-                          suffix: IconButton(
-                            onPressed: () =>
-                                setState(() => _obscure = !_obscure),
-                            icon: Icon(
-                              _obscure ? TablerIcons.eye : TablerIcons.eye_off,
-                              color: CorexTokens.textTertiary(context),
-                              size: 20,
-                            ),
-                          ),
-                          validator: (v) => (v == null || v.isEmpty)
-                              ? 'Enter your password'
-                              : null,
-                        ),
-                        if (_error != null) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            _error!,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Color(0xFFEF4444),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                        if (_activationEmail != null) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            'This account hasn’t been activated yet. '
-                            'Send a code to your email to set a password.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: CorexTokens.textSecondary(context),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          CorexSecondaryButton(
-                            label: 'Activate account',
-                            leading: TablerIcons.mail,
-                            onPressed: _busy
-                                ? null
-                                : () {
-                                    final email = _activationEmail!;
-                                    setState(() => _activationEmail = null);
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => ClientOtpScreen(
-                                          email: email,
-                                          purpose: OtpPurpose.activation,
+                            padding: const EdgeInsets.fromLTRB(22, 26, 22, 24),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const Center(child: CorexMonogram(size: 62)),
+                                const SizedBox(height: 20),
+                                _Wordmark(accent: t.accent),
+                                const SizedBox(height: 10),
+                                Center(
+                                  child: Text(
+                                    'YOUR REAL ESTATE OS',
+                                    style: TextStyle(
+                                      color: CorexTokens.textSecondary(context),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 2.4,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 26),
+                                _input(
+                                  controller: _emailCtl,
+                                  hint: 'Email',
+                                  icon: TablerIcons.mail,
+                                  keyboardType: TextInputType.emailAddress,
+                                  autofillHints: const [
+                                    AutofillHints.username,
+                                    AutofillHints.email,
+                                  ],
+                                  textInputAction: TextInputAction.next,
+                                  validator: (v) {
+                                    if (v == null || v.trim().isEmpty) {
+                                      return 'Enter your email';
+                                    }
+                                    if (!v.contains('@')) {
+                                      return 'Enter a valid email';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                                const SizedBox(height: 12),
+                                _input(
+                                  controller: _passwordCtl,
+                                  hint: 'Password',
+                                  icon: TablerIcons.lock,
+                                  obscure: _obscure,
+                                  autofillHints: const [AutofillHints.password],
+                                  textInputAction: TextInputAction.done,
+                                  onSubmitted: (_) => _submit(),
+                                  suffix: IconButton(
+                                    onPressed: () =>
+                                        setState(() => _obscure = !_obscure),
+                                    icon: Icon(
+                                      _obscure
+                                          ? TablerIcons.eye
+                                          : TablerIcons.eye_off,
+                                      color: CorexTokens.textTertiary(context),
+                                      size: 20,
+                                    ),
+                                  ),
+                                  validator: (v) => (v == null || v.isEmpty)
+                                      ? 'Enter your password'
+                                      : null,
+                                ),
+                                if (_error != null) ...[
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    _error!,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: Color(0xFFEF4444),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                                if (_activationEmail != null) ...[
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'This account hasn’t been activated yet. '
+                                    'Send a code to your email to set a password.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: CorexTokens.textSecondary(context),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  CorexSecondaryButton(
+                                    label: 'Activate account',
+                                    leading: TablerIcons.mail,
+                                    onPressed: _busy
+                                        ? null
+                                        : () {
+                                            final email = _activationEmail!;
+                                            setState(
+                                                () => _activationEmail = null);
+                                            Navigator.of(context).push(
+                                              MaterialPageRoute(
+                                                builder: (_) => ClientOtpScreen(
+                                                  email: email,
+                                                  purpose:
+                                                      OtpPurpose.activation,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                  ),
+                                ],
+                                const SizedBox(height: 36),
+                                CorexPrimaryButton(
+                                  label: 'Continue to your workspace',
+                                  loading: _busy,
+                                  onPressed: _busy ? null : _submit,
+                                ),
+                                if (canUnlock) ...[
+                                  const SizedBox(height: 12),
+                                  CorexSecondaryButton(
+                                    label: 'Unlock with fingerprint',
+                                    leading: TablerIcons.fingerprint,
+                                    onPressed: _busy
+                                        ? null
+                                        : () => _tryBiometricUnlock(),
+                                  ),
+                                ],
+                                // Biometrics are on, but this device no longer holds a
+                                // session for them to unlock — after a reinstall,
+                                // a restore, or an expired token. Never leave this
+                                // silent: the user is looking at a password form
+                                // wondering where their fingerprint prompt went, and
+                                // the app has never stored a password for them to
+                                // fall back on.
+                                if (auth.biometricNeedsPasswordSignIn) ...[
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(
+                                        TablerIcons.fingerprint,
+                                        size: 18,
+                                        color:
+                                            CorexTokens.textSecondary(context),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Sign in with your password once to switch '
+                                          'fingerprint sign-in back on — this device '
+                                          "doesn't have your session any more.",
+                                          style: TextStyle(
+                                            color: CorexTokens.textSecondary(
+                                                context),
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                            height: 1.35,
+                                          ),
                                         ),
                                       ),
-                                    );
-                                  },
-                          ),
-                        ],
-                        const SizedBox(height: 36),
-                        CorexPrimaryButton(
-                          label: 'Continue to your workspace',
-                          loading: _busy,
-                          onPressed: _busy ? null : _submit,
-                        ),
-                        if (canUnlock) ...[
-                          const SizedBox(height: 12),
-                          CorexSecondaryButton(
-                            label: 'Unlock with fingerprint',
-                            leading: TablerIcons.fingerprint,
-                            onPressed:
-                                _busy ? null : () => _tryBiometricUnlock(),
-                          ),
-                        ],
-                        // Biometrics are on, but this device no longer holds a
-                        // session for them to unlock — after a reinstall,
-                        // a restore, or an expired token. Never leave this
-                        // silent: the user is looking at a password form
-                        // wondering where their fingerprint prompt went, and
-                        // the app has never stored a password for them to
-                        // fall back on.
-                        if (auth.biometricNeedsPasswordSignIn) ...[
-                          const SizedBox(height: 12),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                TablerIcons.fingerprint,
-                                size: 18,
-                                color: CorexTokens.textSecondary(context),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Sign in with your password once to switch '
-                                  'fingerprint sign-in back on — this device '
-                                  "doesn't have your session any more.",
+                                    ],
+                                  ),
+                                ],
+                                const SizedBox(height: 20),
+                                // Spelled out as account creation, not as a second way
+                                // in. App Review read a bare "Scan agent QR" button
+                                // sitting next to Sign In as an unlock mechanism
+                                // (guideline 3.1.1); it only ever opened a signup form.
+                                CorexSecondaryButton(
+                                  label: 'Create your account',
+                                  leading: TablerIcons.qrcode,
+                                  onPressed: _busy ? null : _scanQr,
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  'New client? Create your account by scanning '
+                                  "your agent's QR.",
+                                  textAlign: TextAlign.center,
                                   style: TextStyle(
                                     color: CorexTokens.textSecondary(context),
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
-                                    height: 1.35,
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
+                          const SizedBox(height: 18),
+                          Text(
+                            'v$kAppVersion',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: CorexTokens.textMuted(context),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
                         ],
-                        const SizedBox(height: 20),
-                        // Spelled out as account creation, not as a second way
-                        // in. App Review read a bare "Scan agent QR" button
-                        // sitting next to Sign In as an unlock mechanism
-                        // (guideline 3.1.1); it only ever opened a signup form.
-                        CorexSecondaryButton(
-                          label: 'Create your account',
-                          leading: TablerIcons.qrcode,
-                          onPressed: _busy ? null : _scanQr,
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          'New client? Create your account by scanning '
-                          "your agent's QR.",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: CorexTokens.textSecondary(context),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 32),
-                        Text(
-                          'v$kAppVersion',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: CorexTokens.textMuted(context),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            letterSpacing: 0.8,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
                       ),
                     ),
                   ),
@@ -650,7 +678,8 @@ class _LoginScreenState extends State<LoginScreen>
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: TextStyle(color: CorexTokens.textTertiary(context)),
-        prefixIcon: Icon(icon, color: CorexTokens.textTertiary(context), size: 20),
+        prefixIcon:
+            Icon(icon, color: CorexTokens.textTertiary(context), size: 20),
         suffixIcon: suffix,
         filled: true,
         fillColor: Colors.white.withValues(alpha: 0.04),

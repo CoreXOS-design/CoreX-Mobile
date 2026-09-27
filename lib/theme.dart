@@ -185,7 +185,10 @@ class AppTheme {
     final base =
         brightness == Brightness.dark ? ThemeData.dark() : ThemeData.light();
 
-    final body = GoogleFonts.interTextTheme(base.textTheme);
+    // One typeface throughout. Inter used to carry body copy, but pairing it
+    // with Plus Jakarta Sans headings left the two fighting at small sizes —
+    // both are geometric sans, close enough to read as a mistake.
+    final body = GoogleFonts.plusJakartaSansTextTheme(base.textTheme);
     final display = GoogleFonts.plusJakartaSansTextTheme(base.textTheme);
 
     final mergedText = body.copyWith(

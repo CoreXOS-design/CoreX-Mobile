@@ -12,6 +12,7 @@ import '../../theme.dart';
 import '../../widgets/agent_filter_bar.dart';
 import '../../widgets/ui/glow_button.dart';
 import '../../widgets/ui/list_row.dart';
+import '../../widgets/ui/scope_loading.dart';
 import '../../widgets/ui/status_chip.dart';
 import 'contact_show_screen.dart';
 import 'new_contact_screen.dart';
@@ -107,9 +108,11 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
   }
 
   void _openContact(int id) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ContactShowScreen(contactId: id)),
-    ).then((_) => _load());
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(builder: (_) => ContactShowScreen(contactId: id)),
+        )
+        .then((_) => _load());
   }
 
   @override
@@ -121,39 +124,53 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
         top: false,
         child: Column(
           children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: _onSearchChanged,
-              decoration: InputDecoration(
-                hintText: 'Search contacts…',
-                prefixIcon:
-                    Icon(Icons.search_rounded, color: AppTheme.textMuted(context)),
-                suffixIcon: _searchCtrl.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          _onSearchChanged('');
-                        },
-                      )
-                    : null,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: TextField(
+                controller: _searchCtrl,
+                onChanged: _onSearchChanged,
+                decoration: InputDecoration(
+                  hintText: 'Search contacts…',
+                  prefixIcon: Icon(Icons.search_rounded,
+                      color: AppTheme.textMuted(context)),
+                  suffixIcon: _searchCtrl.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            _onSearchChanged('');
+                          },
+                        )
+                      : null,
+                ),
               ),
             ),
-          ),
-          AgentFilterBar(
-            noun: 'Contacts',
-            module: context.watch<VisibilityProvider>().contacts,
-            selected: context.watch<VisibilityProvider>().contactsFilter,
-            onChanged: _onFilterChanged,
-          ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _refresh,
-              child: _buildList(),
+            AgentFilterBar(
+              noun: 'Contacts',
+              module: context.watch<VisibilityProvider>().contacts,
+              selected: context.watch<VisibilityProvider>().contactsFilter,
+              onChanged: _onFilterChanged,
             ),
-          ),
+            // Mine → All refetches over the rows already on screen and takes a
+            // couple of seconds. Without this the toggle looked dead: the only
+            // loading state was the empty-list spinner, which never showed
+            // because the previous scope's contacts were still there.
+            if (_loading && _contacts.isNotEmpty)
+              ScopeLoadingBanner(
+                label: scopeLoadingLabel(
+                  context.watch<VisibilityProvider>().contactsFilter,
+                  'contacts',
+                ),
+              ),
+            Expanded(
+              child: DimWhileLoading(
+                loading: _loading && _contacts.isNotEmpty,
+                child: RefreshIndicator(
+                  onRefresh: _refresh,
+                  child: _buildList(),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -174,8 +191,7 @@ class _ContactsListScreenState extends State<ContactsListScreen> {
             subtitle: _error,
             action: SizedBox(
               width: 180,
-              child: GlowButton(
-                  onPressed: _load, child: const Text('Retry')),
+              child: GlowButton(onPressed: _load, child: const Text('Retry')),
             ),
           ),
         ],

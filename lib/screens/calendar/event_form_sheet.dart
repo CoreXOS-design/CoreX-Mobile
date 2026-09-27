@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../utils/sheet_insets.dart';
 
 import '../../models/calendar_form.dart';
 import '../../providers/dashboard_provider.dart';
@@ -167,7 +168,8 @@ class _EventFormSheetState extends State<_EventFormSheet> {
         final wanted = widget.existing?.category;
         _class = _resolveClass(opts, wanted);
         // Keep priority within the offered set.
-        if (opts.priorities.isNotEmpty && !opts.priorities.contains(_priority)) {
+        if (opts.priorities.isNotEmpty &&
+            !opts.priorities.contains(_priority)) {
           // `.first` would throw on an empty list — the isNotEmpty guard above
           // keeps a server that returns no priorities from taking down the form.
           _priority = opts.priorities.contains('normal')
@@ -383,8 +385,7 @@ class _EventFormSheetState extends State<_EventFormSheet> {
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(error),
-            backgroundColor: const Color(0xFFB45309)),
+            content: Text(error), backgroundColor: const Color(0xFFB45309)),
       );
       return;
     }
@@ -444,7 +445,7 @@ class _EventFormSheetState extends State<_EventFormSheet> {
         maxHeight: MediaQuery.of(context).size.height * 0.92,
       ),
       padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
+        bottom: sheetBottomInset(context),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -520,30 +521,22 @@ class _EventFormSheetState extends State<_EventFormSheet> {
           const SizedBox(height: 8),
           _classPicker(),
           const SizedBox(height: 16),
-
           _titleField(),
           const SizedBox(height: 16),
-
           _dateTimeSection(),
           const SizedBox(height: 16),
-
           _sectionLabel('Priority'),
           const SizedBox(height: 8),
           _priorityPills(),
           const SizedBox(height: 16),
-
           _propertiesSection(),
           const SizedBox(height: 16),
-
           _attendeesSection(),
           const SizedBox(height: 16),
-
           _descriptionField(),
           const SizedBox(height: 8),
-
           _reminderRow(),
           const SizedBox(height: 20),
-
           _saveButton(),
         ],
       ),
@@ -681,9 +674,7 @@ class _EventFormSheetState extends State<_EventFormSheet> {
             child: Text(endErr,
                 style: const TextStyle(fontSize: 12, color: Color(0xFFef4444))),
           ),
-        if (!_allDay &&
-            _end != null &&
-            !_end!.isAfter(_start))
+        if (!_allDay && _end != null && !_end!.isAfter(_start))
           const Padding(
             padding: EdgeInsets.only(top: 6),
             child: Text('End time must be after start time',
@@ -694,7 +685,8 @@ class _EventFormSheetState extends State<_EventFormSheet> {
   }
 
   Widget _priorityPills() {
-    final priorities = _options?.priorities ?? const ['low', 'normal', 'high', 'critical'];
+    final priorities =
+        _options?.priorities ?? const ['low', 'normal', 'high', 'critical'];
     const colors = {
       'low': 0xFF6b7280,
       'normal': 0xFF0ea5e9,
@@ -747,9 +739,8 @@ class _EventFormSheetState extends State<_EventFormSheet> {
         Row(
           children: [
             Expanded(
-              child: _sectionLabel(_allowMultipleProperties
-                  ? 'Properties'
-                  : 'Property (one)'),
+              child: _sectionLabel(
+                  _allowMultipleProperties ? 'Properties' : 'Property (one)'),
             ),
             TextButton.icon(
               onPressed: _addProperty,
@@ -762,8 +753,8 @@ class _EventFormSheetState extends State<_EventFormSheet> {
         ),
         if (_properties.isEmpty)
           Text('No properties linked',
-              style: TextStyle(
-                  fontSize: 13, color: AppTheme.textMuted(context)))
+              style:
+                  TextStyle(fontSize: 13, color: AppTheme.textMuted(context)))
         else
           Wrap(
             spacing: 8,
@@ -833,13 +824,12 @@ class _EventFormSheetState extends State<_EventFormSheet> {
         ),
         if (_attendees.isEmpty)
           Text('No attendees added',
-              style: TextStyle(
-                  fontSize: 13, color: AppTheme.textMuted(context)))
+              style:
+                  TextStyle(fontSize: 13, color: AppTheme.textMuted(context)))
         else
           Column(
             children: [
-              for (final a in _attendees)
-                _attendeeRow(a, roles),
+              for (final a in _attendees) _attendeeRow(a, roles),
             ],
           ),
       ],
@@ -899,8 +889,8 @@ class _EventFormSheetState extends State<_EventFormSheet> {
           IconButton(
             visualDensity: VisualDensity.compact,
             onPressed: () => _removeAttendee(a),
-            icon: Icon(Icons.close,
-                size: 18, color: AppTheme.textMuted(context)),
+            icon:
+                Icon(Icons.close, size: 18, color: AppTheme.textMuted(context)),
           ),
         ],
       ),
@@ -918,7 +908,8 @@ class _EventFormSheetState extends State<_EventFormSheet> {
         child: DropdownButton<String>(
           isDense: true,
           value: current,
-          style: TextStyle(fontSize: 12, color: AppTheme.textSecondary(context)),
+          style:
+              TextStyle(fontSize: 12, color: AppTheme.textSecondary(context)),
           dropdownColor: AppTheme.surface2(context),
           items: [
             for (final r in roles)
@@ -970,8 +961,8 @@ class _EventFormSheetState extends State<_EventFormSheet> {
             ? const SizedBox(
                 width: 20,
                 height: 20,
-                child:
-                    CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white))
             : Text(_isEdit ? 'Save Changes' : 'Create Event'),
       ),
     );
@@ -1107,15 +1098,24 @@ class _EventFormSheetState extends State<_EventFormSheet> {
     );
   }
 
-  String _fmtDate(DateTime d) =>
-      '${d.day} ${_monthAbbr(d.month)} ${d.year}';
+  String _fmtDate(DateTime d) => '${d.day} ${_monthAbbr(d.month)} ${d.year}';
 
   String _fmtTime(DateTime d) =>
       '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
   String _monthAbbr(int m) => const [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec'
       ][m - 1];
 
   String _titleCase(String s) =>
@@ -1205,7 +1205,7 @@ class _SearchPickerSheetState<T> extends State<_SearchPickerSheet<T>> {
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.85,
       ),
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(bottom: sheetBottomInset(context)),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1287,8 +1287,8 @@ class _SearchPickerSheetState<T> extends State<_SearchPickerSheet<T>> {
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
       itemCount: _items.length,
-      separatorBuilder: (_, __) => Divider(
-          height: 1, color: AppTheme.borderColor(context)),
+      separatorBuilder: (_, __) =>
+          Divider(height: 1, color: AppTheme.borderColor(context)),
       itemBuilder: (context, i) {
         final item = _items[i];
         return InkWell(
@@ -1304,8 +1304,8 @@ class _SearchPickerSheetState<T> extends State<_SearchPickerSheet<T>> {
         child: Center(
           child: Text(text,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 13, color: AppTheme.textMuted(context))),
+              style:
+                  TextStyle(fontSize: 13, color: AppTheme.textMuted(context))),
         ),
       );
 }
@@ -1331,14 +1331,14 @@ class _PropertyResultTile extends StatelessWidget {
             child: SizedBox(
               width: 48,
               height: 48,
-              child: property.thumbnail != null &&
-                      property.thumbnail!.isNotEmpty
-                  ? CoreXPhoto.thumb(
-                      url: property.thumbnail!,
-                      logicalWidth: 48,
-                      errorWidget: (_) => _thumbFallback(context),
-                    )
-                  : _thumbFallback(context),
+              child:
+                  property.thumbnail != null && property.thumbnail!.isNotEmpty
+                      ? CoreXPhoto.thumb(
+                          url: property.thumbnail!,
+                          logicalWidth: 48,
+                          errorWidget: (_) => _thumbFallback(context),
+                        )
+                      : _thumbFallback(context),
             ),
           ),
           const SizedBox(width: 12),

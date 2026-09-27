@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../utils/sheet_insets.dart';
 import '../../models/dashboard_data.dart';
 import '../../providers/dashboard_provider.dart';
 import '../../theme.dart';
@@ -88,9 +89,8 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
       // Half-open overlap: [start,end) intersects [eStart,eEnd].
       final intersects = start.isBefore(eEnd) && eStart.isBefore(end);
       // Zero-length (point) events: overlap only if strictly inside the window.
-      final pointInside = eEnd == eStart &&
-          !eStart.isBefore(start) &&
-          eStart.isBefore(end);
+      final pointInside =
+          eEnd == eStart && !eStart.isBefore(start) && eStart.isBefore(end);
       if (eEnd == eStart ? pointInside : intersects) overlaps.add(e);
     }
     setState(() => _conflicts = overlaps);
@@ -179,14 +179,20 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
       // it as a naive SA wall-clock string (see [jhbApiString]) so the stored
       // time matches what the user picked regardless of the device's timezone.
       final dt = jhbWallClock(
-        _eventDate!.year, _eventDate!.month, _eventDate!.day,
-        time.hour, time.minute,
+        _eventDate!.year,
+        _eventDate!.month,
+        _eventDate!.day,
+        time.hour,
+        time.minute,
       );
       String? endIso;
       if (!_allDay && _eventEndTime != null) {
         final end = jhbWallClock(
-          _eventDate!.year, _eventDate!.month, _eventDate!.day,
-          _eventEndTime!.hour, _eventEndTime!.minute,
+          _eventDate!.year,
+          _eventDate!.month,
+          _eventDate!.day,
+          _eventEndTime!.hour,
+          _eventEndTime!.minute,
         );
         endIso = end.isAfter(dt) ? jhbApiString(end) : null;
       }
@@ -227,7 +233,7 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom +
+        bottom: sheetBottomInset(context) +
             MediaQuery.of(context).viewPadding.bottom,
       ),
       child: SingleChildScrollView(
@@ -297,11 +303,9 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                         _mode == 'task' ? 'Task title' : 'Event title'),
                   ),
                   const SizedBox(height: 16),
-
                   if (_mode == 'event') _buildEventDateTime(),
                   if (_mode == 'event') _buildConflictBanner(),
                   if (_mode == 'event') const SizedBox(height: 16),
-
                   Text('Priority',
                       style: TextStyle(
                           fontSize: 12,
@@ -312,7 +316,6 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                       selected: _priority,
                       onChanged: (v) => setState(() => _priority = v)),
                   const SizedBox(height: 16),
-
                   if (_mode == 'task') ...[
                     Text('Type',
                         style: TextStyle(
@@ -347,7 +350,6 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                     ),
                     const SizedBox(height: 16),
                   ],
-
                   if (_mode == 'event') ...[
                     Text('Type',
                         style: TextStyle(
@@ -386,7 +388,6 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                       ],
                     ),
                   ],
-
                   TextField(
                     controller: _descriptionController,
                     maxLines: 2,
@@ -395,7 +396,6 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                     decoration: _inputDecoration('Description (optional)'),
                   ),
                   const SizedBox(height: 8),
-
                   Row(
                     children: [
                       Expanded(
@@ -411,7 +411,6 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                     ],
                   ),
                   const SizedBox(height: 16),
-
                   SizedBox(
                     width: double.infinity,
                     height: 48,
@@ -453,7 +452,8 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: isActive ? Colors.white : AppTheme.textSecondary(context),
+                color:
+                    isActive ? Colors.white : AppTheme.textSecondary(context),
               ),
             ),
           ),
@@ -502,7 +502,8 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                   padding: const EdgeInsets.only(left: 26, top: 2),
                   child: Text(
                     '${e.title} · ${_eventTimeLabel(e)}',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF92400E)),
+                    style:
+                        const TextStyle(fontSize: 12, color: Color(0xFF92400E)),
                   ),
                 )),
             if (extra > 0)
@@ -647,7 +648,8 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
         final now = DateTime.now();
         final picked = await showDatePicker(
           context: context,
-          initialDate: value ?? (allowPast ? now : now.add(const Duration(days: 1))),
+          initialDate:
+              value ?? (allowPast ? now : now.add(const Duration(days: 1))),
           firstDate: allowPast ? now.subtract(const Duration(days: 30)) : now,
           lastDate: now.add(const Duration(days: 365)),
         );
@@ -662,7 +664,9 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
           border: Border.all(color: AppTheme.borderColor(context)),
         ),
         child: Text(
-          value != null ? '${value.day}/${value.month}/${value.year}' : 'Select date',
+          value != null
+              ? '${value.day}/${value.month}/${value.year}'
+              : 'Select date',
           style: TextStyle(
             fontSize: 14,
             color: value != null
@@ -741,9 +745,13 @@ class _PriorityPills extends StatelessWidget {
               margin: EdgeInsets.only(right: opt != _options.last ? 8 : 0),
               padding: const EdgeInsets.symmetric(vertical: 12),
               decoration: BoxDecoration(
-                color: isActive ? color.withValues(alpha: 0.15) : AppTheme.surface2(context),
+                color: isActive
+                    ? color.withValues(alpha: 0.15)
+                    : AppTheme.surface2(context),
                 borderRadius: BorderRadius.circular(AppTheme.radius),
-                border: isActive ? Border.all(color: color.withValues(alpha: 0.4)) : null,
+                border: isActive
+                    ? Border.all(color: color.withValues(alpha: 0.4))
+                    : null,
               ),
               child: Center(
                 child: Text(

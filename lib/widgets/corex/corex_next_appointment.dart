@@ -9,7 +9,6 @@ import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../utils/app_time.dart';
 import 'corex_card.dart';
-import 'corex_chip.dart';
 
 /// Home hero card: surfaces the next upcoming event on today's calendar and
 /// taps through to that event in the Calendar screen. When nothing is left for
@@ -109,18 +108,19 @@ class _AppointmentShell extends StatelessWidget {
     if (state != _ShellState.event) {
       final clear = state == _ShellState.clear;
       return CorexCard(
-        accent: true,
         child: Row(
           children: [
             _IconBox(
               color: t.accentSoft,
               child: Icon(
                 clear ? TablerIcons.circle_check : TablerIcons.calendar_time,
-                color: t.accent,
-                size: 26,
+                color: Theme.of(context).brightness == Brightness.light
+                    ? CorexTokens.textPrimary(context)
+                    : t.accent,
+                size: 19,
               ),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -150,63 +150,105 @@ class _AppointmentShell extends StatelessWidget {
 
     final e = event!;
     final colour = _eventColour();
-    final chips = <Widget>[
-      CorexChip(
-        label: e.allDay ? 'All day' : _formatTime(jhb(e.eventDate)),
-        variant: CorexChipVariant.accent,
-      ),
-      if (!e.allDay) CorexChip(label: _relative(e.eventDate)),
-    ];
     final subtitle = e.propertyAddress ?? e.location ?? e.contactName;
+    final isLight = Theme.of(context).brightness == Brightness.light;
+
+    // The hero's time is the one number on the page, so it gets the accent
+    // outright — darkened per agency in light mode, where the raw accent
+    // usually fails contrast.
+    final timeColour = isLight ? t.accentText : t.accent;
 
     return CorexCard(
-      accent: true,
+      elevated: true,
       onTap: onTap,
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _IconBox(
-            color: colour.withValues(alpha: 0.14),
-            child: Icon(TablerIcons.calendar_event, color: colour, size: 26),
+          Row(
+            children: [
+              _IconBox(
+                color: colour.withValues(alpha: 0.15),
+                child: Icon(
+                  TablerIcons.calendar_event,
+                  color: isLight ? CorexTokens.textPrimary(context) : colour,
+                  size: 19,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const _Eyebrow('NEXT APPOINTMENT'),
+                    const SizedBox(height: 4),
+                    Text(
+                      e.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: CorexTokens.textPrimary(context),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const _Eyebrow('NEXT APPOINTMENT'),
-                const SizedBox(height: 4),
-                Text(
-                  e.title,
+          const SizedBox(height: 14),
+          Container(height: 1, color: CorexTokens.surfaceBorder(context)),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Text(
+                e.allDay ? 'All day' : _formatTime(jhb(e.eventDate)),
+                style: TextStyle(
+                  color: timeColour,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  [
+                    if (!e.allDay) _relative(e.eventDate),
+                    if (subtitle != null && subtitle.isNotEmpty) subtitle,
+                  ].join(' · '),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: CorexTokens.textPrimary(context),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                    color: CorexTokens.textSecondary(context),
+                    fontSize: 13,
                   ),
                 ),
-                if (subtitle != null && subtitle.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: CorexTokens.textSecondary(context),
-                      fontSize: 12,
-                    ),
+              ),
+              const SizedBox(width: 10),
+              // Reads as the card's action, but the whole card is the tap
+              // target — this is an affordance, not a second button, so it
+              // stays a container and never swallows the tap.
+              Container(
+                height: 34,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: t.accent,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Text(
+                  'Open',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
                   ),
-                ],
-                const SizedBox(height: 8),
-                Wrap(spacing: 6, runSpacing: 6, children: chips),
-              ],
-            ),
-          ),
-          Icon(
-            TablerIcons.chevron_right,
-            size: 18,
-            color: CorexTokens.textTertiary(context),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -240,11 +282,11 @@ class _IconBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 64,
-      height: 64,
+      width: 38,
+      height: 38,
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(CorexTokens.radiusChip),
       ),
       child: child,
     );

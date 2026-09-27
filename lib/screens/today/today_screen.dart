@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../../utils/sheet_insets.dart';
 import '../../widgets/ui/content_width.dart';
 import '../../models/notification_models.dart';
 import '../../models/today_card.dart';
@@ -92,7 +93,8 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
       child: Scaffold(
         backgroundColor: CorexTokens.pageBase(context),
         body: Container(
-          decoration: BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
+          decoration:
+              BoxDecoration(gradient: CorexTokens.pageBacklight(context)),
           child: ContentSafeArea(
             bottom: false,
             child: Column(
@@ -231,8 +233,8 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
             try {
               await ApiService().completeEvent(event.id!);
             } catch (e) {
-              messenger.showSnackBar(
-                  SnackBar(content: Text('Complete failed: $e')));
+              messenger
+                  .showSnackBar(SnackBar(content: Text('Complete failed: $e')));
               return;
             }
             if (mounted) _refresh();
@@ -243,8 +245,8 @@ class _TodayScreenState extends State<TodayScreen> with WidgetsBindingObserver {
             try {
               await ApiService().dismissEvent(event.id!);
             } catch (e) {
-              messenger.showSnackBar(
-                  SnackBar(content: Text('Dismiss failed: $e')));
+              messenger
+                  .showSnackBar(SnackBar(content: Text('Dismiss failed: $e')));
               return;
             }
             if (mounted) _refresh();
@@ -344,8 +346,7 @@ class _EventRow extends StatelessWidget {
                       color: CorexTokens.textPrimary(context),
                     ),
                   ),
-                  if (event.location != null &&
-                      event.location!.isNotEmpty) ...[
+                  if (event.location != null && event.location!.isNotEmpty) ...[
                     const SizedBox(height: 3),
                     Row(children: [
                       Icon(Icons.place_outlined,
@@ -403,8 +404,7 @@ class _EventDetailSheet extends StatelessWidget {
     final accent = event.color ?? t.accent;
     return SafeArea(
       child: Padding(
-        padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom),
+        padding: EdgeInsets.only(bottom: sheetBottomInset(context)),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
           child: Column(
@@ -696,7 +696,8 @@ class _ScheduleItem {
     return _ScheduleItem(
       id: toInt(m['id'] ?? m['event_id']),
       title: (m['title'] ?? m['name'] ?? m['label'] ?? '(untitled)').toString(),
-      start: toDate(m['starts_at'] ?? m['start'] ?? m['event_date'] ?? m['time']),
+      start:
+          toDate(m['starts_at'] ?? m['start'] ?? m['event_date'] ?? m['time']),
       end: toDate(m['ends_at'] ?? m['end'] ?? m['end_date']),
       allDay: m['all_day'] == true,
       location:
@@ -721,8 +722,7 @@ class _ScheduleItem {
     if (allDay) return 'All day';
     final s = start;
     if (s == null) return '';
-    String fmt(DateTime d) =>
-        '${d.year}-${d.month.toString().padLeft(2, '0')}-'
+    String fmt(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-'
         '${d.day.toString().padLeft(2, '0')} '
         '${d.hour.toString().padLeft(2, '0')}:'
         '${d.minute.toString().padLeft(2, '0')}';

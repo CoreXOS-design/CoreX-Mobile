@@ -39,6 +39,40 @@ class CorexTokens {
   static const radius = 14.0;
   static const radiusButton = 12.0;
 
+  // Studio-direction radii. Softer and more layered than the flat 14 above,
+  // which stays put so older screens keep their look until they're moved over.
+  static const radiusCard = 18.0;
+  static const radiusTile = 16.0;
+  static const radiusNav = 20.0;
+  static const radiusChip = 12.0;
+
+  /// Two-part card shadow: a tight contact shadow to seat the card, plus a
+  /// wide soft one for depth. Dark mode leans on the wide shadow (a light
+  /// hairline does the seating instead), light mode on the tight one.
+  static List<BoxShadow> cardShadow(BuildContext c, {bool strong = false}) {
+    final isLight = Theme.of(c).brightness == Brightness.light;
+    return [
+      BoxShadow(
+        color: Colors.black.withValues(alpha: isLight ? 0.06 : 0.35),
+        offset: const Offset(0, 2),
+        blurRadius: 4,
+      ),
+      BoxShadow(
+        color: Colors.black.withValues(alpha: isLight ? 0.28 : 0.95),
+        offset: Offset(0, strong ? 20 : 16),
+        blurRadius: strong ? 40 : 32,
+        spreadRadius: strong ? -26 : -24,
+      ),
+    ];
+  }
+
+  /// Hairline that separates a surface from the page. Carries the whole
+  /// edge in dark mode, where the shadows are nearly invisible.
+  static Color surfaceBorder(BuildContext c) =>
+      Theme.of(c).brightness == Brightness.light
+          ? const Color(0xFF0B1426).withValues(alpha: 0.07)
+          : Colors.white.withValues(alpha: 0.06);
+
   // ── Context-aware accessors ───────────────────────────────────────────
   static CorexPalette _p(BuildContext c) => CorexPalette.of(c);
 

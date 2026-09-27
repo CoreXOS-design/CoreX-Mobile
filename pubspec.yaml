@@ -1,7 +1,7 @@
 name: corex_mobile
 description: CoreX OS - Home Finders Coastal mobile app.
 publish_to: 'none'
-version: 1.0.14+36
+version: 1.0.15+37
 
 environment:
   sdk: ^3.6.0
@@ -91,15 +91,15 @@ flutter_launcher_icons:
     icon_size: 48
 
 flutter_native_splash:
-  color: "#0D0F14"
+  color: "#0A0F1C"
   image: assets/images/corex_logo_splash.png
-  color_dark: "#0D0F14"
+  color_dark: "#0A0F1C"
   image_dark: assets/images/corex_logo_splash.png
   android_12:
     image: assets/images/corex_logo_splash.png
-    color: "#0D0F14"
+    color: "#0A0F1C"
     image_dark: assets/images/corex_logo_splash.png
-    color_dark: "#0D0F14"
+    color_dark: "#0A0F1C"
   android: true
   ios: true
   web: false

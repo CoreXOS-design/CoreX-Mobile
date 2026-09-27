@@ -70,5 +70,53 @@ void main() {
     expect(homeText.style!.color!.g, purple.g);
     expect(homeText.style!.color!.b, purple.b);
   });
+
+  // `accentText` / `moneyText` exist so light surfaces stay legible WITHOUT
+  // falling back to a fixed brand colour — an earlier pass hardcoded navy
+  // here and silently dropped per-agency theming.
+  group('readable-on-light accent variants', () {
+    double contrastOnWhite(Color c) => 1.05 / (c.computeLuminance() + 0.05);
+
+    test('leaves an accent that already passes AA untouched', () {
+      const theme =
+          CorexAccentTheme(accent: purple, accentMoney: Color(0xFFE8B86D));
+      expect(contrastOnWhite(purple), greaterThanOrEqualTo(4.5));
+      expect(theme.accentText, purple);
+    });
+
+    test('darkens a mid-tone accent until it clears AA, keeping its hue', () {
+      // The default CoreX sky: ~2.4:1 on white, nowhere near legible.
+      const sky = Color(0xFF0EA5E9);
+      const theme =
+          CorexAccentTheme(accent: sky, accentMoney: Color(0xFFE8B86D));
+
+      expect(contrastOnWhite(sky), lessThan(4.5));
+      expect(contrastOnWhite(theme.accentText), greaterThanOrEqualTo(4.5));
+
+      // Same hue family — darkened, not swapped for a different colour.
+      final original = HSLColor.fromColor(sky);
+      final adjusted = HSLColor.fromColor(theme.accentText);
+      expect((adjusted.hue - original.hue).abs(), lessThan(2.0));
+      expect(adjusted.lightness, lessThan(original.lightness));
+    });
+
+    test('darkens the pale money gold, which is far below AA on white', () {
+      const gold = Color(0xFFE8B86D);
+      const theme = CorexAccentTheme(accent: purple, accentMoney: gold);
+
+      expect(contrastOnWhite(gold), lessThan(2.0));
+      expect(contrastOnWhite(theme.moneyText), greaterThanOrEqualTo(4.5));
+    });
+
+    test('onMoney picks legible digits for light and dark money colours', () {
+      const paleGold = CorexAccentTheme(
+          accent: purple, accentMoney: Color(0xFFE8B86D));
+      const darkMoney = CorexAccentTheme(
+          accent: purple, accentMoney: Color(0xFF14532D));
+
+      expect(paleGold.onMoney, Colors.black);
+      expect(darkMoney.onMoney, Colors.white);
+    });
+  });
 }
 

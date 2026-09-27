@@ -30,6 +30,20 @@ class CorexMonogram extends StatelessWidget {
         child: Image.asset(
           'assets/images/corex_logo.png',
           fit: BoxFit.contain,
+          // Without this a missing/undecodable asset paints Flutter's red
+          // error box in the middle of the splash and the login screen.
+          // Fall back to the wordmark's initials instead.
+          errorBuilder: (context, _, __) => FittedBox(
+            fit: BoxFit.contain,
+            child: Text(
+              'CX',
+              style: TextStyle(
+                color: t.accent,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -1,
+              ),
+            ),
+          ),
         ),
       ),
     );
