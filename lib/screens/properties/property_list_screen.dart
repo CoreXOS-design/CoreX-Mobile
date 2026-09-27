@@ -13,7 +13,6 @@ import '../../widgets/agent_filter_bar.dart';
 import '../../widgets/ui/list_row.dart';
 import '../../widgets/ui/status_chip.dart';
 import 'property_create_screen.dart';
-import 'property_edit_screen.dart';
 import 'property_overview_screen.dart';
 import '../../widgets/corex_photo.dart';
 
@@ -573,14 +572,9 @@ class _PropertyCard extends StatelessWidget {
           child: InkWell(
             borderRadius: BorderRadius.circular(AppTheme.radius),
             onTap: () async {
-              final isDraft =
-                  (property.status ?? '').toLowerCase() == 'draft' ||
-                      (property.status ?? '').isEmpty;
               await Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => isDraft
-                      ? PropertyEditScreen(propertyId: property.id)
-                      : PropertyOverviewScreen(propertyId: property.id),
+                  builder: (_) => PropertyOverviewScreen(propertyId: property.id),
                 ),
               );
               if (context.mounted) {
