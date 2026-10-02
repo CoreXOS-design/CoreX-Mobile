@@ -18,10 +18,15 @@ class CorexEllieCard extends StatelessWidget {
   /// Overridable for testing; defaults to today.
   final DateTime? date;
 
+  /// Home turns the daily line off on short screens: the card collapses to
+  /// its "Meet Ellie" row so the Workspace grid below still fits unscrolled.
+  final bool showQuote;
+
   const CorexEllieCard({
     super.key,
     required this.onTap,
     this.date,
+    this.showQuote = true,
   });
 
   @override
@@ -83,6 +88,7 @@ class CorexEllieCard extends StatelessWidget {
               ),
             ],
           ),
+          if (showQuote) ...[
           const SizedBox(height: 13),
           // The quote sits in its own well rather than running on under a
           // divider — it's Ellie speaking, not more card copy.
@@ -123,6 +129,7 @@ class CorexEllieCard extends StatelessWidget {
               ],
             ),
           ),
+          ],
         ],
       ),
     );

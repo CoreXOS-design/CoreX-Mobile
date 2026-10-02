@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
@@ -8,6 +10,7 @@ import '../../screens/calendar_screen.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../utils/app_time.dart';
+import '../../utils/route_observer.dart';
 import 'corex_card.dart';
 
 /// Home hero card: surfaces the next upcoming event on today's calendar and
@@ -17,6 +20,14 @@ import 'corex_card.dart';
 /// Self-loading: triggers a calendar fetch on init (the range endpoint returns
 /// the whole month, which we filter client-side) and rebuilds off
 /// [DashboardProvider.events].
+///
+/// Home stays mounted underneath anything pushed from it (Ellie, Notifications,
+/// module screens), so an appointment created there would never reach this
+/// card from the init fetch alone. It therefore also re-fetches when:
+///  - a route pushed on top of Home pops ([RouteAware.didPopNext]);
+///  - the app returns to the foreground;
+/// and re-evaluates (no network) once a minute so the card rolls over to the
+/// following event as the current one's start time passes.
 class CorexNextAppointment extends StatefulWidget {
   const CorexNextAppointment({super.key});
 
@@ -24,23 +35,69 @@ class CorexNextAppointment extends StatefulWidget {
   State<CorexNextAppointment> createState() => _CorexNextAppointmentState();
 }
 
-class _CorexNextAppointmentState extends State<CorexNextAppointment> {
+class _CorexNextAppointmentState extends State<CorexNextAppointment>
+    with RouteAware, WidgetsBindingObserver {
   bool _loading = true;
+  bool _inFlight = false;
+  ModalRoute<void>? _route;
+  Timer? _tick;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    _tick = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null && route != _route) {
+      if (_route != null) corexRouteObserver.unsubscribe(this);
+      _route = route;
+      corexRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    corexRouteObserver.unsubscribe(this);
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// A screen pushed over Home (Ellie, a module, Notifications) just closed —
+  /// it may have created, moved or completed an event.
+  @override
+  void didPopNext() => _load();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _load();
+  }
+
+  /// Single-flight: a pop and a resume landing together must not fan out into
+  /// parallel fetches. The skeleton only shows for the very first load; later
+  /// refreshes swap the card in place.
   Future<void> _load() async {
-    final today = DateTime.now();
-    final day = DateTime(today.year, today.month, today.day);
-    await context.read<DashboardProvider>().loadEventsRange(
-          start: day,
-          end: day,
-        );
-    if (mounted) setState(() => _loading = false);
+    if (_inFlight || !mounted) return;
+    _inFlight = true;
+    try {
+      final today = DateTime.now();
+      final day = DateTime(today.year, today.month, today.day);
+      await context.read<DashboardProvider>().loadEventsRange(
+            start: day,
+            end: day,
+          );
+    } finally {
+      _inFlight = false;
+      if (mounted && _loading) setState(() => _loading = false);
+    }
   }
 
   /// First event today whose start is still ahead of now, earliest first.

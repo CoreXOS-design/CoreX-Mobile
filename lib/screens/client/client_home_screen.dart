@@ -14,14 +14,17 @@ import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
 import '../../widgets/client/client_bottom_nav.dart';
 import '../../widgets/client/client_drawer.dart';
-import '../../widgets/corex/corex_app_bar.dart';
 import '../../widgets/corex/corex_card.dart';
+import '../../widgets/corex/corex_home_header.dart';
 import '../../widgets/corex/corex_module_tile.dart';
+import '../home/home_screen.dart'
+    show kHomeModuleTileCompactHeight, kHomeModuleTileMaxHeight;
 import 'client_consent_screen.dart';
 import 'client_matches_list_screen.dart';
 import 'client_profile_screen.dart';
 import 'client_property_screen.dart';
 import 'client_seller_listings_screen.dart';
+import 'client_settings_screen.dart';
 import 'client_testimonials_screen.dart';
 import '../../widgets/corex_photo.dart';
 
@@ -74,82 +77,116 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
             bottom: false,
             child: Column(
               children: [
-                Builder(
-                  builder: (ctx) => CorexAppBar(
-                    userInitials: initials,
-                    unreadBadge: 0,
-                    onMenuTap: () => Scaffold.of(ctx).openDrawer(),
-                    onAvatarTap: () => _push(ctx, const ClientProfileScreen()),
-                  ),
-                ),
+                // Like the staff Home, this is one fixed screen — it never
+                // scrolls. Everything above the grid takes its natural height
+                // and the grid absorbs what's left, stepping down in density
+                // (see the flags below) rather than overflowing.
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (agencyName != null && agencyName.isNotEmpty) ...[
-                          Text(
-                            agencyName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: CorexTokens.textTertiary(context),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.2,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+                    child: LayoutBuilder(builder: (context, box) {
+                      final h = box.maxHeight;
+                      final hasListing = sellerListings.hasListings;
+                      final hasMatches = matches.listings.isNotEmpty;
+                      // Measured pieces (dp): header 103 + gap 16, agent card
+                      // 166 (80 compact), listing card 93 + gap 16, carousel
+                      // block 284, compact matches card 72 + gap 16, Explore
+                      // heading 24 + gap 12, grid 196 at the comfortable tile
+                      // floor / 132 compact. Fixed cost before the matches
+                      // surface, with the full agent card:
+                      final base = 103 + 16 + 166 + 22 + (hasListing ? 109 : 0);
+                      final showCarousel =
+                          hasMatches && h >= base + 284 + 36 + 196;
+                      final showMatchesCard = hasMatches &&
+                          !showCarousel &&
+                          h >= base + 88 + 36 + 132;
+                      final matchesCost =
+                          showCarousel ? 284 : (showMatchesCard ? 88 : 0);
+                      // Steps below that: the agent card folds its three
+                      // labelled buttons into inline icons, then the Explore
+                      // heading goes, and as a last resort the listing card
+                      // (still in the drawer under My Listings) — a 640 dp
+                      // phone with a button nav bar lands exactly there.
+                      final compactAgent = h < base + matchesCost + 36 + 132;
+                      final baseNow = compactAgent ? base - 86 : base;
+                      final showListing =
+                          hasListing && h >= baseNow + matchesCost + 132;
+                      final baseFinal = (hasListing && !showListing)
+                          ? baseNow - 109
+                          : baseNow;
+                      final showSectionHeader =
+                          h >= baseFinal + matchesCost + 36 + 132;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Same header as the staff Home: boxed menu button,
+                          // identity button on the right, agency eyebrow and
+                          // greeting on their own row.
+                          Builder(
+                            builder: (ctx) => CorexHomeHeader(
+                              agencyName: agencyName,
+                              greeting: 'Good ${_timeOfDay()}, $firstName',
+                              onMenuTap: () => Scaffold.of(ctx).openDrawer(),
+                              actions: [
+                                CorexHeaderButton(
+                                  label: initials,
+                                  tooltip: 'Profile',
+                                  onTap: () =>
+                                      _push(ctx, const ClientProfileScreen()),
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 6),
-                        ],
-                        Text(
-                          'Good ${_timeOfDay()}, $firstName.',
-                          style: TextStyle(
-                            color: CorexTokens.textPrimary(context),
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.4,
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        _AgentContactCard(
-                          agent: session.agent,
-                          agencyName: agencyName,
-                        ),
-                        if (sellerListings.hasListings) ...[
                           const SizedBox(height: 16),
-                          _MyListingsCard(
-                            properties: sellerListings.properties,
-                            onTap: () => openSellerDashboard(
-                                context, sellerListings.properties),
+                          _AgentContactCard(
+                            agent: session.agent,
+                            compact: compactAgent,
+                            agencyName: agencyName,
                           ),
-                        ],
-                        // Matched listings carousel — sits under My Listings
-                        // when the client has a listing, otherwise directly
-                        // under the agent card.
-                        if (matches.listings.isNotEmpty) ...[
+                          if (showListing) ...[
+                            const SizedBox(height: 16),
+                            _MyListingsCard(
+                              properties: sellerListings.properties,
+                              onTap: () => openSellerDashboard(
+                                  context, sellerListings.properties),
+                            ),
+                          ],
+                          // Matched listings — the full carousel only when the
+                          // page has room for it without scrolling; otherwise a
+                          // one-line card into the same list, so the surface is
+                          // never silently gone.
+                          if (showCarousel) ...[
+                            const SizedBox(height: 22),
+                            _MatchedCarousel(
+                              listings: matches.listings,
+                              onSeeAll: () => _push(
+                                  context, const ClientMatchesListScreen()),
+                              onTapListing: _openListing,
+                            ),
+                          ] else if (showMatchesCard) ...[
+                            const SizedBox(height: 16),
+                            _MatchedCompactCard(
+                              count: matches.listings.length,
+                              onTap: () => _push(
+                                  context, const ClientMatchesListScreen()),
+                            ),
+                          ],
                           const SizedBox(height: 22),
-                          _MatchedCarousel(
-                            listings: matches.listings,
-                            onSeeAll: () =>
-                                _push(context, const ClientMatchesListScreen()),
-                            onTapListing: _openListing,
-                          ),
+                          if (showSectionHeader) ...[
+                            Text(
+                              'Explore',
+                              style: TextStyle(
+                                color: CorexTokens.textPrimary(context),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          Expanded(child: _moduleGrid(context)),
                         ],
-                        const SizedBox(height: 22),
-                        Text(
-                          'Explore',
-                          style: TextStyle(
-                            color: CorexTokens.textPrimary(context),
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        _moduleGrid(context),
-                        const SizedBox(height: 12),
-                      ],
-                    ),
+                      );
+                    }),
                   ),
                 ),
                 ClientBottomNav(
@@ -166,34 +203,61 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
   }
 
   Widget _moduleGrid(BuildContext context) {
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 3,
-      crossAxisSpacing: 10,
-      mainAxisSpacing: 10,
-      childAspectRatio: 1.0,
-      children: [
-        // Live entry — the client's saved searches and matched listings.
-        CorexModuleTile(
-          icon: TablerIcons.heart_handshake,
-          label: 'Core Matches',
-          onTap: () => _push(context, const ClientMatchesListScreen()),
+    const spacing = 12.0;
+    const rows = 2;
+    // 2-up like the staff Workspace grid, and sized the same way: the grid
+    // is the page's shock absorber, taking whatever height is left so Home
+    // ends exactly at the nav. Tiles flex between the staff grid's compact
+    // floor and ceiling (CorexModuleTile sheds its own content on the way
+    // down), so the grid never needs a scroll of its own.
+    return LayoutBuilder(builder: (context, box) {
+      final free = box.maxHeight - spacing * (rows - 1);
+      final tileHeight = (free / rows).clamp(
+        kHomeModuleTileCompactHeight,
+        kHomeModuleTileMaxHeight,
+      );
+      return GridView(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.zero,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: spacing,
+          mainAxisSpacing: spacing,
+          mainAxisExtent: tileHeight,
         ),
-        // Review your agent — write a testimonial and see ones you've sent.
-        CorexModuleTile(
-          icon: TablerIcons.star,
-          label: 'Review Agent',
-          onTap: () => _push(context, const ClientTestimonialsScreen()),
-        ),
-        // Privacy & consent — view/set the client's own POPIA/CPA consent.
-        CorexModuleTile(
-          icon: TablerIcons.shield_lock,
-          label: 'Privacy & Consent',
-          onTap: () => _push(context, const ClientConsentScreen()),
-        ),
-      ],
-    );
+        children: [
+          // Live entry — the client's saved searches and matched listings.
+          // Money accent on alternate tiles, as on the staff grid, so the
+          // four don't read as one flat block of colour.
+          CorexModuleTile(
+            icon: TablerIcons.heart_handshake,
+            label: 'Core Matches',
+            useMoneyAccent: true,
+            onTap: () => _push(context, const ClientMatchesListScreen()),
+          ),
+          // Review your agent — write a testimonial and see ones you've sent.
+          CorexModuleTile(
+            icon: TablerIcons.star,
+            label: 'Review Agent',
+            onTap: () => _push(context, const ClientTestimonialsScreen()),
+          ),
+          // Privacy & consent — view/set the client's own POPIA/CPA consent.
+          CorexModuleTile(
+            icon: TablerIcons.shield_lock,
+            label: 'Privacy & Consent',
+            onTap: () => _push(context, const ClientConsentScreen()),
+          ),
+          // Fourth tile so the 2-up grid has no orphan; Settings is otherwise
+          // only reachable via the drawer and Profile.
+          CorexModuleTile(
+            icon: TablerIcons.settings,
+            label: 'Settings',
+            useMoneyAccent: true,
+            onTap: () => _push(context, const ClientSettingsScreen()),
+          ),
+        ],
+      );
+    });
   }
 
   void _push(BuildContext context, Widget screen) {
@@ -476,7 +540,6 @@ class _MyListingsCard extends StatelessWidget {
         : '${properties.length} listings';
 
     return CorexCard(
-      accent: true,
       onTap: onTap,
       child: Row(
         children: [
@@ -578,7 +641,17 @@ class _MyListingsCard extends StatelessWidget {
 class _AgentContactCard extends StatelessWidget {
   final ClientAgent? agent;
   final String? agencyName;
-  const _AgentContactCard({required this.agent, required this.agencyName});
+
+  /// Short-page variant: one row, with Call / WhatsApp / Email as inline
+  /// icon buttons instead of the labelled row beneath — about half the
+  /// height, nothing lost.
+  final bool compact;
+
+  const _AgentContactCard({
+    required this.agent,
+    required this.agencyName,
+    this.compact = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -620,8 +693,10 @@ class _AgentContactCard extends StatelessWidget {
         ? a.title!
         : (a.agencyName ?? agencyName ?? 'Your agent');
 
+    if (compact) return _compact(context, a, subtitle);
+
     return CorexCard(
-      accent: true,
+      elevated: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -707,12 +782,110 @@ class _AgentContactCard extends StatelessWidget {
     );
   }
 
-  Widget _avatar(BuildContext context, ClientAgent? a) {
+  /// One-row layout for short pages: avatar, name/subtitle, then the contact
+  /// actions as 36 px icon buttons on the right. Same card, same accents —
+  /// only the labelled button row is folded away.
+  Widget _compact(BuildContext context, ClientAgent a, String subtitle) {
+    return CorexCard(
+      elevated: true,
+      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+      child: Row(
+        children: [
+          _avatar(context, a, size: 44),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _eyebrow(context, 'YOUR AGENT'),
+                const SizedBox(height: 2),
+                Text(
+                  a.fullName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: CorexTokens.textPrimary(context),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: CorexTokens.textSecondary(context),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (a.hasContact) ...[
+            const SizedBox(width: 8),
+            if (a.phone != null && a.phone!.isNotEmpty)
+              _iconAction(
+                context,
+                icon: TablerIcons.phone,
+                tooltip: 'Call',
+                onTap: () => _launch(context, 'tel:${a.phone}'),
+              ),
+            if (a.whatsapp != null && a.whatsapp!.isNotEmpty)
+              _iconAction(
+                context,
+                icon: TablerIcons.brand_whatsapp,
+                tooltip: 'WhatsApp',
+                onTap: () => _launch(context, _waUrl(a.whatsapp!)),
+              ),
+            if (a.email != null && a.email!.isNotEmpty)
+              _iconAction(
+                context,
+                icon: TablerIcons.mail,
+                tooltip: 'Email',
+                onTap: () => _launch(context, 'mailto:${a.email}'),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _iconAction(
+    BuildContext context, {
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    final t = CorexAccentTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(left: 6),
+      child: Tooltip(
+        message: tooltip,
+        child: Material(
+          color: t.accentSoft,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(10),
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: Icon(icon, color: t.accent, size: 18),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _avatar(BuildContext context, ClientAgent? a, {double size = 60}) {
     final t = CorexAccentTheme.of(context);
     final photo = a?.photoUrl;
     if (photo != null && photo.isNotEmpty) {
       return CircleAvatar(
-        radius: 30,
+        radius: size / 2,
         backgroundColor: t.accentSoft,
         backgroundImage: NetworkImage(photo),
         // Swallow load failures gracefully — fall back to the accent circle
@@ -722,8 +895,8 @@ class _AgentContactCard extends StatelessWidget {
     }
     final initials = a != null ? _initialsOf(a.fullName) : null;
     return Container(
-      width: 60,
-      height: 60,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         color: t.accentSoft,
         shape: BoxShape.circle,
@@ -734,7 +907,7 @@ class _AgentContactCard extends StatelessWidget {
               initials,
               style: TextStyle(
                 color: t.accent,
-                fontSize: 20,
+                fontSize: size / 3,
                 fontWeight: FontWeight.w700,
               ),
             )
@@ -800,5 +973,73 @@ class _AgentContactCard extends StatelessWidget {
     if (parts.isEmpty || parts.first.isEmpty) return '';
     if (parts.length == 1) return parts.first[0].toUpperCase();
     return (parts.first[0] + parts.last[0]).toUpperCase();
+  }
+}
+
+/// One-line stand-in for [_MatchedCarousel] when the page hasn't the height
+/// for the strip: the count and a tap-through to the same list.
+class _MatchedCompactCard extends StatelessWidget {
+  final int count;
+  final VoidCallback onTap;
+
+  const _MatchedCompactCard({required this.count, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CorexAccentTheme.of(context);
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    return CorexCard(
+      onTap: onTap,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: t.moneySoft,
+              borderRadius: BorderRadius.circular(CorexTokens.radiusChip),
+            ),
+            child: Icon(
+              TablerIcons.heart_handshake,
+              color: isLight ? t.moneyText : t.accentMoney,
+              size: 19,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Matched for you',
+                  style: TextStyle(
+                    color: CorexTokens.textPrimary(context),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '$count listing${count == 1 ? '' : 's'} match your searches',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: CorexTokens.textSecondary(context),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Icon(
+            TablerIcons.chevron_right,
+            size: 17,
+            color: CorexTokens.textTertiary(context),
+          ),
+        ],
+      ),
+    );
   }
 }

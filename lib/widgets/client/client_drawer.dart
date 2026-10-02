@@ -7,7 +7,10 @@ import '../../providers/client_matches_provider.dart';
 import '../../providers/seller_listings_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../screens/auth/client/client_agency_picker_screen.dart';
+import '../../screens/client/client_consent_screen.dart';
+import '../../screens/client/client_matches_list_screen.dart';
 import '../../screens/client/client_profile_screen.dart';
+import '../../screens/client/client_testimonials_screen.dart';
 import '../../screens/client/client_seller_listings_screen.dart';
 import '../../screens/client/client_settings_screen.dart';
 import '../../theme/corex_accent_theme.dart';
@@ -28,8 +31,8 @@ class ClientDrawer extends StatelessWidget {
         ? session.contact!.fullName
         : (session.client?.email ?? 'Client');
     final email = session.client?.email ?? '';
-    final canSwitch = session.agencies.length > 1 &&
-        session.client?.lockedToAgencyId == null;
+    final canSwitch =
+        session.agencies.length > 1 && session.client?.lockedToAgencyId == null;
 
     return Drawer(
       backgroundColor: CorexTokens.pageBase(context),
@@ -93,58 +96,87 @@ class ClientDrawer extends StatelessWidget {
               ),
             ),
             const Divider(color: Color(0x14FFFFFF), height: 1),
-            const SizedBox(height: 8),
-            _Item(
-              icon: TablerIcons.user,
-              label: 'Profile',
-              onTap: () => _push(context, const ClientProfileScreen()),
+            // Every destination, grouped like the staff drawer — not just
+            // the account items — so nothing is reachable only from the Home
+            // grid. A ListView, not a Column + Spacer: with the theme row,
+            // My Listings and Switch agency all present this overran a
+            // 640 dp phone.
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.only(top: 8, bottom: 8),
+                children: [
+                  const _SectionLabel('Explore'),
+                  _Item(
+                    icon: TablerIcons.heart_handshake,
+                    label: 'Core Matches',
+                    onTap: () =>
+                        _push(context, const ClientMatchesListScreen()),
+                  ),
+                  _Item(
+                    icon: TablerIcons.star,
+                    label: 'Review Agent',
+                    onTap: () =>
+                        _push(context, const ClientTestimonialsScreen()),
+                  ),
+                  _Item(
+                    icon: TablerIcons.shield_lock,
+                    label: 'Privacy & Consent',
+                    onTap: () => _push(context, const ClientConsentScreen()),
+                  ),
+                  const _SectionLabel('Account'),
+                  _Item(
+                    icon: TablerIcons.user,
+                    label: 'Profile',
+                    onTap: () => _push(context, const ClientProfileScreen()),
+                  ),
+                  if (sellerListings.hasListings)
+                    _Item(
+                      icon: TablerIcons.building_estate,
+                      label: 'My Listings',
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        openSellerDashboard(context, sellerListings.properties);
+                      },
+                    ),
+                  _Item(
+                    icon: TablerIcons.settings,
+                    label: 'Settings',
+                    onTap: () => _push(context, const ClientSettingsScreen()),
+                  ),
+                  if (canSwitch)
+                    _Item(
+                      icon: TablerIcons.arrows_left_right,
+                      label: 'Switch agency',
+                      onTap: () => _push(
+                        context,
+                        const ClientAgencyPickerScreen(initialPick: false),
+                      ),
+                    ),
+                  ListTile(
+                    leading: Icon(
+                      isDark ? TablerIcons.moon : TablerIcons.sun,
+                      color: t.accent,
+                      size: 22,
+                    ),
+                    title: Text(
+                      isDark ? 'Dark Mode' : 'Light Mode',
+                      style: TextStyle(
+                        color: CorexTokens.textPrimary(context),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    trailing: Switch(
+                      value: isDark,
+                      activeTrackColor: t.accent,
+                      onChanged: (_) => themeProvider.toggle(),
+                    ),
+                    minVerticalPadding: 14,
+                    onTap: () => themeProvider.toggle(),
+                  ),
+                ],
+              ),
             ),
-            if (sellerListings.hasListings)
-              _Item(
-                icon: TablerIcons.building_estate,
-                label: 'My Listings',
-                onTap: () {
-                  Navigator.of(context).pop();
-                  openSellerDashboard(context, sellerListings.properties);
-                },
-              ),
-            _Item(
-              icon: TablerIcons.settings,
-              label: 'Settings',
-              onTap: () => _push(context, const ClientSettingsScreen()),
-            ),
-            if (canSwitch)
-              _Item(
-                icon: TablerIcons.arrows_left_right,
-                label: 'Switch agency',
-                onTap: () => _push(
-                  context,
-                  const ClientAgencyPickerScreen(initialPick: false),
-                ),
-              ),
-            ListTile(
-              leading: Icon(
-                isDark ? TablerIcons.moon : TablerIcons.sun,
-                color: t.accent,
-                size: 22,
-              ),
-              title: Text(
-                isDark ? 'Dark Mode' : 'Light Mode',
-                style: TextStyle(
-                  color: CorexTokens.textPrimary(context),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              trailing: Switch(
-                value: isDark,
-                activeTrackColor: t.accent,
-                onChanged: (_) => themeProvider.toggle(),
-              ),
-              minVerticalPadding: 14,
-              onTap: () => themeProvider.toggle(),
-            ),
-            const Spacer(),
             const Divider(color: Color(0x14FFFFFF), height: 1),
             _Item(
               icon: TablerIcons.logout,
@@ -207,6 +239,29 @@ class _Item extends StatelessWidget {
       ),
       minVerticalPadding: 14,
       onTap: onTap,
+    );
+  }
+}
+
+/// Group heading between runs of [_Item]s — same treatment as the staff
+/// drawer so both sides of the app read as one product.
+class _SectionLabel extends StatelessWidget {
+  final String label;
+  const _SectionLabel(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+      child: Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          color: CorexTokens.textTertiary(context),
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.2,
+        ),
+      ),
     );
   }
 }

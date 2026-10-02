@@ -63,6 +63,50 @@ class CorexModuleTile extends StatelessWidget {
           // tile's own height — the thresholds are ~28 px below what the grid
           // is told to make each tile.
           final h = box.maxHeight;
+
+          // Compact: not even the stacked chip + label fit (tile under ~84
+          // px). Put them side by side on one line — the grid hands out this
+          // height on short phones when the hero card is in its tall state,
+          // and the alternative was the bottom row vanishing under the nav.
+          if (h < 58) {
+            return Row(
+              children: [
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: chipTint,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Icon(icon, color: iconColor, size: 15),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: CorexTokens.textPrimary(context),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (dot)
+                  Container(
+                    width: 8,
+                    height: 8,
+                    margin: const EdgeInsets.only(left: 6),
+                    decoration: BoxDecoration(
+                      color: t.accentMoney,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+              ],
+            );
+          }
+
           final showSubtitle = subtitle != null && h >= 92;
           final chip = h >= 80 ? 34.0 : 30.0;
           final gap = h >= 80 ? 12.0 : 8.0;

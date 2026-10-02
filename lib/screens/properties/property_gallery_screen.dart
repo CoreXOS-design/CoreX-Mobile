@@ -733,6 +733,21 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
         ],
       ),
       body: ContentSafeArea(top: false, child: _body()),
+      // The selection bar used to be a sliver at the top of the grid, so the
+      // first tap on a photo inserted it and shoved every photo down ~70 px —
+      // the second tap then landed on the wrong one (or on a gap), and on a
+      // narrow phone "2 photos selected" wrapped the actions onto a second
+      // line and shifted everything again. Pinned at the bottom, nothing in
+      // the grid moves when the selection changes.
+      bottomNavigationBar: _selected.isEmpty
+          ? null
+          : SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: _selectionBar(),
+              ),
+            ),
     );
   }
 
@@ -768,11 +783,6 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             sliver: SliverToBoxAdapter(child: _filterChips()),
           ),
-          if (_selected.isNotEmpty)
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              sliver: SliverToBoxAdapter(child: _selectionBar()),
-            ),
           if (sections.isEmpty)
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
@@ -820,11 +830,6 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
               ),
             ),
           ),
-          if (_selected.isNotEmpty)
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              sliver: SliverToBoxAdapter(child: _selectionBar()),
-            ),
           if (order.isEmpty)
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
@@ -1003,11 +1008,8 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
         // a degenerate infinite-width constraint when squeezed inside the
         // narrow branch's Align below. Wrap always has somewhere to put the
         // overflow: a second line.
-        final actions = Wrap(
-          alignment: WrapAlignment.end,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 4,
-          runSpacing: 4,
+        final actions = Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
               tooltip: 'Delete',
@@ -1026,6 +1028,7 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
                   : const Icon(Icons.delete_outline),
               onPressed: busy ? null : _deleteSelected,
             ),
+            const SizedBox(width: 4),
             TextButton(
               onPressed:
                   busy ? null : () => setState(() => _selected.clear()),
@@ -1042,6 +1045,7 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
               ),
               child: const Text('Clear'),
             ),
+            const SizedBox(width: 4),
             ElevatedButton(
               onPressed: busy ? null : _fileSelection,
               style: ElevatedButton.styleFrom(
@@ -1076,19 +1080,15 @@ class _PropertyGalleryScreenState extends State<PropertyGalleryScreen> {
             ],
           );
         }
-        // `label` at its own natural (short, single-line) size, then
-        // `actions` gets whatever's left via Flexible rather than Expanded —
-        // a Row always hands a *non*-flex child unbounded width to measure
-        // itself against, so without this, three buttons' combined natural
-        // width can exceed what's actually available even past the `needed`
-        // threshold above (that gap is exactly how this broke live).
-        // Flexible caps it at the remainder and lets the Wrap above fall
-        // back to a second line instead.
+        // The actions keep their natural width and never reflow; the count
+        // label takes whatever is left and ellipsises. Previously the label
+        // was fixed and the actions flexed, so going from "1 photo" to
+        // "2 photos" could push the buttons onto a second line.
         return Row(
           children: [
-            label,
+            Expanded(child: label),
             const SizedBox(width: 8),
-            Flexible(child: actions),
+            actions,
           ],
         );
       }),

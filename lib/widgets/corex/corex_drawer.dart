@@ -249,22 +249,29 @@ class _Item extends StatelessWidget {
 
     Widget? trailing;
     if (badge > 0) {
+      // ListTile hands `trailing` the whole row width as its max. With
+      // `alignment` set, a Container grows to that max — so the pill ate the
+      // entire tile, the title was squeezed to zero width and wrapped one
+      // letter per line. Size the pill to its digits instead: no alignment,
+      // a Center that shrink-wraps its child.
       trailing = Container(
         constraints: const BoxConstraints(minWidth: 20),
         height: 20,
         padding: const EdgeInsets.symmetric(horizontal: 6),
-        alignment: Alignment.center,
         decoration: BoxDecoration(
           color: t.accentMoney,
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Text(
-          '$badge',
-          style: TextStyle(
-            color: t.onMoney,
-            fontSize: 11,
-            fontWeight: FontWeight.w800,
-            height: 1.0,
+        child: Center(
+          widthFactor: 1,
+          child: Text(
+            '$badge',
+            style: TextStyle(
+              color: t.onMoney,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              height: 1.0,
+            ),
           ),
         ),
       );

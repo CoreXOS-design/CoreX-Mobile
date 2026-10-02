@@ -37,6 +37,7 @@ import 'services/image_cache_diagnostics.dart';
 import 'services/messaging_service.dart';
 import 'services/upload_service.dart';
 import 'utils/app_time.dart';
+import 'utils/route_observer.dart';
 import 'widgets/update_available_dialog.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -244,6 +245,7 @@ class CoreXApp extends StatelessWidget {
             title: 'CoreX OS',
             debugShowCheckedModeBanner: false,
             navigatorKey: rootNavigatorKey,
+            navigatorObservers: [corexRouteObserver],
             theme: AppTheme.light(b),
             darkTheme: AppTheme.dark(b),
             themeMode: themeProvider.themeMode,

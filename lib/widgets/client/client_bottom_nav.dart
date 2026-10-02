@@ -48,37 +48,39 @@ class ClientBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CorexAccentTheme.of(context);
-    final radius = BorderRadius.circular(20);
+    final radius = BorderRadius.circular(CorexTokens.radiusNav);
 
+    // Same floating pill as the staff nav (CorexBottomNav): shadow on its own
+    // layer, hairline border, only the active tab labelled.
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: ClipRRect(
-          borderRadius: radius,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: CorexTokens.surfaceGradient(context),
-              borderRadius: radius,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.40),
-                  offset: const Offset(0, 10),
-                  blurRadius: 24,
-                  spreadRadius: -8,
+        padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            boxShadow: CorexTokens.cardShadow(context, strong: true),
+          ),
+          child: Material(
+            type: MaterialType.transparency,
+            borderRadius: radius,
+            clipBehavior: Clip.antiAlias,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: CorexTokens.surfaceGradient(context),
+                borderRadius: radius,
+                border: Border.all(color: CorexTokens.surfaceBorder(context)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Row(
+                  children: [
+                    _item(context, t, ClientNavTab.home, TablerIcons.home_2,
+                        'Home'),
+                    _item(context, t, ClientNavTab.profile,
+                        TablerIcons.user_circle, 'Profile'),
+                  ],
                 ),
-              ],
-            ),
-            child: SizedBox(
-              height: 64,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _item(context, t, ClientNavTab.home, TablerIcons.home_2,
-                      'Home'),
-                  _item(context, t, ClientNavTab.profile,
-                      TablerIcons.user_circle, 'Profile'),
-                ],
               ),
             ),
           ),
@@ -90,25 +92,51 @@ class ClientBottomNav extends StatelessWidget {
   Widget _item(BuildContext context, CorexAccentTheme t, ClientNavTab tab,
       IconData icon, String label) {
     final isActive = tab == active;
-    final color = isActive ? t.accent : CorexTokens.textTertiary(context);
-    return Expanded(
-      child: InkWell(
-        onTap: () => onTap(tab),
-        child: Column(
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final Color activeColor = isLight ? t.accentText : t.accent;
+    final Color color =
+        isActive ? activeColor : CorexTokens.textTertiary(context);
+
+    final button = InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => onTap(tab),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        height: 42,
+        padding: EdgeInsets.symmetric(horizontal: isActive ? 13 : 0),
+        decoration: BoxDecoration(
+          color: isActive ? t.accentSoft : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 10,
-                fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+            Icon(icon, color: color, size: 20),
+            if (isActive) ...[
+              const SizedBox(width: 7),
+              Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
+            ],
           ],
         ),
+      ),
+    );
+
+    // With only two tabs, both share the width so the pill doesn't sit hard
+    // against one edge of the bar.
+    return Expanded(
+      child: Semantics(
+        label: label,
+        selected: isActive,
+        child: button,
       ),
     );
   }

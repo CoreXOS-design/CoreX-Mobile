@@ -35,6 +35,7 @@ class NotificationsProvider extends ChangeNotifier {
   static const Duration _backoffWindow = Duration(seconds: 30);
   int _feedFailures = 0;
   DateTime? _feedLastFailureAt;
+  DateTime? _feedLoadedAt;
   int _overdueFailures = 0;
   DateTime? _overdueLastFailureAt;
 
@@ -67,7 +68,18 @@ class NotificationsProvider extends ChangeNotifier {
   String? get prefsError => _prefsError;
   bool get saving => _saving;
 
-  Future<void> loadFeed({bool unreadOnly = false, bool manual = false}) async {
+  /// [maxAge]: skip the fetch when the feed was loaded successfully within
+  /// this window. Home passes it so the bell badge is populated on first
+  /// paint without re-hitting the API on every return to the Home tab.
+  Future<void> loadFeed({
+    bool unreadOnly = false,
+    bool manual = false,
+    Duration? maxAge,
+  }) async {
+    if (!manual && maxAge != null) {
+      final at = _feedLoadedAt;
+      if (at != null && DateTime.now().difference(at) < maxAge) return;
+    }
     // Poller backoff + failure cap: a manual/explicit refresh always proceeds
     // and resets the gate; auto refetches back off after repeated failures.
     if (!manual && _feedFailures >= _maxConsecutiveFailures) {
@@ -91,10 +103,16 @@ class NotificationsProvider extends ChangeNotifier {
         ..clear()
         ..addAll(res.items);
       _unread = res.unread;
+      if (kDebugMode) {
+        debugPrint('[notifications] feed loaded: ${res.items.length} items, '
+            'unread=${res.unread}');
+      }
+      _feedLoadedAt = DateTime.now();
       _feedFailures = 0;
       _feedLastFailureAt = null;
     } catch (e) {
       if (reqId != _feedSeq) return;
+      if (kDebugMode) debugPrint('[notifications] feed load failed: $e');
       _feedError = e.toString();
       _feedFailures++;
       _feedLastFailureAt = DateTime.now();
@@ -329,6 +347,7 @@ class NotificationsProvider extends ChangeNotifier {
   void reset() {
     _items.clear();
     _unread = 0;
+    _feedLoadedAt = null;
     _overdue = OverdueSnapshot.empty();
     _prefs = null;
     _prefsFetchedAt = null;
