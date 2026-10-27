@@ -9,6 +9,7 @@ import '../../models/client_models.dart';
 import '../../models/seller_models.dart';
 import '../../providers/client_matches_provider.dart';
 import '../../providers/client_session_provider.dart';
+import '../../providers/rentals_access_provider.dart';
 import '../../providers/seller_listings_provider.dart';
 import '../../theme/corex_accent_theme.dart';
 import '../../theme/corex_tokens.dart';
@@ -26,6 +27,9 @@ import 'client_property_screen.dart';
 import 'client_seller_listings_screen.dart';
 import 'client_settings_screen.dart';
 import 'client_testimonials_screen.dart';
+import '../rentals/client/owner_rentals_screens.dart';
+import '../rentals/client/tenant_rentals_screens.dart';
+import '../../services/rentals/client_rentals_api.dart';
 import '../../widgets/corex_photo.dart';
 
 class ClientHomeScreen extends StatefulWidget {
@@ -36,6 +40,25 @@ class ClientHomeScreen extends StatefulWidget {
 }
 
 class _ClientHomeScreenState extends State<ClientHomeScreen> {
+  /// Rentals (AT-508): which sides show comes from [RentalsAccess] alone;
+  /// these are only the "N waiting" counts for the sides that do.
+  int? _tenantWaiting;
+  int? _ownerWaiting;
+  RentalsAccess? _countedFor;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Re-count whenever the sides change (sign-in, agency switch).
+    final access = context.watch<RentalsAccess>();
+    if (access != _countedFor) {
+      _countedFor = access;
+      _tenantWaiting = null;
+      _ownerWaiting = null;
+      _countRentals();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -50,6 +73,30 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
       context.read<SellerListingsProvider>().load();
       // Load Core Match results for the "Matched for you" carousel.
       context.read<ClientMatchesProvider>().load();
+    });
+  }
+
+  /// Only for sides the server says this person has — never a probe.
+  Future<void> _countRentals() async {
+    final access = _countedFor;
+    if (access == null || !(access.tenant || access.owner)) return;
+    Future<int?> count(bool side, ClientRentalsApi api) async {
+      if (!side) return null;
+      try {
+        return (await api.waiting()).integer('waiting_count');
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final r = await Future.wait([
+      count(access.tenant, ClientRentalsApi.tenant),
+      count(access.owner, ClientRentalsApi.owner),
+    ]);
+    if (!mounted || access != _countedFor) return;
+    setState(() {
+      _tenantWaiting = r[0];
+      _ownerWaiting = r[1];
     });
   }
 
@@ -202,9 +249,47 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
     );
   }
 
+  /// "N waiting" (no capped "9+"), or null when nothing is.
+  static String? _waitingLine(int? n) =>
+      n == null || n == 0 ? null : '$n waiting';
+
   Widget _moduleGrid(BuildContext context) {
     const spacing = 12.0;
-    const rows = 2;
+    // One tile per side the server says this person has at this agency; with
+    // both, the two tiles are the tenant / owner switch.
+    final access = context.watch<RentalsAccess>();
+    final rentalTiles = <Widget>[
+      if (access.tenant)
+        CorexModuleTile(
+          icon: TablerIcons.home,
+          label: 'My Rental',
+          subtitle: _waitingLine(_tenantWaiting),
+          dot: (_tenantWaiting ?? 0) > 0,
+          onTap: () async {
+            await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const TenantRentalsHomeScreen()));
+            _countRentals();
+          },
+        ),
+      if (access.owner)
+        CorexModuleTile(
+          icon: TablerIcons.building_estate,
+          label: 'My Rental Properties',
+          subtitle: _waitingLine(_ownerWaiting),
+          dot: (_ownerWaiting ?? 0) > 0,
+          useMoneyAccent: access.tenant,
+          onTap: () async {
+            await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const OwnerRentalsHomeScreen()));
+            _countRentals();
+          },
+        ),
+    ];
+    // Keep the grid even (no orphan tile): one rentals tile takes Settings'
+    // slot (Settings stays in the drawer and Profile); two add a third row.
+    final showSettings = rentalTiles.length != 1;
+    final count = rentalTiles.length + 3 + (showSettings ? 1 : 0);
+    final rows = (count / 2).ceil();
     // 2-up like the staff Workspace grid, and sized the same way: the grid
     // is the page's shock absorber, taking whatever height is left so Home
     // ends exactly at the nav. Tiles flex between the staff grid's compact
@@ -217,7 +302,11 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
         kHomeModuleTileMaxHeight,
       );
       return GridView(
-        physics: const NeverScrollableScrollPhysics(),
+        // Two rows always fit (the page is sized for them); a third (tenant
+        // AND owner) may not on a short phone, so only then may it scroll.
+        physics: rows > 2
+            ? const ClampingScrollPhysics()
+            : const NeverScrollableScrollPhysics(),
         padding: EdgeInsets.zero,
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
@@ -226,6 +315,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
           mainAxisExtent: tileHeight,
         ),
         children: [
+          ...rentalTiles,
           // Live entry — the client's saved searches and matched listings.
           // Money accent on alternate tiles, as on the staff grid, so the
           // four don't read as one flat block of colour.
@@ -249,12 +339,13 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
           ),
           // Fourth tile so the 2-up grid has no orphan; Settings is otherwise
           // only reachable via the drawer and Profile.
-          CorexModuleTile(
-            icon: TablerIcons.settings,
-            label: 'Settings',
-            useMoneyAccent: true,
-            onTap: () => _push(context, const ClientSettingsScreen()),
-          ),
+          if (showSettings)
+            CorexModuleTile(
+              icon: TablerIcons.settings,
+              label: 'Settings',
+              useMoneyAccent: true,
+              onTap: () => _push(context, const ClientSettingsScreen()),
+            ),
         ],
       );
     });

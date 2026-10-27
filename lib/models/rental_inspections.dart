@@ -105,6 +105,10 @@ class RentalInspections {
   final RentalSection outInspection;
   final List<RentalSection> custom;
 
+  /// The server's own sentence on an upload, e.g. that the photos were
+  /// filed as "added after signing" because the inspection is signed.
+  final String? message;
+
   const RentalInspections({
     required this.propertyId,
     this.listingType,
@@ -113,6 +117,7 @@ class RentalInspections {
     required this.inInspection,
     required this.outInspection,
     this.custom = const [],
+    this.message,
   });
 
   /// In Inspection, Out Inspection, then each custom section — render order.
@@ -154,6 +159,7 @@ class RentalInspections {
         toMap(images['out_inspection']),
       ),
       custom: custom,
+      message: RentalSection._str(json['message']),
     );
   }
 }

@@ -5,6 +5,7 @@ import '../../models/notification_models.dart';
 import '../../providers/notifications_provider.dart';
 import '../../services/messaging_service.dart';
 import '../../theme.dart';
+import '../../widgets/notifications_blocked_notice.dart';
 import '../notification_schedule_screen.dart';
 
 /// Dynamic notification preferences screen rendered from
@@ -73,6 +74,7 @@ class _NotificationSettingsScreenState
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
               children: [
                 if (locked) _agencyBanner(context),
+                const NotificationsBlockedNotice(),
                 _MasterSwitches(
                   master: data.master,
                   locked: locked,

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:tabler_icons/tabler_icons.dart';
+import '../providers/rentals_access_provider.dart';
 import '../widgets/ui/content_width.dart';
 
 import '../theme/corex_tokens.dart';
@@ -9,6 +11,7 @@ import 'contacts/contacts_list_screen.dart';
 import 'core_matches/core_matches_list_screen.dart';
 import 'portal_leads/portal_leads_screen.dart';
 import 'properties/property_list_screen.dart';
+import 'rentals/staff/staff_rentals_home_screen.dart';
 
 class RealEstateHubScreen extends StatelessWidget {
   const RealEstateHubScreen({super.key});
@@ -36,6 +39,13 @@ class RealEstateHubScreen extends StatelessWidget {
         label: 'Portal Leads',
         builder: () => const PortalLeadsScreen(),
       ),
+      // AT-508: only for people the server says may see a rentals screen.
+      if (context.watch<RentalsAccess>().staff)
+        _ModuleSpec(
+          icon: TablerIcons.key,
+          label: 'Rentals',
+          builder: () => const StaffRentalsHomeScreen(),
+        ),
     ];
 
     return AnnotatedRegion<SystemUiOverlayStyle>(

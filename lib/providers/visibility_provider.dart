@@ -17,6 +17,7 @@ class VisibilityProvider extends ChangeNotifier {
   VisibilityDescriptor get descriptor => _descriptor;
   ModuleVisibility get contacts => _descriptor.contacts;
   ModuleVisibility get properties => _descriptor.properties;
+  RentalScreens get rentals => _descriptor.rentals;
   bool get loaded => _loaded;
 
   AgentFilter get contactsFilter => _contactsFilter;
@@ -35,6 +36,28 @@ class VisibilityProvider extends ChangeNotifier {
     // Session reset: every refresh (login / pull-to-refresh) starts at Mine.
     _contactsFilter = AgentFilter.mine;
     _propertiesFilter = AgentFilter.mine;
+    notifyListeners();
+  }
+
+  /// App resume: pick up an admin's change (e.g. Rentals switched off)
+  /// without a re-login. Unlike [refresh] it keeps the agent's list filters
+  /// where still allowed, and keeps the current descriptor when offline.
+  Future<void> refreshOnResume() async {
+    if (!_loaded) return;
+    final VisibilityDescriptor next;
+    try {
+      next = await _api.getVisibility();
+    } catch (_) {
+      return;
+    }
+    if (!_loaded) return; // signed out meanwhile
+    _descriptor = next;
+    if (!_isAllowed(next.contacts, _contactsFilter)) {
+      _contactsFilter = AgentFilter.mine;
+    }
+    if (!_isAllowed(next.properties, _propertiesFilter)) {
+      _propertiesFilter = AgentFilter.mine;
+    }
     notifyListeners();
   }
 

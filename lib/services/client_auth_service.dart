@@ -378,6 +378,7 @@ class ClientAuthService {
         List<ClientAgency> agencies,
         ClientContact? contact,
         ClientAgent? agent,
+        ClientRentalSides rentals,
       })> me() async {
     final res = await http
         .get(
@@ -403,6 +404,7 @@ class ClientAuthService {
         agent: agentRaw is Map
             ? ClientAgent.fromJson(Map<String, dynamic>.from(agentRaw))
             : null,
+        rentals: ClientRentalSides.fromJson(body['rentals']),
       );
     }
     throw _toException(res, 'Could not load profile');

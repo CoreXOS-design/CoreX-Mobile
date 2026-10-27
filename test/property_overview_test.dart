@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 import 'package:corex_mobile/models/gallery_tags.dart';
 import 'package:corex_mobile/models/property.dart';
 import 'package:corex_mobile/models/property_compliance.dart';
 import 'package:corex_mobile/models/property_drive.dart';
 import 'package:corex_mobile/models/property_overview.dart';
+import 'package:corex_mobile/providers/rentals_access_provider.dart';
 import 'package:corex_mobile/screens/properties/property_gallery_screen.dart';
 import 'package:corex_mobile/screens/properties/property_overview_screen.dart';
 import 'package:corex_mobile/services/api_service.dart';
@@ -534,13 +536,33 @@ void main() {
         ..overview = _baseOverview(rentalInspections: true);
 
       await tester.pumpWidget(_wrap(
-        PropertyOverviewScreen(propertyId: 7, api: api),
+        Provider.value(
+          value: const RentalsAccess(staffRentalsEnabled: true),
+          child: PropertyOverviewScreen(propertyId: 7, api: api),
+        ),
       ));
       await tester.pumpAndSettle();
 
       expect(_tabLabels(tester), contains('Inspections'));
       await _openTab(tester, 'Inspections');
       expect(find.text('Rental Inspections'), findsOneWidget);
+    });
+
+    testWidgets('no Inspections tab when the agent has Rentals off',
+        (tester) async {
+      _useTallViewport(tester);
+      final api = _FakeApi()
+        ..overview = _baseOverview(rentalInspections: true);
+
+      await tester.pumpWidget(_wrap(
+        Provider.value(
+          value: const RentalsAccess(staffRentalsEnabled: false),
+          child: PropertyOverviewScreen(propertyId: 7, api: api),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(_tabLabels(tester), isNot(contains('Inspections')));
     });
 
     testWidgets('agents and owner moved onto the Contacts tab and count there',

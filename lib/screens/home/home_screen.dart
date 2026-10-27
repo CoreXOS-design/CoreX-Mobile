@@ -14,15 +14,15 @@ import '../../widgets/corex/corex_ellie_card.dart';
 import '../../widgets/corex/corex_home_header.dart';
 import '../../widgets/corex/corex_module_tile.dart';
 import '../../widgets/corex/corex_next_appointment.dart';
+import '../../providers/home_workspace_provider.dart';
 import '../../providers/portal_leads_provider.dart';
-import '../contacts/contacts_list_screen.dart';
+import '../../providers/rentals_access_provider.dart';
 import '../ellie/ellie_screen.dart';
+import '../home_workspace_settings_screen.dart';
 import '../notifications/notifications_screen.dart';
-import '../core_matches/core_matches_list_screen.dart';
 import '../my_agent_qr_screen.dart';
-import '../portal_leads/portal_leads_screen.dart';
-import '../properties/property_list_screen.dart';
 import '../real_estate_hub_screen.dart';
+import 'workspace_modules.dart';
 
 /// Bounds for a Workspace tile's height. The grid flexes between them so Home
 /// fills the screen exactly and never scrolls; exported so the layout test
@@ -163,6 +163,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           if (showSectionHeader) ...[
                             _sectionHeader(
                               'Workspace',
+                              onCustomise: () => _push(context,
+                                  const HomeWorkspaceSettingsScreen()),
                               onAll: () =>
                                   _push(context, const RealEstateHubScreen()),
                             ),
@@ -186,7 +188,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _sectionHeader(String label, {required VoidCallback onAll}) {
+  Widget _sectionHeader(
+    String label, {
+    required VoidCallback onCustomise,
+    required VoidCallback onAll,
+  }) {
     return Builder(
       builder: (context) {
         final t = CorexAccentTheme.of(context);
@@ -202,6 +208,25 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: CorexTokens.textPrimary(context),
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 2),
+            // Which tiles the grid shows, and in what order — same screen as
+            // Settings → Home screen. Muted so it reads as secondary to the
+            // heading.
+            Tooltip(
+              message: 'Workspace settings',
+              child: InkWell(
+                onTap: onCustomise,
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(
+                    TablerIcons.settings,
+                    size: 16,
+                    color: CorexTokens.textTertiary(context),
+                  ),
+                ),
               ),
             ),
             const Spacer(),
@@ -235,38 +260,15 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _moduleGrid(BuildContext context) {
     final unreadLeads = context.watch<PortalLeadsProvider>().totalUnread;
 
-    // Only Portal Leads has a count the home screen already holds. The other
-    // three would need a list fetch each to show one, so they stay label-only
-    // rather than showing a stale or invented number.
-    final modules = <_ModuleSpec>[
-      _ModuleSpec(
-        icon: TablerIcons.building_skyscraper,
-        label: 'Properties',
-        builder: () => const PropertyListScreen(),
-      ),
-      _ModuleSpec(
-        icon: TablerIcons.users,
-        label: 'Contacts',
-        builder: () => const ContactsListScreen(),
-      ),
-      _ModuleSpec(
-        icon: TablerIcons.heart_handshake,
-        label: 'Core Matches',
-        useMoneyAccent: true,
-        builder: () => const CoreMatchesListScreen(),
-      ),
-      _ModuleSpec(
-        icon: TablerIcons.target_arrow,
-        label: 'Portal Leads',
-        dot: unreadLeads > 0,
-        subtitle: unreadLeads > 0 ? '$unreadLeads unread' : null,
-        useMoneyAccent: true,
-        builder: () => const PortalLeadsScreen(),
-      ),
-    ];
+    // The agent picks and orders 1–4 of these in Settings → Home screen.
+    final modules = context
+        .watch<HomeWorkspaceProvider>()
+        .visible(rentals: context.watch<RentalsAccess>().staff);
 
     const spacing = 12.0;
-    const rows = 2;
+    // A lone tile spans the row rather than sitting half-width beside a gap.
+    final columns = modules.length == 1 ? 1 : 2;
+    final rows = (modules.length / columns).ceil();
 
     // The grid is the page's shock absorber: it takes whatever height is left
     // once the cards above have had theirs, so Home ends exactly at the nav
@@ -290,20 +292,23 @@ class _HomeScreenState extends State<HomeScreen> {
           physics: const NeverScrollableScrollPhysics(),
           itemCount: modules.length,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
+            crossAxisCount: columns,
             crossAxisSpacing: spacing,
             mainAxisSpacing: spacing,
             mainAxisExtent: tileHeight,
           ),
           itemBuilder: (context, i) {
             final m = modules[i];
+            // Only Portal Leads has a count the home screen already holds.
+            // The others would need a list fetch each to show one, so they
+            // stay label-only rather than showing a stale or invented number.
+            final leads = m == WorkspaceModule.portalLeads && unreadLeads > 0;
             return CorexModuleTile(
               icon: m.icon,
               label: m.label,
-              dot: m.dot,
-              subtitle: m.subtitle,
-              useMoneyAccent: m.useMoneyAccent,
-              onTap: () => _push(context, m.builder()),
+              dot: leads,
+              subtitle: leads ? '$unreadLeads unread' : null,
+              onTap: () => _push(context, m.screen()),
             );
           },
         );
@@ -346,21 +351,4 @@ class _HomeScreenState extends State<HomeScreen> {
     if (h < 17) return 'afternoon';
     return 'evening';
   }
-}
-
-class _ModuleSpec {
-  final IconData icon;
-  final String label;
-  final bool dot;
-  final String? subtitle;
-  final bool useMoneyAccent;
-  final Widget Function() builder;
-  _ModuleSpec({
-    required this.icon,
-    required this.label,
-    required this.builder,
-    this.dot = false,
-    this.subtitle,
-    this.useMoneyAccent = false,
-  });
 }

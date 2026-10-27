@@ -56,6 +56,27 @@ class ClientAgency {
       );
 }
 
+/// Which rentals sides this client has at the current agency — `rentals` on
+/// `/v1/client/me`. The server decides; the app never infers a side from a
+/// list being empty. Absent (an older server) means neither.
+class ClientRentalSides {
+  /// Lessee: show the tenant rentals views.
+  final bool tenant;
+
+  /// Lessor: show the owner rentals views.
+  final bool owner;
+
+  const ClientRentalSides({required this.tenant, required this.owner});
+
+  static const ClientRentalSides none =
+      ClientRentalSides(tenant: false, owner: false);
+
+  factory ClientRentalSides.fromJson(Object? raw) => raw is Map
+      ? ClientRentalSides(
+          tenant: raw['tenant'] == true, owner: raw['owner'] == true)
+      : none;
+}
+
 class ClientProfile {
   final int id;
   final String email;

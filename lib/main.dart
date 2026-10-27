@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show File, Platform;
+import 'dart:io' show File;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'config/env.dart';
 import 'models/branding.dart';
@@ -17,9 +16,11 @@ import 'providers/branding_provider.dart';
 import 'providers/client_matches_provider.dart';
 import 'providers/client_session_provider.dart';
 import 'providers/dashboard_provider.dart';
+import 'providers/home_workspace_provider.dart';
 import 'providers/notifications_provider.dart';
 import 'providers/portal_leads_provider.dart';
 import 'providers/property_provider.dart';
+import 'providers/rentals_access_provider.dart';
 import 'providers/seller_listings_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/visibility_provider.dart';
@@ -35,6 +36,7 @@ import 'services/client_auth_service.dart';
 import 'services/image_cache.dart';
 import 'services/image_cache_diagnostics.dart';
 import 'services/messaging_service.dart';
+import 'services/rentals/rental_write_queue.dart';
 import 'services/upload_service.dart';
 import 'utils/app_time.dart';
 import 'utils/route_observer.dart';
@@ -183,30 +185,10 @@ Future<void> _initDeferredServices() async {
   } catch (e) {
     debugPrint('[messaging] init failed: $e');
   }
-  try {
-    await _requestInitialPermissions();
-  } catch (e) {
-    debugPrint('[permissions] initial request failed: $e');
-  }
-}
-
-Future<void> _requestInitialPermissions() async {
-  // Android only. On iOS the notification prompt is already raised by
-  // `MessagingService.init` via `FirebaseMessaging.requestPermission()`;
-  // asking again through permission_handler pointed a second
-  // UNUserNotificationCenter authorisation request at the same alert.
-  //
-  // Camera is NOT requested here on either platform. Asking up front stacks a
-  // second system alert on top of the notification one at cold start — iOS
-  // drops queued alerts, leaving permissions in a state the user never
-  // actually answered. image_picker raises the camera prompt at the point of
-  // capture, which is also what the user expects.
-  if (!Platform.isAndroid) return;
-  final notificationStatus = await Permission.notification.status;
-  if (!notificationStatus.isGranted &&
-      !notificationStatus.isPermanentlyDenied) {
-    await Permission.notification.request();
-  }
+  // No permission prompts at launch. The notification prompt waits for
+  // sign-in (MessagingService._ensurePermission, both platforms). Camera is
+  // never asked up front: image_picker raises it at the point of capture, and
+  // stacked system alerts at cold start get dropped on iOS.
 }
 
 class CoreXApp extends StatelessWidget {
@@ -234,7 +216,13 @@ class CoreXApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => SellerListingsProvider()),
         ChangeNotifierProvider(create: (_) => ClientMatchesProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => HomeWorkspaceProvider()),
         ChangeNotifierProvider(create: (_) => VisibilityProvider()),
+        // AT-508: who may see Rentals, derived from the two above.
+        ProxyProvider2<ClientSessionProvider, VisibilityProvider,
+            RentalsAccess>(
+          update: (_, client, staff, __) => RentalsAccess.from(client, staff),
+        ),
       ],
       child: Consumer2<ThemeProvider, BrandingProvider>(
         builder: (context, themeProvider, brandingProvider, _) {
@@ -306,7 +294,48 @@ class _AppBootstrapState extends State<AppBootstrap>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Re-check on resume so raising the cutoff catches agents who keep the app
     // open for days, rather than only those who happen to cold-start after it.
-    if (state == AppLifecycleState.resumed) _checkForUpdate();
+    if (state == AppLifecycleState.resumed) {
+      _checkForUpdate();
+      // Coming back to the app is the usual moment signal has returned.
+      RentalWriteQueue.instance.kick();
+      // Pick up an admin's change (e.g. Rentals switched off for the agency
+      // or role) without a re-login.
+      if (context.read<AuthProvider>().isLoggedIn) {
+        context.read<VisibilityProvider>().refreshOnResume();
+      } else if (context.read<ClientSessionProvider>().isLoggedIn) {
+        context.read<ClientSessionProvider>().refreshMe().catchError((_) {});
+      }
+    }
+  }
+
+  /// Tells the rentals write queue who is signed in, so it only ever sends a
+  /// person's own queued work with their own token.
+  void _syncRentalQueueSession(
+      AuthProvider auth, ClientSessionProvider clientSession) {
+    final queue = RentalWriteQueue.instance;
+    if (auth.isChecking || clientSession.isChecking) return;
+    String? key;
+    var identityUnknown = false;
+    if (clientSession.isLoggedIn) {
+      final id = clientSession.client?.id;
+      key = id == null ? null : 'client:$id';
+      identityUnknown = id == null;
+    } else if (auth.isLoggedIn) {
+      final id = auth.currentUserId;
+      key = id == null ? null : 'user:$id';
+      identityUnknown = id == null;
+    }
+    if (identityUnknown) {
+      if (queue.sessionKey == null) {
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => queue.resumeLastSession());
+      }
+      return;
+    }
+    if (key != queue.sessionKey) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => queue.setSession(key));
+    }
   }
 
   Future<void> _checkForUpdate() async {
@@ -356,6 +385,7 @@ class _AppBootstrapState extends State<AppBootstrap>
     // own 8s timeout, so the splash is bounded even if the network hangs.
     final eitherLoggedIn = auth.isLoggedIn || clientSession.isLoggedIn;
     final bothSettled = !auth.isChecking && !clientSession.isChecking;
+    _syncRentalQueueSession(auth, clientSession);
     if (!_splashDone || (!eitherLoggedIn && !bothSettled)) {
       return SplashScreen(
         onFinished: () => setState(() => _splashDone = true),
@@ -394,6 +424,12 @@ class _AppBootstrapState extends State<AppBootstrap>
     // agent or client. Held back on the login screen so it can't collide with
     // the biometric prompt that fires there.
     if (eitherLoggedIn) _maybePromptForUpdate();
+    // A push tapped before sign-in (cold start, locked, signed out) opens
+    // now. No-op when none is held or the person is still on a sign-in step.
+    if (eitherLoggedIn) {
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => MessagingService.instance.openPendingTap());
+    }
     return const AuthGate();
   }
 }

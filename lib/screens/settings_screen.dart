@@ -6,7 +6,9 @@ import '../models/branding.dart';
 import '../models/notification_models.dart';
 import '../theme.dart';
 import '../providers/auth_provider.dart';
+import '../providers/home_workspace_provider.dart';
 import '../providers/notifications_provider.dart';
+import '../providers/rentals_access_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/ai_consent.dart';
 import '../services/security_service.dart';
@@ -16,6 +18,7 @@ import '../widgets/ui/icon_badge.dart';
 import '../widgets/ui/section_header.dart';
 import 'ai_data_screen.dart';
 import 'delete_account_screen.dart';
+import 'home_workspace_settings_screen.dart';
 import 'notification_schedule_screen.dart';
 
 /// Destructive-action red, matching Sign out on the Profile screen.
@@ -60,6 +63,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final notifLocked = prefsData?.locked ?? false;
     final reminderPref =
         prefsData != null ? ensureEventReminder(prefsData) : null;
+    final workspaceCount = context
+        .watch<HomeWorkspaceProvider>()
+        .visible(rentals: context.watch<RentalsAccess>().staff)
+        .length;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -85,6 +92,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   activeThumbColor: Colors.white,
                   onChanged: (_) => themeProvider.toggle(),
                 ),
+              ),
+            ]),
+            const SizedBox(height: 24),
+            const SectionHeader(label: 'Home screen'),
+            const SizedBox(height: 12),
+            _SettingsCard(children: [
+              _SettingsTile(
+                icon: Icons.dashboard_customize_outlined,
+                tint: brand.icon,
+                label: 'Workspace tiles',
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '$workspaceCount of ${HomeWorkspaceProvider.max}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textMuted(context),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right_rounded,
+                        size: 20, color: AppTheme.textMuted(context)),
+                  ],
+                ),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const HomeWorkspaceSettingsScreen(),
+                )),
               ),
             ]),
             const SizedBox(height: 24),

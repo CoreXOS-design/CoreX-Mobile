@@ -10,6 +10,7 @@ import '../../services/api_service.dart';
 import '../../theme.dart';
 import '../../utils/app_time.dart';
 import '../../widgets/corex_photo.dart';
+import '../../widgets/event_reminder_picker.dart';
 
 /// Full "Add / Edit Event" flow — at parity with the web add-event panel.
 ///
@@ -111,6 +112,17 @@ class _EventFormSheetState extends State<_EventFormSheet> {
   String _priority = 'normal';
   bool _sendReminder = true;
 
+  /// Null = "My default" (`agent.event_due`), else an offered lead time.
+  int? _reminderMinutes;
+
+  /// Seeded from the event, else the agency's `default_channels` once
+  /// options load.
+  List<String>? _reminderChannels;
+
+  /// An edit that doesn't mention reminders leaves them unchanged server-side,
+  /// so the reminder fields go up only once the agent has touched one.
+  bool _reminderTouched = false;
+
   final List<SelectedProperty> _properties = [];
   // Owner suggestions keyed by the property they came from, so removing a
   // property also drops its suggestions.
@@ -136,6 +148,8 @@ class _EventFormSheetState extends State<_EventFormSheet> {
       _allDay = existing.allDay;
       _priority = existing.priority;
       _sendReminder = existing.sendReminder;
+      _reminderMinutes = existing.reminderMinutesBefore;
+      _reminderChannels = existing.reminderChannels;
       _properties.addAll(existing.linkedProperties);
       _attendees.addAll(existing.attendees);
     } else {
@@ -177,6 +191,14 @@ class _EventFormSheetState extends State<_EventFormSheet> {
               : opts.priorities.first;
         }
         _enforceSinglePropertyCap();
+        final reminder = opts.reminder;
+        if (reminder != null) {
+          final offered = reminder.channels.map((c) => c.key).toSet();
+          final kept =
+              _reminderChannels?.where(offered.contains).toList() ?? const [];
+          _reminderChannels =
+              kept.isNotEmpty ? kept : List.of(reminder.defaultChannels);
+        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -362,6 +384,11 @@ class _EventFormSheetState extends State<_EventFormSheet> {
 
   Map<String, dynamic> _buildBody() {
     final desc = _descriptionController.text.trim();
+    // Create: always state the reminder (a null lead time = "My default").
+    // Edit: only when touched — the server leaves untouched reminders as
+    // they were, and resending them could overwrite a web-side change.
+    final sendReminderFields = !_isEdit || _reminderTouched;
+    final hasReminderOptions = _options?.reminder != null;
     return {
       'title': _titleController.text.trim(),
       'category': _class!.eventClass,
@@ -370,7 +397,11 @@ class _EventFormSheetState extends State<_EventFormSheet> {
         'end_date': _apiDate(_end!),
       'all_day': _allDay,
       'priority': _priority,
-      'send_reminder': _sendReminder,
+      if (sendReminderFields) 'send_reminder': _sendReminder,
+      if (sendReminderFields && hasReminderOptions && _sendReminder) ...{
+        'reminder_minutes_before': _reminderMinutes,
+        'reminder_channels': _reminderChannels,
+      },
       if (desc.isNotEmpty) 'description': desc,
       'property_ids': _properties.map((p) => p.id).toList(),
       'attendees': _attendees.map((a) => a.toBody()).toList(),
@@ -935,18 +966,122 @@ class _EventFormSheetState extends State<_EventFormSheet> {
   }
 
   Widget _reminderRow() {
+    final reminder = _options?.reminder;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text('Remind me',
+                  style: TextStyle(
+                      fontSize: 14, color: AppTheme.textSecondary(context))),
+            ),
+            Switch.adaptive(
+              value: _sendReminder,
+              onChanged: (v) => setState(() {
+                _sendReminder = v;
+                _reminderTouched = true;
+              }),
+              activeTrackColor: AppTheme.brand,
+            ),
+          ],
+        ),
+        // Older backends send no `reminder` block: just the switch.
+        if (_sendReminder && reminder != null) ...[
+          if (reminder.leadOptions.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            _reminderLeadPicker(reminder),
+          ],
+          if (reminder.channels.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _reminderChannelPills(reminder),
+          ],
+        ],
+      ],
+    );
+  }
+
+  /// Stands in for null ("My default") — DropdownButton can't show a
+  /// selected item whose value is null.
+  static const int _kMyDefault = -1;
+
+  Widget _reminderLeadPicker(ReminderOptions reminder) {
+    final current = _reminderMinutes;
+    final offered = reminder.leadOptions.map((o) => o.minutes).toSet();
+    final myDefault = reminder.myDefaultMinutes;
+    return _boxedDropdown<int>(
+      value: current ?? _kMyDefault,
+      items: [
+        DropdownMenuItem(
+          value: _kMyDefault,
+          child: Text(myDefault == null
+              ? 'My default'
+              : 'My default ($myDefault min)'),
+        ),
+        for (final o in reminder.leadOptions)
+          DropdownMenuItem(value: o.minutes, child: Text(o.label)),
+        // Saved before the agency dropped this option: show it rather than
+        // assert, so opening the event doesn't break. Not re-sent unless the
+        // agent changes a reminder field, and then the server is the judge.
+        if (current != null && !offered.contains(current))
+          DropdownMenuItem(value: current, child: Text(formatLeadTime(current))),
+      ],
+      onChanged: (v) {
+        if (v == null) return;
+        setState(() {
+          _reminderMinutes = v == _kMyDefault ? null : v;
+          _reminderTouched = true;
+        });
+      },
+    );
+  }
+
+  Widget _reminderChannelPills(ReminderOptions reminder) {
+    final selected = _reminderChannels ?? const <String>[];
     return Row(
       children: [
-        Expanded(
-          child: Text('Remind me',
-              style: TextStyle(
-                  fontSize: 14, color: AppTheme.textSecondary(context))),
-        ),
-        Switch.adaptive(
-          value: _sendReminder,
-          onChanged: (v) => setState(() => _sendReminder = v),
-          activeTrackColor: AppTheme.brand,
-        ),
+        for (final c in reminder.channels)
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                final on = selected.contains(c.key);
+                // At least one channel, or the reminder goes nowhere — the
+                // switch above is how to turn it off.
+                if (on && selected.length == 1) return;
+                setState(() {
+                  _reminderChannels = [
+                    for (final k in reminder.channels.map((x) => x.key))
+                      if (k == c.key ? !on : selected.contains(k)) k,
+                  ];
+                  _reminderTouched = true;
+                });
+              },
+              child: Container(
+                margin: EdgeInsets.only(
+                    right: c == reminder.channels.last ? 0 : 8),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: selected.contains(c.key)
+                      ? AppTheme.brand.withValues(alpha: 0.15)
+                      : AppTheme.surface2(context),
+                  borderRadius: BorderRadius.circular(AppTheme.radius),
+                ),
+                child: Center(
+                  child: Text(
+                    c.label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: selected.contains(c.key)
+                          ? AppTheme.brand
+                          : AppTheme.textSecondary(context),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }

@@ -114,6 +114,10 @@ class _RentalInspectionsScreenState extends State<RentalInspectionsScreen> {
         _data = data;
         _busyMessage = null;
       });
+      if (data.message != null) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(data.message!)));
+      }
     } on RentalNotEligibleException {
       if (!mounted) return;
       setState(() {

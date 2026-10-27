@@ -68,16 +68,80 @@ class AttendeeRoleOption {
   }
 }
 
+/// One "Remind me" lead time the agency offers (`reminder.lead_options`).
+class ReminderLeadOption {
+  final int minutes;
+  final String label;
+
+  const ReminderLeadOption({required this.minutes, required this.label});
+}
+
+/// The per-appointment reminder choices from `calendar/options` → `reminder`.
+/// Never hard-code these: an offered-set mismatch answers 422.
+class ReminderOptions {
+  final List<ReminderLeadOption> leadOptions;
+
+  /// The agent's own `agent.event_due` preference — what a null
+  /// `reminder_minutes_before` ("My default") resolves to.
+  final int? myDefaultMinutes;
+
+  /// Channel keys (`popup`, `email`) with their labels.
+  final List<AttendeeRoleOption> channels;
+  final List<String> defaultChannels;
+
+  const ReminderOptions({
+    this.leadOptions = const [],
+    this.myDefaultMinutes,
+    this.channels = const [],
+    this.defaultChannels = const [],
+  });
+
+  /// Null when the server sends no usable `reminder` block (an older backend):
+  /// the form then shows only the on/off switch and sends no new fields.
+  static ReminderOptions? fromJson(dynamic raw) {
+    if (raw is! Map) return null;
+    final json = Map<String, dynamic>.from(raw);
+    final leads = <ReminderLeadOption>[];
+    for (final e in (json['lead_options'] as List? ?? const []).whereType<Map>()) {
+      final m = _asInt(e['minutes']);
+      if (m == null) continue;
+      final label = _asString(e['label']);
+      leads.add(ReminderLeadOption(
+          minutes: m, label: label.isNotEmpty ? label : '$m min'));
+    }
+    final channels = (json['channels'] as List? ?? const [])
+        .whereType<Map>()
+        .map((e) => AttendeeRoleOption.fromJson(Map<String, dynamic>.from(e)))
+        .where((c) => c.key.isNotEmpty)
+        .toList();
+    if (leads.isEmpty && channels.isEmpty) return null;
+    final keys = channels.map((c) => c.key).toSet();
+    final defaults = (json['default_channels'] as List? ?? const [])
+        .map((e) => e.toString())
+        .where(keys.contains)
+        .toList();
+    return ReminderOptions(
+      leadOptions: leads,
+      myDefaultMinutes: _asInt(json['my_default_minutes']),
+      channels: channels,
+      defaultChannels:
+          defaults.isNotEmpty || channels.isEmpty ? defaults : [channels.first.key],
+    );
+  }
+}
+
 /// Bootstrap payload for the add-event form.
 class CalendarOptions {
   final List<EventClassOption> classes;
   final List<String> priorities;
   final List<AttendeeRoleOption> attendeeRoles;
+  final ReminderOptions? reminder;
 
   const CalendarOptions({
     this.classes = const [],
     this.priorities = const ['low', 'normal', 'high', 'critical'],
     this.attendeeRoles = const [],
+    this.reminder,
   });
 
   /// Contact roles the backend accepts on create when the server doesn't ship
@@ -112,6 +176,7 @@ class CalendarOptions {
       // Fall back to the built-in set when the server omits roles, so the
       // contact-role picker still works instead of silently disappearing.
       attendeeRoles: roles.isEmpty ? defaultAttendeeRoles : roles,
+      reminder: ReminderOptions.fromJson(json['reminder']),
     );
   }
 }
@@ -312,6 +377,13 @@ class EventFormData {
   final String priority;
   final String status;
   final bool sendReminder;
+
+  /// This appointment's own lead time; null means none set, so it follows
+  /// the agent's default (`agent.event_due`).
+  final int? reminderMinutesBefore;
+
+  /// `popup` / `email`; null means none set.
+  final List<String>? reminderChannels;
   final bool isEditable;
   final String? sourceType;
   final bool isPrivate;
@@ -330,6 +402,8 @@ class EventFormData {
     this.priority = 'normal',
     this.status = 'pending',
     this.sendReminder = true,
+    this.reminderMinutesBefore,
+    this.reminderChannels,
     this.isEditable = true,
     this.sourceType,
     this.isPrivate = false,
@@ -431,6 +505,10 @@ class EventFormData {
       // Default true: a missing flag shouldn't lock a freshly-created event.
       sendReminder:
           json['send_reminder'] == null ? true : _asBool(json['send_reminder']),
+      reminderMinutesBefore: _asInt(json['reminder_minutes_before']),
+      reminderChannels: json['reminder_channels'] is List
+          ? (json['reminder_channels'] as List).map((e) => e.toString()).toList()
+          : null,
       isEditable:
           json['is_editable'] == null ? true : _asBool(json['is_editable']),
       sourceType: json['source_type']?.toString(),

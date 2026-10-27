@@ -270,6 +270,12 @@ class ApiService {
   /// fields) and must never sign anyone out. That case skips the debounce:
   /// the server has already stated the token is dead, so there is nothing
   /// transient to wait out.
+  /// The same session handling for staff calls made outside this class (the
+  /// rentals client in `services/rentals/`), so a revoked token there signs
+  /// the agent out exactly as it would here.
+  Future<void> handleAuthFailure(int status, [String? body]) =>
+      _handleUnauthorized(status, body);
+
   Future<void> _handleUnauthorized(int status, [String? body]) async {
     if (status == 403 && isAccountDeletedResponse(body)) {
       debugPrint('[auth] app access has been deleted — dropping the session');
@@ -2701,6 +2707,19 @@ class ApiService {
     }
     if (status == 404) {
       throw ApiException(404, 'That section no longer exists.');
+    }
+    if (status == 409) {
+      // e.g. `no_inspection_under_way` / `not_recordable`: the server's own
+      // sentence says why, so show that rather than a generic failure.
+      String message = 'This cannot be done right now.';
+      try {
+        final json = jsonDecode(body);
+        if (json is Map && json['message'] is String &&
+            (json['message'] as String).isNotEmpty) {
+          message = json['message'] as String;
+        }
+      } catch (_) {}
+      throw ApiException(409, message);
     }
     if (status == 422) {
       String? code;

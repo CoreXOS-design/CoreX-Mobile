@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../models/client_models.dart';
 import '../services/api_service.dart' show ApiException;
 import '../services/client_auth_service.dart';
+import '../services/messaging_service.dart';
 
 // Owns the long-lived client session: token, profile, agencies, current
 // agency. Sibling to AuthProvider — they never both hold a session at the
@@ -21,6 +22,15 @@ class ClientSessionProvider extends ChangeNotifier {
   List<ClientAgency> _agencies = const [];
   bool _passwordMustChange = false;
 
+  // Rentals sides at the current agency, from the latest /client/me. Never
+  // persisted: a cold start, sign-in or agency switch starts at neither and
+  // shows rentals only once /client/me says so.
+  ClientRentalSides _rentals = ClientRentalSides.none;
+  bool _rentalsLoaded = false;
+  // Bumped whenever the agency (or person) changes, so a /client/me that was
+  // already in flight cannot apply the previous agency's flags.
+  int _rentalsGen = 0;
+
   // Set once the client has chosen an agency for the *current* app run. It is
   // intentionally in-memory only: a cold start clears it so the picker shows
   // again on every app open — until the client locks to a specific agency.
@@ -33,6 +43,10 @@ class ClientSessionProvider extends ChangeNotifier {
   ClientContact? get contact => _contact;
   ClientAgent? get agent => _agent;
   List<ClientAgency> get agencies => _agencies;
+  ClientRentalSides get rentals => _rentals;
+
+  /// True once /client/me has answered for the current agency.
+  bool get rentalsLoaded => _rentalsLoaded;
 
   ClientAgency? get currentAgency {
     final id = _client?.currentAgencyId ??
@@ -73,12 +87,16 @@ class ClientSessionProvider extends ChangeNotifier {
     }
     try {
       final me = await _api.me().timeout(const Duration(seconds: 8));
+      _applyRentals(me.rentals);
       _client = me.client;
       _contact = me.contact;
       _agent = me.agent;
       _agencies = me.agencies;
       _passwordMustChange = me.client.passwordMustChange;
       _isLoggedIn = true;
+      // Re-register the phone on every cold start (the token may have
+      // rotated while the app was closed).
+      unawaited(MessagingService.instance.onClientLogin());
     } on TimeoutException {
       // Network hung — leave logged-out so splash can finish.
     } on ApiException catch (e) {
@@ -104,14 +122,30 @@ class ClientSessionProvider extends ChangeNotifier {
     _isLoggedIn = true;
     // A fresh sign-in starts a new run: ask for the agency again unless locked.
     _agencyChosenThisSession = false;
+    // The login response has no rentals block; Home's refreshMe fills it.
+    _clearRentals();
     notifyListeners();
+    unawaited(MessagingService.instance.onClientLogin());
   }
 
   Future<void> saveToken(String token) => _api.saveToken(token);
 
+  void _clearRentals() {
+    _rentalsGen++;
+    _rentals = ClientRentalSides.none;
+    _rentalsLoaded = false;
+  }
+
+  void _applyRentals(ClientRentalSides sides) {
+    _rentals = sides;
+    _rentalsLoaded = true;
+  }
+
   Future<void> refreshMe() async {
+    final gen = _rentalsGen;
     try {
       final me = await _api.me();
+      if (gen == _rentalsGen) _applyRentals(me.rentals);
       _client = me.client;
       _contact = me.contact;
       _agent = me.agent;
@@ -137,7 +171,13 @@ class ClientSessionProvider extends ChangeNotifier {
     _client = client;
     _agencies = agencies;
     _agencyChosenThisSession = true;
+    // Rentals sides are per agency: hide them until /client/me answers for
+    // the new one (the same person may be a tenant at one, a buyer at another).
+    _clearRentals();
     notifyListeners();
+    unawaited(refreshMe().catchError((_) {}));
+    // Pushes are per agency: register this phone again for the new one.
+    unawaited(MessagingService.instance.onClientLogin());
   }
 
   void clearPasswordMustChange() {
@@ -158,6 +198,8 @@ class ClientSessionProvider extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    // Before the token goes: the device-token DELETE needs it.
+    await MessagingService.instance.onClientLogout();
     await _api.logout();
     await signOutLocal();
   }
@@ -171,6 +213,7 @@ class ClientSessionProvider extends ChangeNotifier {
     _agencies = const [];
     _passwordMustChange = false;
     _agencyChosenThisSession = false;
+    _clearRentals();
     notifyListeners();
   }
 }

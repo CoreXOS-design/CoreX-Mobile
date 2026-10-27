@@ -11,6 +11,7 @@ import '../../models/property_compliance.dart';
 import '../../models/property_drive.dart';
 import '../../models/property_overview.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/rentals_access_provider.dart';
 import '../../services/api_service.dart';
 import '../../theme.dart';
 import '../../utils/app_time.dart';
@@ -443,8 +444,10 @@ class _PropertyOverviewScreenState extends State<PropertyOverviewScreen> {
         ],
       ),
       // Rental inspection galleries — live rentals only. Gate strictly on the
-      // server flag; never derive eligibility here.
-      if (p.rentalInspectionsAvailable)
+      // server flags; never derive eligibility here. Hidden with the rest of
+      // Rentals when the agency or role has it off (AT-508).
+      if (p.rentalInspectionsAvailable &&
+          context.watch<RentalsAccess>().staffRentalsEnabled)
         DetailTab(label: 'Inspections', children: [_inspectionsCard(p)]),
     ];
   }
